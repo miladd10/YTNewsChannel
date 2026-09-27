@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import html as html_lib
 import ipaddress
 import mimetypes
 import re
 import socket
 import uuid
+from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import httpx
 
@@ -322,6 +324,11 @@ def _matches_actual_story_subject(item: dict, story: dict) -> bool:
         corporate_visual = any(term in title.lower() for term in CORPORATE_BROLL_TERMS)
         return entity_match and corporate_visual
 
+    if item.get("_reference_direct_asset"):
+        article_title = str(item.get("_reference_article_title") or "")
+        if any(_subject_matches(subject, article_title) for subject in _story_subjects(story)):
+            return True
+
     # Search queries may add a year or distributor name to improve discovery,
     # but acceptance is always based on the actual primary story subject.
     return any(_subject_matches(subject, f"{title} {description}") for subject in _story_subjects(story))
@@ -338,6 +345,9 @@ def _is_original_visual_source(item: dict, story: dict) -> bool:
     if _is_corporate_story(story):
         entities = _known_entities(_story_text(story))
         return any(_subject_matches(entity, source) for entity in entities)
+
+    if _reference_direct_asset_is_official(item, story):
+        return True
 
     # Known studios/distributors are acceptable. For less-famous companies,
     # require verification plus an explicit production-company style name.
@@ -404,6 +414,9 @@ def _official_broll_strength(item: dict, story: dict) -> tuple[int, str]:
 
     if allow_spoken and (any(term in title for term in SPOKEN_SOURCE_TERMS) or "podcast" in source):
         return 5, "original interview/podcast"
+
+    if _reference_direct_asset_is_official(item, story):
+        return 5, "official reference-page video"
 
     if any(term in title for term in BROLL_TITLE_TERMS):
         return 5, "official B-roll"
@@ -567,6 +580,300 @@ def _story_distributors(story: dict) -> list[str]:
         if entity_words and entity_words != subject_words:
             distributors.append(entity)
     return list(dict.fromkeys(distributors))[:3]
+
+
+
+REFERENCE_VIDEO_HOSTS = (
+    "youtube.com", "youtu.be", "youtube-nocookie.com",
+    "vimeo.com", "player.vimeo.com", "dailymotion.com", "dai.ly",
+)
+
+
+class _ReferenceVideoParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.urls: list[tuple[str, bool]] = []
+
+    def _add(self, value: str, primary: bool) -> None:
+        value = html_lib.unescape((value or "").strip())
+        if value:
+            self.urls.append((value, primary))
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        data = {str(k).lower(): str(v or "") for k, v in attrs}
+        tag = tag.lower()
+        if tag in {"iframe", "video", "source"}:
+            self._add(data.get("src", ""), True)
+        elif tag == "meta":
+            key = (data.get("property") or data.get("name") or "").lower()
+            if key in {
+                "og:video", "og:video:url", "og:video:secure_url",
+                "twitter:player", "twitter:player:stream",
+            }:
+                self._add(data.get("content", ""), True)
+        elif tag == "a":
+            href = data.get("href", "")
+            host = (urlparse(href).hostname or "").lower()
+            if any(term in host for term in REFERENCE_VIDEO_HOSTS):
+                self._add(href, False)
+
+
+def _normalize_reference_video_url(value: str, page_url: str) -> str:
+    value = html_lib.unescape((value or "").replace("\\/", "/").strip())
+    if not value:
+        return ""
+    if value.startswith("//"):
+        value = "https:" + value
+    value = urljoin(page_url, value)
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower()
+
+    if "youtube.com" in host or "youtube-nocookie.com" in host:
+        match = re.search(r"/(?:embed|shorts)/([A-Za-z0-9_-]{6,})", parsed.path)
+        if match:
+            return f"https://www.youtube.com/watch?v={match.group(1)}"
+        video_id = (parse_qs(parsed.query).get("v") or [""])[0]
+        if video_id:
+            return f"https://www.youtube.com/watch?v={video_id}"
+    if host.endswith("youtu.be"):
+        video_id = parsed.path.strip("/").split("/")[0]
+        if video_id:
+            return f"https://www.youtube.com/watch?v={video_id}"
+    return value
+
+
+def _extract_reference_video_urls(html_text: str, page_url: str) -> list[tuple[str, bool]]:
+    parser = _ReferenceVideoParser()
+    try:
+        parser.feed(html_text or "")
+    except Exception:
+        pass
+
+    # Many publishers embed player metadata inside JSON-LD / JavaScript rather
+    # than literal iframe/video tags.
+    for key in ("embedUrl", "contentUrl"):
+        pattern = rf'["\\\']{key}["\\\']\s*:\s*["\\\']([^"\\\']+)'
+        for match in re.finditer(pattern, html_text or "", flags=re.IGNORECASE):
+            parser.urls.append((match.group(1), True))
+
+    # Catch escaped YouTube/Vimeo player URLs in script payloads.
+    script_patterns = (
+        r'https?:\\?/\\?/(?:www\\.)?youtube(?:-nocookie)?\.com\\?/(?:embed|watch)[^"\\\'<>\s]+',
+        r'https?:\\?/\\?/youtu\.be\\?/[^"\\\'<>\s]+',
+        r'https?:\\?/\\?/(?:player\\.)?vimeo\.com\\?/[^"\\\'<>\s]+',
+    )
+    for pattern in script_patterns:
+        for match in re.finditer(pattern, html_text or "", flags=re.IGNORECASE):
+            parser.urls.append((match.group(0), True))
+
+    out: list[tuple[str, bool]] = []
+    seen: set[str] = set()
+    for raw, primary in parser.urls:
+        normalized = _normalize_reference_video_url(raw, page_url)
+        if not normalized or normalized in seen:
+            continue
+        parsed = urlparse(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            continue
+        seen.add(normalized)
+        out.append((normalized, primary))
+    return out[:16]
+
+
+def _source_domain_hint(source: str) -> list[str]:
+    words = [
+        word for word in re.findall(r"[A-Za-z0-9]+", source or "")
+        if len(word) >= 4 and word.lower() not in {"news", "daily", "weekly", "magazine", "online"}
+    ]
+    return words[:3]
+
+
+def _resolve_reference_article_url(article: dict, client: httpx.Client) -> tuple[str, str]:
+    original = str(article.get("url") or "").strip()
+    if not original:
+        return "", ""
+    try:
+        _assert_public_http_url(original)
+        response = client.get(original)
+        response.raise_for_status()
+        final_url = str(response.url)
+        final_host = (urlparse(final_url).hostname or "").lower()
+
+        # Google News often returns a Google page rather than the publisher page.
+        # Resolve it by exact article title/source through DDGS when necessary.
+        if "news.google.com" not in final_host:
+            return final_url, response.text
+    except Exception:
+        pass
+
+    try:
+        from ddgs import DDGS
+
+        title = str(article.get("title") or "").strip()
+        source = str(article.get("source") or "").strip()
+        query = f'"{title}" {source}'.strip()
+        hints = [x.lower() for x in _source_domain_hint(source)]
+        results = DDGS().text(query, max_results=8) or []
+        ranked: list[tuple[int, str]] = []
+        for item in results:
+            candidate = str(item.get("href") or item.get("url") or "").strip()
+            host = (urlparse(candidate).hostname or "").lower()
+            if not candidate or not host or "news.google.com" in host:
+                continue
+            score = sum(10 for hint in hints if hint in host)
+            result_title = str(item.get("title") or "")
+            score += sum(2 for word in _distinctive_subject_words(title)[:6] if word in result_title.lower())
+            ranked.append((score, candidate))
+        for _, candidate in sorted(ranked, reverse=True):
+            try:
+                _assert_public_http_url(candidate)
+                response = client.get(candidate)
+                response.raise_for_status()
+                return str(response.url), response.text
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return "", ""
+
+
+def _reference_direct_asset_is_official(item: dict, story: dict) -> bool:
+    if not item.get("_reference_direct_asset"):
+        return False
+    article_source = str(item.get("_reference_article_source") or "")
+    if _looks_like_official_channel(article_source):
+        return True
+    if _is_corporate_story(story):
+        return any(_subject_matches(entity, article_source) for entity in _known_entities(_story_text(story)))
+    return False
+
+
+def _search_reference_page_videos(
+    story: dict,
+    max_videos: int,
+    page_cache: dict[str, tuple[str, str]] | None = None,
+) -> tuple[list[dict], list[str]]:
+    from yt_dlp import YoutubeDL
+
+    articles = story.get("articles") or []
+    if not articles:
+        return [], []
+
+    page_cache = page_cache if page_cache is not None else {}
+    errors: list[str] = []
+    discovered: list[tuple[str, bool, dict, str]] = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                      "AppleWebKit/537.36 Chrome/124 Safari/537.36 YTNewsStudio/0.3"
+    }
+
+    with httpx.Client(timeout=20, follow_redirects=True, headers=headers) as client:
+        for article in articles[:4]:
+            article_url = str(article.get("url") or "").strip()
+            if not article_url:
+                continue
+            cached = page_cache.get(article_url)
+            if cached is None:
+                resolved_url, html_text = _resolve_reference_article_url(article, client)
+                page_cache[article_url] = (resolved_url, html_text)
+            else:
+                resolved_url, html_text = cached
+            if not resolved_url or not html_text:
+                errors.append(f"Could not inspect reference page: {article.get('source') or article.get('title') or article_url}")
+                continue
+
+            for video_url, primary in _extract_reference_video_urls(html_text, resolved_url):
+                discovered.append((video_url, primary, article, resolved_url))
+
+    if not discovered:
+        return [], errors
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "extract_flat": False,
+        "socket_timeout": 20,
+    }
+    raw: list[dict] = []
+    seen_urls: set[str] = set()
+    with YoutubeDL(options) as ydl:
+        for video_url, primary, article, resolved_url in discovered[:20]:
+            if video_url in seen_urls:
+                continue
+            seen_urls.add(video_url)
+            try:
+                info = ydl.extract_info(video_url, download=False)
+                entries = (info or {}).get("entries") if isinstance(info, dict) else None
+                items = [x for x in entries or [] if x] if entries else [info]
+                for source_item in items:
+                    if not isinstance(source_item, dict):
+                        continue
+                    item = dict(source_item)
+                    item["_search_query"] = f"Reference page: {article.get('title') or ''}"
+                    item["_reference_page_url"] = resolved_url
+                    item["_reference_article_source"] = str(article.get("source") or "")
+                    item["_reference_article_title"] = str(article.get("title") or "")
+                    direct_host = (urlparse(video_url).hostname or "").lower()
+                    item["_reference_direct_asset"] = bool(
+                        primary and not any(term in direct_host for term in REFERENCE_VIDEO_HOSTS)
+                    )
+                    if item["_reference_direct_asset"]:
+                        # Generic direct MP4/HLS metadata is often meaningless.
+                        # The publisher page is the provenance for this asset.
+                        item["channel"] = item.get("channel") or str(article.get("source") or "")
+                        item["uploader"] = item.get("uploader") or str(article.get("source") or "")
+                        item["description"] = (
+                            str(item.get("description") or "") + " " + str(article.get("title") or "")
+                        ).strip()
+                    raw.append(item)
+            except Exception as exc:
+                errors.append(f"Reference video could not be inspected: {video_url} · {exc}")
+
+    base = clean_story_query(story.get("canonical_title", ""))
+    usable = [item for item in raw if video_is_usable_broll(item, story)]
+    usable.sort(
+        key=lambda item: (
+            1 if item.get("_reference_direct_asset") else 0,
+            *_video_rank(item, story, base),
+        ),
+        reverse=True,
+    )
+
+    results: list[dict] = []
+    seen_pages: set[str] = set()
+    for item in usable:
+        video_id = str(item.get("id") or "").strip()
+        page_url = str(item.get("webpage_url") or item.get("original_url") or item.get("url") or "").strip()
+        if not page_url and video_id:
+            page_url = f"https://www.youtube.com/watch?v={video_id}"
+        if not page_url or page_url in seen_pages:
+            continue
+        seen_pages.add(page_url)
+        height = _max_video_height(item)
+        _, source_kind = _official_broll_strength(item, story)
+        results.append({
+            "id": str(uuid.uuid4()),
+            "media_type": "video",
+            "title": str(item.get("title") or item.get("_reference_article_title") or base).strip(),
+            "page_url": page_url,
+            "asset_url": page_url,
+            "thumbnail_url": _youtube_thumbnail(item),
+            "source": str(
+                item.get("channel") or item.get("uploader")
+                or item.get("_reference_article_source") or "Reference page"
+            ).strip(),
+            "provider": f"Reference page · {source_kind or 'official/original video'}",
+            "duration": str(item.get("duration_string") or item.get("duration") or "").strip(),
+            "published_at": str(item.get("upload_date") or item.get("release_date") or "").strip(),
+            "width": _as_int(item.get("width")),
+            "height": height,
+            "search_query": str(item.get("_search_query") or ""),
+        })
+        if len(results) >= max_videos:
+            break
+    return results, errors
 
 
 def _youtube_search_queries(story: dict) -> list[str]:
@@ -818,12 +1125,35 @@ def search_story_media(
     max_images: int = 3,
     max_videos: int = 12,
     query_cache: dict[str, list[dict]] | None = None,
+    reference_page_cache: dict[str, tuple[str, str]] | None = None,
 ) -> tuple[list[dict], list[str]]:
     base = clean_story_query(story.get("canonical_title", ""))
     if not base:
         return [], ["Story title is empty."]
 
-    videos, errors = _search_youtube_videos(story, max_videos, query_cache=query_cache)
+    reference_videos, reference_errors = _search_reference_page_videos(
+        story,
+        max_videos=max_videos,
+        page_cache=reference_page_cache,
+    )
+    youtube_videos, youtube_errors = _search_youtube_videos(
+        story,
+        max_videos,
+        query_cache=query_cache,
+    )
+    errors = reference_errors + youtube_errors
+
+    videos: list[dict] = []
+    seen_video_urls: set[str] = set()
+    for item in reference_videos + youtube_videos:
+        key = str(item.get("page_url") or "")
+        if not key or key in seen_video_urls:
+            continue
+        seen_video_urls.add(key)
+        videos.append(item)
+        if len(videos) >= max_videos:
+            break
+
     has_hd_video = any((_as_int(item.get("height")) or 0) >= 720 for item in videos)
 
     # Images are a true fallback: do not clutter the picker when HD/4K video exists.
