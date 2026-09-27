@@ -606,37 +606,122 @@ def _search_youtube_videos(
     return results, errors
 
 
-def _image_fallback(base: str, max_images: int) -> tuple[list[dict], list[str]]:
+BANNED_IMAGE_HOST_TERMS = (
+    "facebook.com", "youtube.com", "youtu.be", "pinterest.", "instagram.com",
+    "tiktok.com", "twitter.com", "x.com", "reddit.com", "memesita.com",
+)
+
+PREFERRED_IMAGE_SOURCE_TERMS = (
+    "reuters", "apnews", "associated press", "getty", "deadline", "variety",
+    "hollywoodreporter", "thewrap", "netflix", "warnerbros", "paramount",
+    "sony", "marvel", "disney", "universal", "lionsgate", "a24",
+)
+
+
+def _image_search_queries(story: dict) -> list[str]:
+    if _is_corporate_story(story):
+        queries: list[str] = []
+        for entity in _known_entities(_story_text(story)):
+            queries.extend([
+                f'{entity} official logo press kit',
+                f'{entity} studio lot official photo',
+            ])
+        return list(dict.fromkeys(queries))
+
+    subject = (_story_subjects(story) or [clean_story_query(story.get("canonical_title", ""))])[0]
+    year = _story_reference_year(story)
+    queries = []
+    if year:
+        queries.append(f'{subject} {year} official still press photo poster')
+    queries.append(f'{subject} official still press photo poster')
+    return list(dict.fromkeys(queries))
+
+
+def _image_candidate_score(item: dict, story: dict) -> int:
+    title = str(item.get("title") or "")
+    source = str(item.get("source") or "")
+    page_url = str(item.get("url") or "")
+    asset_url = str(item.get("image") or "")
+    host = (urlparse(page_url).hostname or "").lower()
+    haystack = f"{title} {source} {host}".lower()
+
+    if any(term in host for term in BANNED_IMAGE_HOST_TERMS):
+        return -10_000
+
+    if _is_corporate_story(story):
+        entities = _known_entities(_story_text(story))
+        if entities and not any(_subject_matches(entity, haystack) for entity in entities):
+            return -5_000
+        score = 25
+    else:
+        subjects = _story_subjects(story)
+        if subjects and not any(_subject_matches(subject, title) for subject in subjects):
+            return -5_000
+        score = 30
+
+    if any(term in haystack for term in PREFERRED_IMAGE_SOURCE_TERMS):
+        score += 30
+    if any(term in haystack for term in ("official", "press", "studio", "poster", "first look")):
+        score += 15
+
+    width = _as_int(item.get("width")) or 0
+    height = _as_int(item.get("height")) or 0
+    if max(width, height) >= 1600:
+        score += 12
+    elif max(width, height) >= 1000:
+        score += 8
+
+    if not asset_url:
+        score -= 20
+    return score
+
+
+def _image_fallback(story: dict, max_images: int) -> tuple[list[dict], list[str]]:
     from ddgs import DDGS
 
-    image_query = f'{base} official still poster press photo'
+    candidates: list[dict] = []
+    errors: list[str] = []
+    for image_query in _image_search_queries(story):
+        try:
+            for item in DDGS().images(image_query, max_results=max(max_images * 4, 10)) or []:
+                item = dict(item)
+                item["_search_query"] = image_query
+                if _image_candidate_score(item, story) <= -5_000:
+                    continue
+                candidates.append(item)
+        except Exception as exc:
+            errors.append(f"Image fallback search failed for '{image_query}': {exc}")
+
+    candidates.sort(key=lambda item: _image_candidate_score(item, story), reverse=True)
     results: list[dict] = []
-    try:
-        for item in DDGS().images(image_query, max_results=max(max_images * 2, 6)) or []:
-            page_url = str(item.get("url") or "").strip()
-            asset_url = str(item.get("image") or "").strip()
-            if not (page_url or asset_url):
-                continue
-            results.append({
-                "id": str(uuid.uuid4()),
-                "media_type": "image",
-                "title": str(item.get("title") or base).strip(),
-                "page_url": page_url or asset_url,
-                "asset_url": asset_url,
-                "thumbnail_url": str(item.get("thumbnail") or asset_url).strip(),
-                "source": str(item.get("source") or "").strip(),
-                "provider": str(item.get("provider") or "DDGS").strip(),
-                "duration": "",
-                "published_at": "",
-                "width": _as_int(item.get("width")),
-                "height": _as_int(item.get("height")),
-                "search_query": image_query,
-            })
-            if len(results) >= max_images:
-                break
-        return results, []
-    except Exception as exc:
-        return [], [f"Image fallback search failed: {exc}"]
+    seen: set[str] = set()
+    base = clean_story_query(story.get("canonical_title", ""))
+    for item in candidates:
+        page_url = str(item.get("url") or "").strip()
+        asset_url = str(item.get("image") or "").strip()
+        key = asset_url or page_url
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        results.append({
+            "id": str(uuid.uuid4()),
+            "media_type": "image",
+            "title": str(item.get("title") or base).strip(),
+            "page_url": page_url or asset_url,
+            "asset_url": asset_url,
+            "thumbnail_url": str(item.get("thumbnail") or asset_url).strip(),
+            "source": str(item.get("source") or "").strip(),
+            "provider": str(item.get("provider") or "DDGS").strip(),
+            "duration": "",
+            "published_at": "",
+            "width": _as_int(item.get("width")),
+            "height": _as_int(item.get("height")),
+            "search_query": str(item.get("_search_query") or ""),
+        })
+        if len(results) >= max_images:
+            break
+
+    return results, errors
 
 
 def search_story_media(
@@ -655,7 +740,7 @@ def search_story_media(
     # Images are a true fallback: do not clutter the picker when HD/4K video exists.
     images: list[dict] = []
     if not has_hd_video:
-        images, image_errors = _image_fallback(base, max_images)
+        images, image_errors = _image_fallback(story, max_images)
         errors.extend(image_errors)
 
     return videos + images, errors
