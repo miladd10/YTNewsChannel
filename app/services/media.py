@@ -2130,16 +2130,17 @@ def search_story_media(
 
     # Publisher/article hero images are more contextually trustworthy than a
     # random image-search result. Use them first for uncovered visual beats.
-    reference_images = _reference_page_images(story, reference_page_cache, max_images)
-    primary_label = title_subjects[0] if title_subjects else base
-    for item in _tag_coverage(reference_images, primary_label, "supporting image"):
-        key = str(item.get("asset_url") or item.get("page_url") or "")
-        if not key or key in seen_image_urls:
-            continue
-        seen_image_urls.add(key)
-        images.append(item)
-        if len(images) >= max_images:
-            break
+    if image_targets:
+        reference_images = _reference_page_images(story, reference_page_cache, max_images)
+        primary_label = title_subjects[0] if title_subjects else base
+        for item in _tag_coverage(reference_images, primary_label, "supporting image"):
+            key = str(item.get("asset_url") or item.get("page_url") or "")
+            if not key or key in seen_image_urls:
+                continue
+            seen_image_urls.add(key)
+            images.append(item)
+            if len(images) >= max_images:
+                break
 
     for label, kind in image_targets:
         if len(images) >= max_images:
