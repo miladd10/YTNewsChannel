@@ -1668,6 +1668,13 @@ PREFERRED_IMAGE_SOURCE_TERMS = (
 
 
 def _image_search_queries(story: dict) -> list[str]:
+    contextual_kind = str(story.get("_contextual_kind") or "")
+    contextual_subject = (_story_subjects(story) or [clean_story_query(story.get("canonical_title", ""))])[0]
+    if contextual_kind == "cast/director":
+        return list(dict.fromkeys([
+            f'{contextual_subject} official press photo portrait',
+            f'{contextual_subject} premiere red carpet photo',
+        ]))
     if _is_corporate_story(story):
         queries: list[str] = []
         for entity in _known_entities(_story_text(story)):
@@ -1785,40 +1792,80 @@ def search_story_media(
     if not base:
         return [], ["Story title is empty."]
 
+    plan = story_visual_plan(story)
+    title_subjects = list(plan.get("subjects") or _story_subjects(story))
+    beats = list(plan.get("beats") or [])
+    errors: list[str] = []
+    gathered_videos: list[dict] = []
+
+    # Inspect the supplied article pages once. Embedded videos can cover any of
+    # the narration subjects, so assign each candidate to the subject it
+    # actually matches instead of treating the whole story as one visual.
     reference_videos, reference_errors = _search_reference_page_videos(
         story,
         max_videos=max_videos,
         page_cache=reference_page_cache,
     )
-    youtube_videos, youtube_errors = _search_youtube_videos(
-        story,
-        max_videos,
-        query_cache=query_cache,
-    )
-    web_videos, web_errors = _search_web_video_sources(
-        story,
-        max_videos=max_videos,
-        search_cache=web_video_cache,
-    )
-    errors = reference_errors + youtube_errors + web_errors
+    errors.extend(reference_errors)
+    for item in reference_videos:
+        label = _coverage_label_for_item(item, title_subjects)
+        gathered_videos.extend(_tag_coverage([item], label, "current"))
 
-    # Source location is not priority. Compare every accepted copy globally and
-    # rank by resolution first: 4K > 1440p > 1080p > 720p. For likely mirrors of
-    # the same trailer/clip, keep the highest-quality/original copy first.
-    videos = _dedupe_quality_first_results(
-        reference_videos + youtube_videos + web_videos,
-        story,
-        max_videos,
-    )
+    # Search every distinct narration/title beat independently. This is what
+    # lets a comparison story retrieve Avengers footage AND Resident Evil
+    # footage instead of letting the first title consume all candidate slots.
+    for beat in beats:
+        label = str(beat.get("label") or "").strip()
+        kind = str(beat.get("kind") or "title")
+        if not label:
+            continue
+        variant = dict(story)
+        variant["_media_subject_override"] = label
 
-    has_hd_video = any((_as_int(item.get("height")) or 0) >= 720 for item in videos)
+        if kind == "cast/director":
+            variant["_allow_spoken_broll"] = True
+            variant["_allow_archive_media"] = True
+            variant["_contextual_kind"] = "cast/director"
+            variant["category"] = "celebrities"
 
-    # If the exact/current-title pass finds no HD footage, broaden carefully.
-    # This is intentionally a second pass so archive footage can never outrank
-    # real footage from the newly announced movie/show.
-    contextual_videos: list[dict] = []
-    if not has_hd_video:
-        for fallback_story, fallback_kind in _contextual_fallback_stories(story):
+        youtube_videos, youtube_errors = _search_youtube_videos(
+            variant,
+            max_videos,
+            query_cache=query_cache,
+        )
+        web_videos, web_errors = _search_web_video_sources(
+            variant,
+            max_videos=max_videos,
+            search_cache=web_video_cache,
+        )
+        errors.extend(youtube_errors)
+        errors.extend(web_errors)
+
+        coverage_kind = "cast/director" if kind == "cast/director" else "current"
+        tagged = _tag_coverage(youtube_videos + web_videos, label, coverage_kind)
+        if kind == "cast/director":
+            for item in tagged:
+                item["provider"] = "Contextual B-roll · cast/director"
+        gathered_videos.extend(tagged)
+
+    current_hd_labels = {
+        str(item.get("coverage_label") or "")
+        for item in gathered_videos
+        if str(item.get("coverage_kind") or "") == "current"
+        and (_as_int(item.get("height")) or 0) >= 720
+    }
+
+    # For title beats still lacking current HD footage, try official archive /
+    # previous-installment material for that specific subject. Cast/director
+    # coverage is already represented as its own narration beat above.
+    for subject in title_subjects:
+        if subject in current_hd_labels:
+            continue
+        subject_story = dict(story)
+        subject_story["_media_subject_override"] = subject
+        for fallback_story, fallback_kind in _contextual_fallback_stories(subject_story):
+            if fallback_kind == "cast/director":
+                continue
             fallback_youtube, fallback_youtube_errors = _search_youtube_videos(
                 fallback_story,
                 max_videos,
@@ -1831,25 +1878,72 @@ def search_story_media(
             )
             errors.extend(fallback_youtube_errors)
             errors.extend(fallback_web_errors)
-            for item in fallback_youtube + fallback_web:
-                cloned = dict(item)
-                cloned["provider"] = f"Contextual B-roll · {fallback_kind}"
-                contextual_videos.append(cloned)
-
-        if contextual_videos:
-            contextual_videos = _dedupe_quality_first_results(
-                contextual_videos,
-                story,
-                max_videos,
+            tagged = _tag_coverage(
+                fallback_youtube + fallback_web,
+                subject,
+                fallback_kind,
             )
-            videos = contextual_videos
-            has_hd_video = any((_as_int(item.get("height")) or 0) >= 720 for item in videos)
+            for item in tagged:
+                item["provider"] = f"Contextual B-roll · {fallback_kind}"
+            gathered_videos.extend(tagged)
 
-    # Images are the final fallback after current-title and contextual video.
+    videos = _coverage_balanced_results(gathered_videos, story, max_videos)
+
+    hd_labels = {
+        str(item.get("coverage_label") or "")
+        for item in videos
+        if (_as_int(item.get("height")) or 0) >= 720
+    }
+    distinct_video_choices = _distinct_video_choice_count(videos, story)
+    target_count = int(plan.get("target_count") or 1)
+
+    # Images are no longer all-or-nothing. If one narration beat has no useful
+    # video, or the narration needs more visual changes than the distinct video
+    # choices provide, search supporting stills for the uncovered beat(s).
+    image_targets: list[tuple[str, str]] = []
+    for beat in beats:
+        label = str(beat.get("label") or "").strip()
+        kind = str(beat.get("kind") or "title")
+        if label and label not in hd_labels:
+            image_targets.append((label, kind))
+    if distinct_video_choices < target_count:
+        for subject in title_subjects:
+            if (subject, "title") not in image_targets:
+                image_targets.append((subject, "title"))
+            if len(image_targets) >= max_images:
+                break
+
     images: list[dict] = []
-    if not has_hd_video:
-        images, image_errors = _image_fallback(story, max_images)
+    seen_image_urls: set[str] = set()
+    for label, kind in image_targets:
+        if len(images) >= max_images:
+            break
+        variant = dict(story)
+        variant["_media_subject_override"] = label
+        if kind == "cast/director":
+            variant["_contextual_kind"] = "cast/director"
+            variant["category"] = "celebrities"
+        found_images, image_errors = _image_fallback(
+            variant,
+            max(1, min(2, max_images - len(images))),
+        )
         errors.extend(image_errors)
+        for item in _tag_coverage(found_images, label, "supporting image"):
+            key = str(item.get("asset_url") or item.get("page_url") or "")
+            if not key or key in seen_image_urls:
+                continue
+            seen_image_urls.add(key)
+            images.append(item)
+            if len(images) >= max_images:
+                break
+
+    # If absolutely nothing survived, retain the original generic image fallback
+    # as the final safety net.
+    if not videos and not images:
+        fallback_images, image_errors = _image_fallback(story, max_images)
+        errors.extend(image_errors)
+        primary = title_subjects[0] if title_subjects else base
+        images = _tag_coverage(fallback_images, primary, "supporting image")
 
     return videos + images, errors
 
