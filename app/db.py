@@ -12,8 +12,8 @@ PIPELINE = [
     (1, "research", "Research"),
     (2, "pick-news", "Pick News"),
     (3, "narration", "Narration"),
-    (4, "media-plan", "Media Plan"),
-    (5, "find-media", "Find Media"),
+    (4, "media-sources", "Media Sources"),
+    (5, "downloads", "Downloads"),
 ]
 
 
@@ -141,8 +141,37 @@ def init_db() -> None:
                 FOREIGN KEY(narration_id) REFERENCES narrations(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS media_candidates (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                story_id TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                page_url TEXT NOT NULL,
+                asset_url TEXT NOT NULL DEFAULT '',
+                thumbnail_url TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT '',
+                provider TEXT NOT NULL DEFAULT '',
+                duration TEXT NOT NULL DEFAULT '',
+                published_at TEXT NOT NULL DEFAULT '',
+                width INTEGER,
+                height INTEGER,
+                search_query TEXT NOT NULL DEFAULT '',
+                selected INTEGER NOT NULL DEFAULT 0,
+                download_status TEXT NOT NULL DEFAULT 'not_downloaded',
+                stored_path TEXT NOT NULL DEFAULT '',
+                error TEXT NOT NULL DEFAULT '',
+                rights_status TEXT NOT NULL DEFAULT 'unverified',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY(story_id) REFERENCES stories(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_articles_project_run ON research_articles(project_id, run_id);
             CREATE INDEX IF NOT EXISTS idx_stories_project_run ON stories(project_id, run_id);
             CREATE INDEX IF NOT EXISTS idx_stories_project_decision ON stories(project_id, decision);
+            CREATE INDEX IF NOT EXISTS idx_media_candidates_story ON media_candidates(project_id, story_id, media_type);
+            CREATE INDEX IF NOT EXISTS idx_media_candidates_selected ON media_candidates(project_id, selected);
             """
         )
