@@ -239,13 +239,47 @@ def _subject_matches(value: str, target_text: str) -> bool:
 
 def _story_subjects(story: dict) -> list[str]:
     base = clean_story_query(story.get("canonical_title", ""))
-    quoted = _quoted_subjects(base)
-    if quoted:
-        # The first quoted title is the primary subject of the headline.
-        # Do not let a secondary title mentioned later (for example Endgame
-        # Encore in an Avengers: Doomsday headline) replace the main B-roll.
-        return [quoted[0]]
-    compact = _compact_subject(base)
+
+    # Prefer a quoted phrase that behaves like an actual title. Entertainment
+    # headlines often open with a quoted slogan and mention the movie title
+    # later, e.g. “Feed upon the flesh...” ... “Werwulf” trailer.
+    quoted_matches: list[tuple[int, str, str]] = []
+    quote_patterns = (
+        r"“([^”]{2,80})”",
+        r"‘([^’]{2,80})’",
+        r'"([^"]{2,80})"',
+        r"(?<!\\w)'([^']{2,80})'(?!\\w)",
+    )
+    for pattern in quote_patterns:
+        for match in re.finditer(pattern, base):
+            after = base[match.end():match.end() + 32].lower()
+            quoted_matches.append((match.start(), match.group(1).strip(), after))
+    if quoted_matches:
+        title_context_terms = (" trailer", " teaser", " movie", " film", " series", " first look", " clip")
+        contextual = [row for row in quoted_matches if any(term in row[2] for term in title_context_terms)]
+        chosen = (contextual or quoted_matches)[0][1]
+        if chosen:
+            return [chosen]
+
+    # Remove common headline prefixes that describe coverage rather than the
+    # visual subject itself.
+    normalized = re.sub(
+        r"^(?:weekend\s+box\s+office|box\s+office)\s*:\s*",
+        "",
+        base,
+        flags=re.IGNORECASE,
+    )
+
+    # Keep a title + subtitle together, but remove trailing credit/news clauses.
+    normalized = re.split(
+        r",\s*(?:directed\s+by|starring|from\s+director|from\s+filmmaker|"
+        r"release\s+date|cast\b|gets\b|set\s+for\b)",
+        normalized,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip()
+
+    compact = _compact_subject(normalized)
     # Strip generic leading/trailing news words so "New Resident Evil film"
     # becomes a useful subject rather than matching unrelated videos.
     words = compact.split()
@@ -253,8 +287,8 @@ def _story_subjects(story: dict) -> list[str]:
         words.pop(0)
     while words and words[-1].lower().strip("’'") in {"film", "movie", "series", "show"}:
         words.pop()
-    subject = " ".join(words).strip()
-    return [subject] if subject else [base]
+    subject = " ".join(words).strip(" :-–—")
+    return [subject] if subject else [normalized or base]
 
 
 def _story_reference_year(story: dict) -> int | None:
@@ -634,6 +668,7 @@ NEWS_VERBS = (
     " gets ", " get ", " sets ", " set ", " breaks ", " reaches ", " settles ",
     " sues ", " rejects ", " reveals ", " announces ", " adds ", " casts ",
     " opens ", " wins ", " has ", " faces ", " plans ", " agrees ", " says ",
+    " takes ", " beats ", " unveils ", " debuts ", " drops ", " releases ",
 )
 
 
