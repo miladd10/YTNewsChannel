@@ -160,9 +160,10 @@ def _reconcile_voice_story_rows(
 
         top_score, top_id = scored[0]
         second_score = scored[1][0] if len(scored) > 1 else -1
-        # Exact-title/article matches are safe even if duplicate topic keys exist.
-        # A bare topic-key match must have a unique best current story.
-        if top_score >= 500 or top_score > second_score:
+        # Never guess across indistinguishable duplicate current stories.
+        # Exact title/article overlap naturally produces a higher unique score
+        # when there is one real successor; ties remain unresolved.
+        if top_score > second_score:
             mapping[story_id] = top_id
         else:
             unresolved.append(story_id)
