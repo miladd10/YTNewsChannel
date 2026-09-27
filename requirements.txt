@@ -5,3 +5,5 @@ python-multipart>=0.0.9
 openai>=1.60
 anthropic>=0.49
 keyring>=25.0
+ddgs>=9.15.0
+yt-dlp>=2026.8.19
