@@ -96,3 +96,9 @@
 .run-status.warning .run-spinner{animation:none;border:0;background:#9a7838;position:relative}
 .run-status.warning .run-spinner:after{content:'!';position:absolute;inset:0;display:grid;place-items:center;color:white;font-size:11px;font-weight:900}
 .run-status.warning .run-error{border-color:#7a6235;background:#211b10;color:#e8c982}
+
+.story-meta-row{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:6px}
+.story-coverage-plan{display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;padding:4px 7px;border:1px solid #2c3a49;border-radius:7px;background:#101821}
+.story-coverage-plan strong{font-size:9px}
+.story-coverage-plan span{color:var(--muted);font-size:8px}
+.coverage-chip{display:inline-flex;align-items:center;padding:3px 6px;border:1px solid #3b4b60;border-radius:999px;background:#172231;color:#c9d8ea;font-size:8px;font-weight:700}
