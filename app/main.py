@@ -174,6 +174,7 @@ class ProjectCreate(BaseModel):
     content_type: str = "weekly_news"
     language: str = "Persian"
     target_minutes: int = Field(default=15, ge=1, le=180)
+    media_chunk_minutes: float = Field(default=1.0, ge=0.25, le=10)
     date_start: str = ""
     date_end: str = ""
     geographic_focus: str = "Worldwide"
@@ -186,6 +187,7 @@ class ProjectUpdate(BaseModel):
     name: str | None = None
     language: str | None = None
     target_minutes: int | None = Field(default=None, ge=1, le=180)
+    media_chunk_minutes: float | None = Field(default=None, ge=0.25, le=10)
     date_start: str | None = None
     date_end: str | None = None
     geographic_focus: str | None = None
@@ -213,12 +215,12 @@ def create_project(body: ProjectCreate):
     with db() as conn:
         conn.execute(
             """INSERT INTO projects(
-                id,name,channel,content_type,language,target_minutes,date_start,date_end,
+                id,name,channel,content_type,language,target_minutes,media_chunk_minutes,date_start,date_end,
                 geographic_focus,editorial_focus,notes,root_path,created_at,updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 project_id, body.name.strip(), body.channel, body.content_type, body.language,
-                body.target_minutes, body.date_start or start, body.date_end or end,
+                body.target_minutes, body.media_chunk_minutes, body.date_start or start, body.date_end or end,
                 body.geographic_focus, body.editorial_focus, body.notes, str(root), stamp, stamp,
             ),
         )
@@ -238,7 +240,7 @@ def update_project(project_id: str, body: ProjectUpdate):
     if not values:
         with db() as conn:
             return project_payload(conn, project_id)
-    allowed = {"name","language","target_minutes","date_start","date_end","geographic_focus","editorial_focus","notes"}
+    allowed = {"name","language","target_minutes","media_chunk_minutes","date_start","date_end","geographic_focus","editorial_focus","notes"}
     values = {k:v for k,v in values.items() if k in allowed}
     with db() as conn:
         project_or_404(conn, project_id)
