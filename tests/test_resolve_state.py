@@ -1,4 +1,4 @@
-from app.main import _resolve_input_signature, _resolve_prerequisites
+from app.main import _reconcile_voice_story_rows, _resolve_input_signature, _resolve_prerequisites
 
 
 def voice_row(index=1, story_id="story", approved=True):
@@ -49,3 +49,81 @@ def test_resolve_signature_changes_when_approved_take_or_media_changes():
 
     changed_media = [dict(media[0], stored_path="media/selected/story/new.mp4")]
     assert _resolve_input_signature(voices, changed_media) != base
+
+
+
+def story_row(story_id, title, category="upcoming_films", url=""):
+    return {
+        "id": story_id,
+        "canonical_title": title,
+        "summary": "",
+        "category": category,
+        "articles": [{"url": url, "title": title}] if url else [],
+    }
+
+
+def test_resolve_reconciles_legacy_voice_story_ids_to_current_media_story_ids():
+    voices = [
+        voice_row(1, story_id="old-werwulf"),
+        voice_row(2, story_id="old-lotr"),
+    ]
+    historical = [
+        story_row(
+            "old-werwulf",
+            "‘Feed upon the flesh of mankind!’ Robert Eggers sics chilling new ‘Werwulf’ trailer on fans",
+            url="https://goldderby.com/werwulf",
+        ),
+        story_row(
+            "old-lotr",
+            "Lord of the Rings takes us back to the Shire in first look at new movie from Andy Serkis",
+            url="https://digitalspy.com/lord-of-the-rings",
+        ),
+    ]
+    current = [
+        story_row(
+            "new-werwulf",
+            "‘Feed upon the flesh of mankind!’ Robert Eggers sics chilling new ‘Werwulf’ trailer on fans",
+            url="https://goldderby.com/werwulf",
+        ),
+        story_row(
+            "new-lotr",
+            "Lord of the Rings takes us back to the Shire in first look at new movie from Andy Serkis",
+            url="https://digitalspy.com/lord-of-the-rings",
+        ),
+    ]
+
+    resolved, info = _reconcile_voice_story_rows(voices, current, historical)
+
+    assert [row["story_id"] for row in resolved] == ["new-werwulf", "new-lotr"]
+    assert info["remapped_segment_count"] == 2
+    assert info["unresolved_story_ids"] == []
+
+    media = [
+        media_row("m1", "new-werwulf"),
+        media_row("m2", "new-lotr"),
+    ]
+    prerequisites = _resolve_prerequisites(resolved, media)
+    assert prerequisites["ready"] is True
+    assert prerequisites["stories_missing_downloaded_media"] == []
+
+
+def test_resolve_story_reconciliation_does_not_guess_ambiguous_topic_match():
+    voices = [voice_row(1, story_id="old-ray")]
+    historical = [story_row("old-ray", "Ray Gunn official trailer")]
+    current = [
+        story_row("new-ray-1", "Ray Gunn official trailer"),
+        story_row("new-ray-2", "Ray Gunn official trailer"),
+    ]
+
+    resolved, info = _reconcile_voice_story_rows(voices, current, historical)
+
+    assert resolved[0]["story_id"] == "old-ray"
+    assert info["unresolved_story_ids"] == ["old-ray"]
+
+
+def test_resolve_signature_changes_when_effective_story_mapping_changes():
+    voices = [voice_row(story_id="old-story")]
+    media = [media_row(story_id="new-story")]
+    original = _resolve_input_signature(voices, media)
+    remapped = _resolve_input_signature([dict(voices[0], story_id="new-story")], media)
+    assert remapped != original
