@@ -16,6 +16,7 @@ PROJECT_DIRS = [
     "media-plan",
     "media/candidates",
     "media/selected",
+    "resolve",
     "exports",
 ]
 
