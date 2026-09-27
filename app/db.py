@@ -157,6 +157,9 @@ def init_db() -> None:
                 width INTEGER,
                 height INTEGER,
                 search_query TEXT NOT NULL DEFAULT '',
+                clip_start_sec INTEGER,
+                clip_end_sec INTEGER,
+                shared_source INTEGER NOT NULL DEFAULT 0,
                 selected INTEGER NOT NULL DEFAULT 0,
                 download_status TEXT NOT NULL DEFAULT 'not_downloaded',
                 stored_path TEXT NOT NULL DEFAULT '',
@@ -175,3 +178,9 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_media_candidates_selected ON media_candidates(project_id, selected);
             """
         )
+        if not _column_exists(conn, "media_candidates", "clip_start_sec"):
+            conn.execute("ALTER TABLE media_candidates ADD COLUMN clip_start_sec INTEGER")
+        if not _column_exists(conn, "media_candidates", "clip_end_sec"):
+            conn.execute("ALTER TABLE media_candidates ADD COLUMN clip_end_sec INTEGER")
+        if not _column_exists(conn, "media_candidates", "shared_source"):
+            conn.execute("ALTER TABLE media_candidates ADD COLUMN shared_source INTEGER NOT NULL DEFAULT 0")
