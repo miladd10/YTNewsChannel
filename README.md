@@ -7,10 +7,10 @@ Local research and narration pipeline for YouTube news channels. The first MVP i
 1. **Research** — searches Google News RSS across cinema query groups for the configured week, stores the raw findings, deduplicates overlapping coverage into unique stories, and optionally asks GPT/Claude to rank the stories.
 2. **Pick News** — human editorial gate with Include / Maybe / Skip decisions.
 3. **Narration** — generates a narration-led weekly cinema-news script from Included stories only.
-4. **Media Plan** — maps narration blocks to real-world visual sourcing needs (trailers, interviews, official stills, social posts, screenshots, graphics, etc.).
-5. **Find Media** — MVP provides exact search intents and one-click YouTube / Google Images / Reddit searches. Direct source adapters and candidate capture are the next implementation slice.
+4. **Media Sources** — searches real image and video results for every Included story, shows previews and original links, and lets you select the assets you want.
+5. **Downloads** — downloads only the selected media into the portable project folder. Downloaded candidates keep an **unverified rights** status so licensing/permission can be checked before publishing.
 
-No image generation is used.
+No image generation is used. Media discovery uses web image/video search, and video downloading is handled locally for selected public media URLs.
 
 ## GPT / Claude subscription mode
 
