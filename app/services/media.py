@@ -308,6 +308,190 @@ def _story_subjects(story: dict) -> list[str]:
     return [subject] if subject else [normalized or base]
 
 
+
+COMPARISON_VISUAL_VERBS = (
+    " beats ", " vs ", " vs. ", " versus ", " tops ", " edges ",
+    " outgrosses ", " overtakes ", " trails ",
+)
+
+
+def _clean_visual_subject(value: str) -> str:
+    value = re.sub(
+        r"\s+(?:in|during|over|for|after|before|with)\s+(?:week|weekend|week\s+\w+|"
+        r"its\s+\w+\s+week|the\s+weekend|box\s+office).*$",
+        "",
+        value or "",
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(r"\s+-\s+[^-]{2,80}$", "", value).strip(" ,:;–—-")
+    words = value.split()
+    if len(words) > 8:
+        value = " ".join(words[:8])
+    return value.strip()
+
+
+def _comparison_visual_subjects(story: dict) -> list[str]:
+    title = clean_story_query(story.get("canonical_title", ""))
+    title = re.sub(
+        r"^(?:weekend\s+box\s+office|box\s+office)\s*:\s*",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    )
+    lowered = f" {title.lower()} "
+    split_at: tuple[int, str] | None = None
+    for verb in COMPARISON_VISUAL_VERBS:
+        pos = lowered.find(verb)
+        if pos >= 0 and (split_at is None or pos < split_at[0]):
+            split_at = (pos, verb)
+    if split_at is None:
+        return []
+    pos, verb = split_at
+    left = _clean_visual_subject(title[: max(0, pos - 1)])
+    right_start = max(0, pos - 1) + len(verb)
+    right = _clean_visual_subject(title[right_start:])
+    results: list[str] = []
+    for value in (left, right):
+        if not value:
+            continue
+        # Reuse the normal title cleaner for each half without recursively
+        # treating the entire comparison headline as one subject.
+        variant = dict(story)
+        variant["canonical_title"] = value
+        variant.pop("_media_subject_override", None)
+        parsed = (_story_subjects(variant) or [value])[0]
+        if parsed and parsed not in results:
+            results.append(parsed)
+    return results[:3]
+
+
+def _story_visual_subjects(story: dict) -> list[str]:
+    """Distinct movie/show subjects that deserve their own visual coverage."""
+    primary = (_story_subjects(story) or [""])[0]
+    subjects: list[str] = [primary] if primary else []
+
+    for subject in _comparison_visual_subjects(story):
+        if subject and subject not in subjects:
+            subjects.append(subject)
+
+    # Secondary quoted titles are only promoted when they are also supported by
+    # the summary/narration, which avoids turning incidental headline references
+    # into unnecessary B-roll targets.
+    context_without_title = " ".join([
+        str(story.get("summary") or ""),
+        str(story.get("_narration_text") or ""),
+    ])
+    for quoted in _quoted_subjects(clean_story_query(story.get("canonical_title", ""))):
+        if quoted in subjects:
+            continue
+        if _subject_matches(quoted, context_without_title):
+            subjects.append(quoted)
+
+    return subjects[:4]
+
+
+def story_visual_plan(story: dict) -> dict:
+    """Estimate how many distinct visual beats the narration needs."""
+    subjects = _story_visual_subjects(story)
+    duration = float(story.get("_voice_duration_seconds") or 0)
+    narration = str(story.get("_narration_text") or "").strip()
+
+    duration_target = 1
+    if duration > 18:
+        duration_target = 2
+    if duration > 38:
+        duration_target = 3
+    if duration > 60:
+        duration_target = 4
+
+    sentence_count = len([
+        part for part in re.split(r"(?<=[.!?؟])\s+", narration)
+        if part.strip()
+    ])
+    sentence_target = 1
+    if sentence_count >= 3:
+        sentence_target = 2
+    if sentence_count >= 6:
+        sentence_target = 3
+
+    people = _story_people(story) if _story_has_quote_or_person_context(story) else []
+    target_count = max(1, len(subjects), duration_target, sentence_target)
+    if people:
+        target_count = max(target_count, 2)
+    target_count = min(4, target_count)
+
+    beats = [{"label": subject, "kind": "title"} for subject in subjects]
+    for person in people:
+        if len(beats) >= target_count:
+            break
+        if person not in {beat["label"] for beat in beats}:
+            beats.append({"label": person, "kind": "cast/director"})
+
+    return {
+        "target_count": target_count,
+        "subjects": subjects,
+        "people": people,
+        "beats": beats,
+        "duration_seconds": duration,
+    }
+
+
+def _tag_coverage(items: list[dict], label: str, kind: str) -> list[dict]:
+    output: list[dict] = []
+    for item in items:
+        cloned = dict(item)
+        cloned["coverage_label"] = label
+        cloned["coverage_kind"] = kind
+        output.append(cloned)
+    return output
+
+
+def _coverage_label_for_item(item: dict, subjects: list[str]) -> str:
+    haystack = f"{item.get('title') or ''} {item.get('search_query') or ''}"
+    for subject in subjects:
+        if _subject_matches(subject, haystack):
+            return subject
+    return subjects[0] if subjects else ""
+
+
+def _coverage_balanced_results(items: list[dict], story: dict, limit: int) -> list[dict]:
+    ranked = _dedupe_quality_first_results(items, story, max(limit * 2, limit))
+    groups: dict[str, list[dict]] = {}
+    for item in ranked:
+        label = str(item.get("coverage_label") or "")
+        groups.setdefault(label, []).append(item)
+
+    first_pass: list[dict] = []
+    used_urls: set[str] = set()
+    for label in [x for x in _story_visual_subjects(story) if x in groups] + [
+        key for key in groups if key not in _story_visual_subjects(story)
+    ]:
+        bucket = groups.get(label) or []
+        if not bucket:
+            continue
+        item = bucket[0]
+        url = str(item.get("page_url") or "")
+        if url and url not in used_urls:
+            used_urls.add(url)
+            first_pass.append(item)
+
+    extras = [
+        item for item in ranked
+        if str(item.get("page_url") or "") not in used_urls
+    ]
+    return (first_pass + extras)[:limit]
+
+
+def _distinct_video_choice_count(items: list[dict], story: dict) -> int:
+    identities = {
+        _video_identity_key(item, story)
+        for item in items
+        if item.get("media_type") == "video"
+        and (_as_int(item.get("height")) or 0) >= 720
+    }
+    return len(identities)
+
+
 def _story_reference_year(story: dict) -> int | None:
     years: list[int] = []
     for value in [str(story.get("canonical_title") or "")] + [
@@ -597,8 +781,9 @@ def _result_duration_seconds(item: dict) -> int | None:
 
 def _video_identity_key(item: dict, story: dict) -> str:
     """Group likely copies of the same trailer/clip across different hosts."""
+    coverage_subject = str(item.get("coverage_label") or "").strip()
     subjects = _story_subjects(story)
-    subject = subjects[0] if subjects else clean_story_query(story.get("canonical_title", ""))
+    subject = coverage_subject or (subjects[0] if subjects else clean_story_query(story.get("canonical_title", "")))
     subject_key = " ".join(_distinctive_subject_words(subject)[:5])
     kind = _video_kind_key(str(item.get("title") or ""))
     duration = _result_duration_seconds(item)
