@@ -454,17 +454,35 @@ def _coverage_label_for_item(item: dict, subjects: list[str]) -> str:
     return subjects[0] if subjects else ""
 
 
+def _coverage_relevance_rank(item: dict, story: dict) -> tuple[int, int, int, int, int]:
+    kind = str(item.get("coverage_kind") or "")
+    relevance_tier = 3 if kind == "current" else 2 if kind == "cast/director" else 1
+    return (relevance_tier, *_result_quality_rank(item, story))
+
+
 def _coverage_balanced_results(items: list[dict], story: dict, limit: int) -> list[dict]:
-    ranked = _dedupe_quality_first_results(items, story, max(limit * 2, limit))
+    # First remove true duplicate copies within each coverage/relevance group,
+    # then ensure every narration subject gets at least one strong option before
+    # one subject is allowed to dominate the remaining result slots.
+    ranked = _dedupe_quality_first_results(items, story, max(limit * 3, limit))
     groups: dict[str, list[dict]] = {}
     for item in ranked:
         label = str(item.get("coverage_label") or "")
         groups.setdefault(label, []).append(item)
+    for bucket in groups.values():
+        bucket.sort(key=lambda item: _coverage_relevance_rank(item, story), reverse=True)
+
+    desired_order = _story_visual_subjects(story)
+    desired_order.extend([
+        str(beat.get("label") or "")
+        for beat in story_visual_plan(story).get("beats") or []
+        if str(beat.get("label") or "") not in desired_order
+    ])
 
     first_pass: list[dict] = []
     used_urls: set[str] = set()
-    for label in [x for x in _story_visual_subjects(story) if x in groups] + [
-        key for key in groups if key not in _story_visual_subjects(story)
+    for label in [x for x in desired_order if x in groups] + [
+        key for key in groups if key not in desired_order
     ]:
         bucket = groups.get(label) or []
         if not bucket:
@@ -476,9 +494,10 @@ def _coverage_balanced_results(items: list[dict], story: dict, limit: int) -> li
             first_pass.append(item)
 
     extras = [
-        item for item in ranked
+        item for bucket in groups.values() for item in bucket
         if str(item.get("page_url") or "") not in used_urls
     ]
+    extras.sort(key=lambda item: _coverage_relevance_rank(item, story), reverse=True)
     return (first_pass + extras)[:limit]
 
 
@@ -786,12 +805,13 @@ def _video_identity_key(item: dict, story: dict) -> str:
     subject = coverage_subject or (subjects[0] if subjects else clean_story_query(story.get("canonical_title", "")))
     subject_key = " ".join(_distinctive_subject_words(subject)[:5])
     kind = _video_kind_key(str(item.get("title") or ""))
+    coverage_kind = str(item.get("coverage_kind") or "")
     duration = _result_duration_seconds(item)
     # Same official trailer mirrored across regions/hosts is normally within a
     # couple seconds. Five-second buckets avoid collapsing genuinely different
     # trailer cuts while deduplicating localized mirrors.
     duration_bucket = "unknown" if duration is None else str(int(round(duration / 5.0) * 5))
-    return f"{subject_key}|{kind}|{duration_bucket}"
+    return f"{subject_key}|{coverage_kind}|{kind}|{duration_bucket}"
 
 
 def _result_quality_rank(item: dict, story: dict) -> tuple[int, int, int, int]:
