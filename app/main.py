@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from .db import BASE_DIR, PIPELINE, db, init_db
 from .services.ai import generate_text
 from .services.local_cli import all_statuses, launch_login
-from .services.media import _dedupe_quality_first_results, download_candidate, search_story_media, story_media_key, suggested_clip_range
+from .services.media import _coverage_balanced_results, download_candidate, search_story_media, story_media_key, story_visual_plan, suggested_clip_range
 from .services.elevenlabs_client import ElevenLabsError, MODEL_ID as ELEVEN_MODEL_ID, forced_alignment, list_voices, mp3_duration_seconds, text_to_speech
 from .services.voice_pipeline import extract_narration_segments, performance_text_is_safe, prepare_performance
 from .services.voice_takes import approve_take as approve_voice_take_service, clear_segment_files, generate_take as generate_voice_take_service
@@ -1142,17 +1142,20 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
             (project_id,),
         ).fetchone()["c"]
         narration_rows = conn.execute(
-            """SELECT story_id,source_text
+            """SELECT story_id,source_text,duration_seconds
                FROM voice_segments
                WHERE project_id=? AND story_id<>''
                ORDER BY segment_index""",
             (project_id,),
         ).fetchall()
     narration_by_story: dict[str, list[str]] = {}
+    voice_seconds_by_story: dict[str, float] = {}
     for row in narration_rows:
         narration_by_story.setdefault(row["story_id"], []).append(str(row["source_text"] or ""))
+        voice_seconds_by_story[row["story_id"]] = voice_seconds_by_story.get(row["story_id"], 0.0) + float(row["duration_seconds"] or 0)
     for story in all_stories:
         story["_narration_text"] = " ".join(narration_by_story.get(story["id"], [])).strip()
+        story["_voice_duration_seconds"] = voice_seconds_by_story.get(story["id"], 0.0)
     if not voice_total or voice_aligned != voice_total:
         raise HTTPException(
             400,
@@ -1252,18 +1255,14 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
                 cloned["id"] = str(uuid.uuid4())
                 merged_videos.append(cloned)
                 own_video_urls.add(cloned.get("page_url"))
-            merged_videos = _dedupe_quality_first_results(
+            merged_videos = _coverage_balanced_results(
                 merged_videos,
                 story,
                 body.max_videos_per_story,
             )
-            has_hd = any((item.get("height") or 0) >= 720 for item in merged_videos)
-            if has_hd:
-                candidates = merged_videos
-            else:
-                candidates = merged_videos + [
-                    item for item in candidates if item.get("media_type") == "image"
-                ]
+            candidates = merged_videos + [
+                item for item in candidates if item.get("media_type") == "image"
+            ]
 
         story_voice_duration = float(story_voice_durations.get(story["id"], 0) or 0)
         for item in candidates:
@@ -1307,13 +1306,14 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
                     """INSERT INTO media_candidates(
                         id,project_id,story_id,media_type,title,page_url,asset_url,thumbnail_url,source,provider,
                         duration,published_at,width,height,search_query,clip_start_sec,clip_end_sec,target_duration_sec,shared_source,
-                        selected,download_status,stored_path,error,rights_status,created_at,updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        coverage_label,coverage_kind,selected,download_status,stored_path,error,rights_status,created_at,updated_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         item["id"], project_id, story["id"], item["media_type"], item["title"], item["page_url"],
                         item["asset_url"], item["thumbnail_url"], item["source"], item["provider"], item["duration"],
                         item["published_at"], item["width"], item["height"], item["search_query"],
                         item.get("clip_start_sec"), item.get("clip_end_sec"), item.get("target_duration_sec"), item.get("shared_source", 0),
+                        item.get("coverage_label", ""), item.get("coverage_kind", ""),
                         0, "not_downloaded", "", "", "unverified", stamp, stamp,
                     ),
                 )
