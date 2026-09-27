@@ -589,63 +589,113 @@ def generate_narrator_voice(project_id: str):
     audio_dir.mkdir(parents=True, exist_ok=True)
     generated = 0
     aligned = 0
+    reused_audio = 0
     errors = []
     output_format = settings["output_format"] or "mp3_44100_192"
 
     for row in rows:
         if row.get("audio_status") == "aligned" and row.get("audio_path"):
             continue
+
+        filename = f"{int(row['segment_index']):04d}_narration.mp3"
+        expected_path = audio_dir / filename
+        stored_path = str(row.get("audio_path") or "")
+        existing_path = (root / stored_path).resolve() if stored_path else expected_path.resolve()
+        can_reuse_audio = bool(
+            existing_path.exists()
+            and existing_path.is_file()
+            and root.resolve() in existing_path.parents
+            and row.get("duration_seconds")
+        )
+
         try:
-            audio, used_format = text_to_speech(settings["voice_id"], row["performance_text"] or row["source_text"])
-            output_format = used_format
-            filename = f"{int(row['segment_index']):04d}_narration.mp3"
-            path = audio_dir / filename
-            path.write_bytes(audio)
-            duration = mp3_duration_seconds(path)
+            if can_reuse_audio:
+                path = existing_path
+                duration = float(row["duration_seconds"])
+                reused_audio += 1
+            else:
+                audio, used_format = text_to_speech(
+                    settings["voice_id"],
+                    row["performance_text"] or row["source_text"],
+                )
+                output_format = used_format
+                path = expected_path
+                path.write_bytes(audio)
+                duration = mp3_duration_seconds(path)
+                if duration is None:
+                    raise RuntimeError("Could not measure generated MP3 duration.")
+                rel = path.relative_to(root).as_posix()
+                with db() as conn:
+                    conn.execute(
+                        """UPDATE voice_segments
+                           SET voice_id=?,audio_path=?,duration_seconds=?,alignment_json='{}',
+                               audio_status='generated',updated_at=? WHERE id=?""",
+                        (
+                            settings["voice_id"], rel, float(duration),
+                            now(), row["id"],
+                        ),
+                    )
+                generated += 1
+
+            # Alignment is a separate phase. A failure here leaves the paid
+            # generated MP3 and measured duration intact, so retrying does not
+            # synthesize the voice again.
             alignment = forced_alignment(path, row["source_text"])
             words = []
             for item in alignment.get("words") or []:
                 if not isinstance(item, dict):
                     continue
                 try:
-                    start = float(item.get("start"))
-                    end = float(item.get("end"))
+                    word_start = float(item.get("start"))
+                    word_end = float(item.get("end"))
                 except Exception:
                     continue
-                if end < start:
+                if word_end < word_start:
                     continue
                 words.append({
                     "text": str(item.get("text") or ""),
-                    "start": start,
-                    "end": end,
+                    "start": word_start,
+                    "end": word_end,
                     "loss": item.get("loss"),
                 })
-            if duration is None and words:
-                duration = max(float(x["end"]) for x in words)
-            if duration is None:
-                raise RuntimeError("Could not measure generated MP3 duration.")
-            status = "aligned" if words else "generated"
+            if not words:
+                raise RuntimeError("ElevenLabs Forced Alignment returned no word timestamps.")
+
             rel = path.relative_to(root).as_posix()
             with db() as conn:
                 conn.execute(
                     """UPDATE voice_segments
                        SET voice_id=?,audio_path=?,duration_seconds=?,alignment_json=?,
-                           audio_status=?,updated_at=? WHERE id=?""",
+                           audio_status='aligned',updated_at=? WHERE id=?""",
                     (
                         settings["voice_id"], rel, float(duration),
                         json.dumps({"words": words, "loss": alignment.get("loss")}, ensure_ascii=False),
-                        status, now(), row["id"],
+                        now(), row["id"],
                     ),
                 )
-            generated += 1
-            if words:
-                aligned += 1
+            aligned += 1
         except Exception as exc:
-            errors.append({"segment_id": row["id"], "segment_index": row["segment_index"], "error": str(exc)})
+            errors.append({
+                "segment_id": row["id"],
+                "segment_index": row["segment_index"],
+                "error": str(exc),
+            })
+            # Keep a successfully generated source file reusable even when only
+            # alignment failed. Never convert it back to a state that forces TTS.
             with db() as conn:
+                current = conn.execute(
+                    "SELECT audio_path,duration_seconds FROM voice_segments WHERE id=?",
+                    (row["id"],),
+                ).fetchone()
+                keep_generated = bool(
+                    current
+                    and current["audio_path"]
+                    and current["duration_seconds"]
+                    and (root / current["audio_path"]).exists()
+                )
                 conn.execute(
-                    "UPDATE voice_segments SET audio_status='failed',updated_at=? WHERE id=?",
-                    (now(), row["id"]),
+                    "UPDATE voice_segments SET audio_status=?,updated_at=? WHERE id=?",
+                    ("generated" if keep_generated else "failed", now(), row["id"]),
                 )
 
     with db() as conn:
@@ -656,7 +706,12 @@ def generate_narrator_voice(project_id: str):
         conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
         save_manifest(conn, project_id)
         payload = _voice_payload(conn, project_id)
-    payload.update({"generated_this_run": generated, "aligned_this_run": aligned, "errors": errors})
+    payload.update({
+        "generated_this_run": generated,
+        "aligned_this_run": aligned,
+        "reused_audio_for_alignment": reused_audio,
+        "errors": errors,
+    })
     return payload
 
 
