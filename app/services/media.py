@@ -329,6 +329,18 @@ def _matches_actual_story_subject(item: dict, story: dict) -> bool:
         if any(_subject_matches(subject, article_title) for subject in _story_subjects(story)):
             return True
 
+    if item.get("_reference_page_url"):
+        # A reference article can embed an official trailer for one concrete
+        # title mentioned in a broader/multi-title news headline. Accept that
+        # only when the meaningful video-title words are visibly part of the
+        # supplied story packet; source authenticity is checked separately.
+        video_words = _distinctive_subject_words(title)
+        story_words = set(_normalized_words(_story_text(story)))
+        meaningful = video_words[:4]
+        if meaningful and all(word in story_words for word in meaningful):
+            if len(meaningful) >= 2 or len(meaningful[0]) >= 6:
+                return True
+
     # Search queries may add a year or distributor name to improve discovery,
     # but acceptance is always based on the actual primary story subject.
     return any(_subject_matches(subject, f"{title} {description}") for subject in _story_subjects(story))
