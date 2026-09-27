@@ -1602,7 +1602,39 @@ def search_story_media(
 
     has_hd_video = any((_as_int(item.get("height")) or 0) >= 720 for item in videos)
 
-    # Images are a true fallback: do not clutter the picker when HD/4K video exists.
+    # If the exact/current-title pass finds no HD footage, broaden carefully.
+    # This is intentionally a second pass so archive footage can never outrank
+    # real footage from the newly announced movie/show.
+    contextual_videos: list[dict] = []
+    if not has_hd_video:
+        for fallback_story, fallback_kind in _contextual_fallback_stories(story):
+            fallback_youtube, fallback_youtube_errors = _search_youtube_videos(
+                fallback_story,
+                max_videos,
+                query_cache=query_cache,
+            )
+            fallback_web, fallback_web_errors = _search_web_video_sources(
+                fallback_story,
+                max_videos=max_videos,
+                search_cache=web_video_cache,
+            )
+            errors.extend(fallback_youtube_errors)
+            errors.extend(fallback_web_errors)
+            for item in fallback_youtube + fallback_web:
+                cloned = dict(item)
+                cloned["provider"] = f"Contextual B-roll · {fallback_kind}"
+                contextual_videos.append(cloned)
+
+        if contextual_videos:
+            contextual_videos = _dedupe_quality_first_results(
+                contextual_videos,
+                story,
+                max_videos,
+            )
+            videos = contextual_videos
+            has_hd_video = any((_as_int(item.get("height")) or 0) >= 720 for item in videos)
+
+    # Images are the final fallback after current-title and contextual video.
     images: list[dict] = []
     if not has_hd_video:
         images, image_errors = _image_fallback(story, max_images)
