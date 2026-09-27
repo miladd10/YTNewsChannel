@@ -781,6 +781,12 @@ def _story_people(story: dict) -> list[str]:
     for pattern in (PERSON_ROLE_PATTERN, PERSON_SPEECH_PATTERN):
         for match in pattern.finditer(text):
             name = re.sub(r"\s+", " ", match.group(1)).strip(" ,:-")
+            name = re.sub(
+                r"^(?:director|filmmaker|actor|actress|star|creator|showrunner)\s+",
+                "",
+                name,
+                flags=re.IGNORECASE,
+            ).strip()
             if len(name.split()) >= 2 and name not in found:
                 found.append(name)
     return found[:3]
