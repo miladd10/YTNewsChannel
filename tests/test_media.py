@@ -184,3 +184,66 @@ def test_corporate_story_accepts_company_logo_or_lot_broll():
         "_search_query": "Warner Bros official studio lot",
     }
     assert video_is_usable_broll(item, story)
+
+
+def test_old_franchise_entry_is_rejected_for_current_story():
+    story = {
+        "canonical_title": "New Resident Evil film breaks franchise box office records",
+        "summary": "The new Resident Evil movie opened strongly.",
+        "category": "trend",
+        "articles": [{"title": "Resident Evil breaks records", "published_at": "2026-09-26"}],
+    }
+    old_item = {
+        "title": "RESIDENT EVIL [2002] - Official Trailer (HD)",
+        "channel": "Sony Pictures Entertainment",
+        "channel_is_verified": True,
+        "height": 1080,
+        "upload_date": "20120301",
+        "_search_query": "Resident Evil 2026 official trailer",
+    }
+    assert not video_is_usable_broll(old_item, story)
+
+
+def test_current_franchise_trailer_is_accepted():
+    story = {
+        "canonical_title": "New Resident Evil film breaks franchise box office records",
+        "summary": "The new Resident Evil movie opened strongly.",
+        "category": "trend",
+        "articles": [{"title": "Resident Evil breaks records", "published_at": "2026-09-26"}],
+    }
+    current_item = {
+        "title": "RESIDENT EVIL – Official Trailer (4K)",
+        "channel": "Sony Pictures Entertainment",
+        "channel_is_verified": True,
+        "height": 2160,
+        "upload_date": "20260515",
+        "_search_query": "Resident Evil 2026 official trailer",
+    }
+    assert video_is_usable_broll(current_item, story)
+
+
+def test_primary_quoted_title_wins_over_secondary_title():
+    story = {
+        "canonical_title": "'Avengers: Doomsday': Trailers, tickets, release date and 'Endgame: Encore' details",
+        "summary": "The update focuses on Avengers: Doomsday.",
+        "category": "trend",
+        "articles": [{"title": "Avengers Doomsday update", "published_at": "2026-09-25"}],
+    }
+    endgame = {
+        "title": "Avengers: Endgame Encore | Official Trailer",
+        "channel": "IMAX",
+        "channel_is_verified": True,
+        "height": 1080,
+        "upload_date": "20260920",
+        "_search_query": "Avengers: Doomsday 2026 official trailer",
+    }
+    doomsday = {
+        "title": "Avengers: Doomsday | Official Trailer",
+        "channel": "Marvel Entertainment",
+        "channel_is_verified": True,
+        "height": 1080,
+        "upload_date": "20260920",
+        "_search_query": "Avengers: Doomsday 2026 official trailer",
+    }
+    assert not video_is_usable_broll(endgame, story)
+    assert video_is_usable_broll(doomsday, story)
