@@ -379,9 +379,9 @@ def _automatic_media_plan(stories: list[dict], narration_text: str = "") -> dict
             "visuals": [
                 {
                     "type": "video",
-                    "search_intent": f"{title} official trailer clip interview featurette",
-                    "preferred_source": "official YouTube channel / studio / broadcaster / original interview",
-                    "why": "Primary source: use relevant motion footage directly connected to the included story.",
+                    "search_intent": f"{title} official trailer clip featurette behind the scenes",
+                    "preferred_source": "original studio / distributor / official production channel",
+                    "why": "Primary source: use clean official B-roll, not a news recap, reaction, review, or commentator video.",
                 },
                 {
                     "type": "image",
@@ -472,7 +472,7 @@ def latest_media_plan(project_id: str):
 class MediaSearchBody(BaseModel):
     refresh: bool = True
     max_images_per_story: int = Field(default=3, ge=1, le=8)
-    max_videos_per_story: int = Field(default=12, ge=1, le=24)
+    max_videos_per_story: int = Field(default=8, ge=1, le=16)
 
 
 @app.post("/api/projects/{project_id}/media/search")
