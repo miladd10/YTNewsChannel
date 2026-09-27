@@ -7,7 +7,7 @@ from ..db import DATA_DIR
 
 SERVICE_NAME = "YT News Studio"
 SETTINGS_PATH = DATA_DIR / "ai_settings.json"
-SUPPORTED_PROVIDERS = {"openai", "anthropic"}
+SUPPORTED_PROVIDERS = {"openai", "anthropic", "elevenlabs"}
 DEFAULT_SETTINGS = {
     "research_provider": "codex_local",
     "research_model": "default",
@@ -77,4 +77,5 @@ def masked_status() -> dict:
         **load_ai_settings(),
         "openai_configured": bool(get_api_key("openai")),
         "anthropic_configured": bool(get_api_key("anthropic")),
+        "elevenlabs_configured": bool(get_api_key("elevenlabs")),
     }
