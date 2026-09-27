@@ -496,7 +496,7 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
             if body.refresh:
                 conn.execute(
                     """DELETE FROM media_candidates
-                       WHERE project_id=? AND story_id=? AND selected=0 AND download_status<>'downloaded'""",
+                       WHERE project_id=? AND story_id=? AND download_status<>'downloaded'""",
                     (project_id, story["id"]),
                 )
             existing = {
