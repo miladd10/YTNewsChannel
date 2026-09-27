@@ -55,6 +55,7 @@ def init_db() -> None:
                 content_type TEXT NOT NULL DEFAULT 'weekly_news',
                 language TEXT NOT NULL DEFAULT 'Persian',
                 target_minutes INTEGER NOT NULL DEFAULT 15,
+                media_chunk_minutes REAL NOT NULL DEFAULT 1.0,
                 date_start TEXT NOT NULL DEFAULT '',
                 date_end TEXT NOT NULL DEFAULT '',
                 geographic_focus TEXT NOT NULL DEFAULT 'Worldwide',
@@ -218,6 +219,8 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_media_candidates_selected ON media_candidates(project_id, selected);
             """
         )
+        if not _column_exists(conn, "projects", "media_chunk_minutes"):
+            conn.execute("ALTER TABLE projects ADD COLUMN media_chunk_minutes REAL NOT NULL DEFAULT 1.0")
         if not _column_exists(conn, "voice_segments", "take1_path"):
             conn.execute("ALTER TABLE voice_segments ADD COLUMN take1_path TEXT NOT NULL DEFAULT ''")
         if not _column_exists(conn, "voice_segments", "take2_path"):
