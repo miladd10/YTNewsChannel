@@ -5,3 +5,5 @@
 .candidate-link-row{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 
 .quality-badge{position:absolute;right:8px;top:8px;padding:3px 7px;border-radius:999px;background:rgba(8,11,16,.86);border:1px solid rgba(255,255,255,.14);font-size:9px;font-weight:800;letter-spacing:.04em}
+
+.source-kind{display:inline-block;margin-top:7px;padding:3px 7px;border-radius:999px;border:1px solid #354154;color:#aeb9c8;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
