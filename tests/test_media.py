@@ -1,4 +1,5 @@
-from app.services.media import _contextual_fallback_stories, _dedupe_quality_first_results, _extract_reference_video_urls, _story_subjects, _youtube_search_queries, story_allows_interview_or_podcast, story_media_key, story_visual_plan, suggested_clip_range, video_is_usable_broll
+import app.services.media as media_module
+from app.services.media import _contextual_fallback_stories, _dedupe_quality_first_results, _extract_reference_video_urls, _reference_resolution_queries, _story_subjects, _youtube_search_queries, search_story_media, story_allows_interview_or_podcast, story_media_key, story_visual_plan, suggested_clip_range, video_is_usable_broll
 
 
 def normal_story():
@@ -587,3 +588,72 @@ def test_quote_story_can_add_director_as_separate_visual_beat():
     assert labels[0] == "Avatar: Fire and Ash production update"
     assert "James Cameron" in labels
     assert plan["target_count"] >= 2
+
+
+
+def test_werwulf_visual_plan_does_not_treat_quoted_slogan_as_title():
+    story = {
+        "canonical_title": "‘Feed upon the flesh of mankind!’ Robert Eggers sics chilling new ‘Werwulf’ trailer on fans",
+        "summary": "Robert Eggers released a new trailer for Werwulf.",
+        "_narration_text": "Feed upon the flesh of mankind! The new Werwulf trailer shows Robert Eggers' latest horror film.",
+        "_voice_duration_seconds": 28.0,
+        "category": "upcoming_films",
+        "articles": [],
+    }
+    plan = story_visual_plan(story)
+    assert plan["subjects"] == ["Werwulf"]
+    assert "Feed upon the flesh of mankind!" not in [beat["label"] for beat in plan["beats"]]
+    assert plan["target_count"] == 2
+
+
+def test_gold_derby_reference_resolution_queries_start_with_publisher_subject():
+    article = {
+        "title": "‘Feed upon the flesh of mankind!’ Robert Eggers sics chilling new ‘Werwulf’ trailer on fans - Gold Derby",
+        "source": "Gold Derby",
+        "url": "https://news.google.com/rss/articles/example",
+    }
+    queries = _reference_resolution_queries(article)
+    assert queries[0].lower() == 'site:goldderby.com "werwulf"'
+    assert any('"werwulf"' in query.lower() for query in queries)
+
+
+def test_reference_hd_video_skips_broad_search_for_covered_story(monkeypatch):
+    story = {
+        "canonical_title": "‘Feed upon the flesh of mankind!’ Robert Eggers sics chilling new ‘Werwulf’ trailer on fans - Gold Derby",
+        "summary": "Robert Eggers released a new trailer for Werwulf.",
+        "_narration_text": "The new Werwulf trailer is here.",
+        "_voice_duration_seconds": 10.0,
+        "category": "upcoming_films",
+        "articles": [{"title": "Werwulf trailer", "source": "Gold Derby", "url": "https://example.com"}],
+    }
+    reference = [{
+        "id": "ref",
+        "media_type": "video",
+        "title": "WERWULF | Official Trailer",
+        "page_url": "https://www.youtube.com/watch?v=officialwerwulf",
+        "asset_url": "https://www.youtube.com/watch?v=officialwerwulf",
+        "thumbnail_url": "",
+        "source": "Focus Features",
+        "provider": "Reference page · official B-roll",
+        "duration": "2:30",
+        "published_at": "20260926",
+        "width": 3840,
+        "height": 2160,
+        "search_query": "Reference page: Werwulf trailer",
+    }]
+    monkeypatch.setattr(media_module, "_search_reference_page_videos", lambda *args, **kwargs: (reference, []))
+    monkeypatch.setattr(
+        media_module,
+        "_search_youtube_videos",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("YouTube search should be skipped")),
+    )
+    monkeypatch.setattr(
+        media_module,
+        "_search_web_video_sources",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Web search should be skipped")),
+    )
+    results, errors = search_story_media(story, max_images=3, max_videos=8)
+    assert not errors
+    assert len(results) == 1
+    assert results[0]["coverage_label"] == "Werwulf"
+    assert results[0]["coverage_kind"] == "current"
