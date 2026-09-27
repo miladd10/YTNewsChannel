@@ -6,7 +6,7 @@ import re
 import subprocess
 from pathlib import Path
 
-PROJECT_SCHEMA_VERSION = 1
+PROJECT_SCHEMA_VERSION = 2
 PROJECT_DIRS = [
     "research/raw",
     "research/stories",
@@ -98,6 +98,9 @@ def save_manifest(conn, project_id: str) -> Path:
     media_plans = [dict(row) for row in conn.execute(
         "SELECT * FROM media_plans WHERE project_id=? ORDER BY created_at", (project_id,)
     ).fetchall()]
+    media_candidates = [dict(row) for row in conn.execute(
+        "SELECT * FROM media_candidates WHERE project_id=? ORDER BY story_id,media_type,created_at", (project_id,)
+    ).fetchall()]
     payload = {
         "schema_version": PROJECT_SCHEMA_VERSION,
         "project": dict(project),
@@ -105,6 +108,7 @@ def save_manifest(conn, project_id: str) -> Path:
         "stories": stories,
         "narrations": narrations,
         "media_plans": media_plans,
+        "media_candidates": media_candidates,
     }
     path = root / "project.json"
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
