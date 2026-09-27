@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.9"
+APP_VERSION = "0.3.10"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Selective B-roll Search"
+APP_RELEASE_NAME = "Per-Batch B-roll Controls"
