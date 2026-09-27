@@ -226,6 +226,33 @@ def init_db() -> None:
             conn.execute("ALTER TABLE voice_segments ADD COLUMN selected_take INTEGER NOT NULL DEFAULT 0")
         if not _column_exists(conn, "voice_segments", "approval_status"):
             conn.execute("ALTER TABLE voice_segments ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'pending'")
+        # v0.3.1 introduced explicit Take 1 / Take 2 approval. Preserve
+        # previously generated + aligned narration instead of forcing users to
+        # spend ElevenLabs credits again. Only promote legacy audio when the
+        # actual project file still exists.
+        legacy_rows = conn.execute(
+            """SELECT v.id,v.audio_path,p.root_path
+               FROM voice_segments v
+               JOIN projects p ON p.id=v.project_id
+               WHERE v.audio_status='aligned'
+                 AND v.audio_path<>''
+                 AND COALESCE(v.approval_status,'pending')<>'approved'
+                 AND COALESCE(v.take1_path,'')=''"""
+        ).fetchall()
+        for row in legacy_rows:
+            try:
+                audio_file = (Path(row["root_path"]) / row["audio_path"]).resolve()
+                project_root = Path(row["root_path"]).resolve()
+                if project_root in audio_file.parents and audio_file.exists() and audio_file.is_file():
+                    conn.execute(
+                        """UPDATE voice_segments
+                           SET take1_path=audio_path,selected_take=1,approval_status='approved'
+                           WHERE id=?""",
+                        (row["id"],),
+                    )
+            except Exception:
+                pass
+
         if not _column_exists(conn, "media_candidates", "clip_start_sec"):
             conn.execute("ALTER TABLE media_candidates ADD COLUMN clip_start_sec INTEGER")
         if not _column_exists(conn, "media_candidates", "clip_end_sec"):
