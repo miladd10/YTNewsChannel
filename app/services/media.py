@@ -426,8 +426,18 @@ def _video_rank(item: dict, story: dict, base: str) -> tuple[int, int, int, int]
 
 
 def _quoted_subjects(text: str) -> list[str]:
-    found = re.findall(r"[\"'‘’“”]([^\"'‘’“”]{2,80})[\"'‘’“”]", text or "")
-    return list(dict.fromkeys(x.strip() for x in found if x.strip()))[:3]
+    # Match real quote pairs. Treating every curly apostrophe as both an
+    # opener and closer breaks headlines such as "Brad Bird’s ‘Ray Gunn’".
+    pattern = re.compile(
+        r'“([^”]{2,80})”|‘([^’]{2,80})’|"([^"]{2,80})"|(?<!\\w)\\'([^\\']{2,80})\\'(?!\\w)'
+    )
+    found: list[str] = []
+    for match in pattern.finditer(text or ""):
+        value = next((group for group in match.groups() if group is not None), "")
+        value = value.strip()
+        if value and value not in found:
+            found.append(value)
+    return found[:3]
 
 
 NEWS_VERBS = (
