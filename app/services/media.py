@@ -924,7 +924,7 @@ def download_video(url: str, target_stem: Path) -> Path:
         "quiet": True,
         "no_warnings": True,
         "restrictfilenames": True,
-        "format": "bestvideo*+bestaudio/best",
+        "format": "bestvideo+bestaudio/best",
         "merge_output_format": "mp4",
     }
     before = set(target_stem.parent.glob(f"{target_stem.name}.*"))
