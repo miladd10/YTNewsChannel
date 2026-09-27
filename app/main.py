@@ -53,12 +53,15 @@ def latest_run_id(conn, project_id: str) -> str | None:
 def project_payload(conn, project_id: str) -> dict:
     project = project_or_404(conn, project_id)
     run_id = latest_run_id(conn, project_id)
-    counts = {"articles": 0, "stories": 0, "included": 0, "narrations": 0, "media_plans": 0, "media_candidates": 0, "media_selected": 0, "media_downloaded": 0}
+    counts = {"articles": 0, "stories": 0, "included": 0, "narrations": 0, "voice_segments": 0, "voice_generated": 0, "voice_seconds": 0.0, "media_plans": 0, "media_candidates": 0, "media_selected": 0, "media_downloaded": 0}
     if run_id:
         counts["articles"] = conn.execute("SELECT COUNT(*) c FROM research_articles WHERE run_id=?", (run_id,)).fetchone()["c"]
         counts["stories"] = conn.execute("SELECT COUNT(*) c FROM stories WHERE run_id=?", (run_id,)).fetchone()["c"]
         counts["included"] = conn.execute("SELECT COUNT(*) c FROM stories WHERE run_id=? AND decision='include'", (run_id,)).fetchone()["c"]
     counts["narrations"] = conn.execute("SELECT COUNT(*) c FROM narrations WHERE project_id=?", (project_id,)).fetchone()["c"]
+    counts["voice_segments"] = conn.execute("SELECT COUNT(*) c FROM voice_segments WHERE project_id=?", (project_id,)).fetchone()["c"]
+    counts["voice_generated"] = conn.execute("SELECT COUNT(*) c FROM voice_segments WHERE project_id=? AND audio_status IN ('generated','aligned')", (project_id,)).fetchone()["c"]
+    counts["voice_seconds"] = round(float(conn.execute("SELECT COALESCE(SUM(duration_seconds),0) s FROM voice_segments WHERE project_id=?", (project_id,)).fetchone()["s"] or 0), 3)
     counts["media_plans"] = conn.execute("SELECT COUNT(*) c FROM media_plans WHERE project_id=?", (project_id,)).fetchone()["c"]
     counts["media_candidates"] = conn.execute("SELECT COUNT(*) c FROM media_candidates WHERE project_id=?", (project_id,)).fetchone()["c"]
     counts["media_selected"] = conn.execute("SELECT COUNT(*) c FROM media_candidates WHERE project_id=? AND selected=1", (project_id,)).fetchone()["c"]
@@ -367,6 +370,310 @@ def list_narrations(project_id: str):
     with db() as conn:
         project_or_404(conn, project_id)
         return [dict(row) for row in conn.execute("SELECT * FROM narrations WHERE project_id=? ORDER BY version_number DESC", (project_id,)).fetchall()]
+
+
+class ElevenLabsKeyBody(BaseModel):
+    api_key: str = Field(min_length=8)
+
+
+class NarratorVoiceBody(BaseModel):
+    voice_id: str = Field(min_length=1)
+    voice_name: str = ""
+
+
+def _latest_narration(conn, project_id: str):
+    return conn.execute(
+        "SELECT * FROM narrations WHERE project_id=? ORDER BY version_number DESC LIMIT 1",
+        (project_id,),
+    ).fetchone()
+
+
+def _voice_payload(conn, project_id: str) -> dict:
+    project = project_or_404(conn, project_id)
+    narration = _latest_narration(conn, project_id)
+    settings = conn.execute(
+        "SELECT * FROM voice_settings WHERE project_id=?",
+        (project_id,),
+    ).fetchone()
+    segments = [dict(row) for row in conn.execute(
+        """SELECT * FROM voice_segments
+           WHERE project_id=? ORDER BY segment_index""",
+        (project_id,),
+    ).fetchall()]
+    story_rows = conn.execute(
+        """SELECT story_id,
+                  ROUND(COALESCE(SUM(duration_seconds),0),3) AS duration_seconds,
+                  COUNT(*) AS segment_count
+           FROM voice_segments
+           WHERE project_id=? AND story_id<>''
+           GROUP BY story_id""",
+        (project_id,),
+    ).fetchall()
+    story_durations = {
+        row["story_id"]: {
+            "duration_seconds": float(row["duration_seconds"] or 0),
+            "segment_count": int(row["segment_count"] or 0),
+        }
+        for row in story_rows
+    }
+    return {
+        "project_id": project_id,
+        "narration": dict(narration) if narration else None,
+        "settings": dict(settings) if settings else {
+            "voice_id": "",
+            "voice_name": "",
+            "model_id": ELEVEN_MODEL_ID,
+            "output_format": "mp3_44100_192",
+            "prepared_narration_id": "",
+        },
+        "segments": segments,
+        "story_durations": story_durations,
+        "total_duration_seconds": round(sum(float(x.get("duration_seconds") or 0) for x in segments), 3),
+        "generated_count": sum(1 for x in segments if x.get("audio_status") in {"generated", "aligned"}),
+        "aligned_count": sum(1 for x in segments if x.get("audio_status") == "aligned"),
+    }
+
+
+@app.get("/api/voice/connection")
+def voice_connection():
+    configured = bool(get_api_key("elevenlabs"))
+    voices, error = [], ""
+    if configured:
+        try:
+            voices = list_voices()
+        except ElevenLabsError as exc:
+            error = str(exc)
+    return {
+        "configured": configured,
+        "connected": configured and not error,
+        "voice_count": len(voices),
+        "voices": voices,
+        "error": error,
+        "model_id": ELEVEN_MODEL_ID,
+    }
+
+
+@app.put("/api/voice/connection")
+def save_voice_connection(body: ElevenLabsKeyBody):
+    set_api_key("elevenlabs", body.api_key)
+    try:
+        voices = list_voices()
+    except ElevenLabsError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "voice_count": len(voices), "voices": voices}
+
+
+@app.delete("/api/voice/connection")
+def clear_voice_connection():
+    delete_api_key("elevenlabs")
+    return {"ok": True}
+
+
+@app.get("/api/projects/{project_id}/voice")
+def get_voice_workspace(project_id: str):
+    with db() as conn:
+        return _voice_payload(conn, project_id)
+
+
+@app.put("/api/projects/{project_id}/voice/settings")
+def save_narrator_voice(project_id: str, body: NarratorVoiceBody):
+    stamp = now()
+    with db() as conn:
+        project_or_404(conn, project_id)
+        current = conn.execute(
+            "SELECT voice_id FROM voice_settings WHERE project_id=?",
+            (project_id,),
+        ).fetchone()
+        voice_changed = bool(current and current["voice_id"] and current["voice_id"] != body.voice_id)
+        conn.execute(
+            """INSERT INTO voice_settings(
+                   project_id,voice_id,voice_name,model_id,output_format,prepared_narration_id,updated_at
+               ) VALUES (?,?,?,?,?,?,?)
+               ON CONFLICT(project_id) DO UPDATE SET
+                   voice_id=excluded.voice_id,
+                   voice_name=excluded.voice_name,
+                   model_id=excluded.model_id,
+                   output_format=excluded.output_format,
+                   updated_at=excluded.updated_at""",
+            (
+                project_id, body.voice_id, body.voice_name, ELEVEN_MODEL_ID,
+                "mp3_44100_192", "", stamp,
+            ),
+        )
+        if voice_changed:
+            conn.execute(
+                """UPDATE voice_segments
+                   SET voice_id=?,audio_path='',duration_seconds=NULL,alignment_json='{}',
+                       audio_status='pending',updated_at=?
+                   WHERE project_id=?""",
+                (body.voice_id, stamp, project_id),
+            )
+        save_manifest(conn, project_id)
+        return _voice_payload(conn, project_id)
+
+
+@app.post("/api/projects/{project_id}/voice/prepare")
+def prepare_narrator_voice(project_id: str):
+    stamp = now()
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        narration = _latest_narration(conn, project_id)
+        settings = conn.execute("SELECT * FROM voice_settings WHERE project_id=?", (project_id,)).fetchone()
+    if not narration:
+        raise HTTPException(400, "Generate narration first.")
+    if not settings or not settings["voice_id"]:
+        raise HTTPException(400, "Choose one ElevenLabs narrator voice first.")
+
+    raw_segments = extract_narration_segments(narration["content"])
+    if not raw_segments:
+        raise HTTPException(400, "No spoken narration could be extracted from the latest narration.")
+    performance, warnings, provider, model = prepare_performance(raw_segments)
+
+    root = Path(project["root_path"])
+    audio_dir = root / "audio" / "narration"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    for path in audio_dir.glob("*.mp3"):
+        try:
+            path.unlink()
+        except Exception:
+            pass
+
+    with db() as conn:
+        conn.execute("DELETE FROM voice_segments WHERE project_id=?", (project_id,))
+        for segment in raw_segments:
+            conn.execute(
+                """INSERT INTO voice_segments(
+                    id,project_id,narration_id,story_id,segment_index,source_text,performance_text,
+                    voice_id,audio_path,duration_seconds,alignment_json,audio_status,created_at,updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    segment["id"], project_id, narration["id"], segment.get("story_id", ""),
+                    segment["segment_index"], segment["source_text"],
+                    performance.get(segment["id"], segment["source_text"]),
+                    settings["voice_id"], "", None, "{}", "prepared", stamp, stamp,
+                ),
+            )
+        conn.execute(
+            """UPDATE voice_settings
+               SET prepared_narration_id=?,updated_at=? WHERE project_id=?""",
+            (narration["id"], stamp, project_id),
+        )
+        save_manifest(conn, project_id)
+        payload = _voice_payload(conn, project_id)
+    payload.update({"warnings": warnings, "performance_provider": provider, "performance_model": model})
+    return payload
+
+
+@app.post("/api/projects/{project_id}/voice/generate")
+def generate_narrator_voice(project_id: str):
+    if not get_api_key("elevenlabs"):
+        raise HTTPException(400, "Connect ElevenLabs first.")
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        narration = _latest_narration(conn, project_id)
+        settings = conn.execute("SELECT * FROM voice_settings WHERE project_id=?", (project_id,)).fetchone()
+        rows = [dict(row) for row in conn.execute(
+            "SELECT * FROM voice_segments WHERE project_id=? ORDER BY segment_index",
+            (project_id,),
+        ).fetchall()]
+    if not narration:
+        raise HTTPException(400, "Generate narration first.")
+    if not settings or not settings["voice_id"]:
+        raise HTTPException(400, "Choose one ElevenLabs narrator voice first.")
+    if not rows or any(row["narration_id"] != narration["id"] for row in rows):
+        raise HTTPException(400, "Prepare the latest narration for voice first.")
+
+    root = Path(project["root_path"])
+    audio_dir = root / "audio" / "narration"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    generated = 0
+    aligned = 0
+    errors = []
+    output_format = settings["output_format"] or "mp3_44100_192"
+
+    for row in rows:
+        if row.get("audio_status") == "aligned" and row.get("audio_path"):
+            continue
+        try:
+            audio, used_format = text_to_speech(settings["voice_id"], row["performance_text"] or row["source_text"])
+            output_format = used_format
+            filename = f"{int(row['segment_index']):04d}_narration.mp3"
+            path = audio_dir / filename
+            path.write_bytes(audio)
+            duration = mp3_duration_seconds(path)
+            alignment = forced_alignment(path, row["source_text"])
+            words = []
+            for item in alignment.get("words") or []:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    start = float(item.get("start"))
+                    end = float(item.get("end"))
+                except Exception:
+                    continue
+                if end < start:
+                    continue
+                words.append({
+                    "text": str(item.get("text") or ""),
+                    "start": start,
+                    "end": end,
+                    "loss": item.get("loss"),
+                })
+            if duration is None and words:
+                duration = max(float(x["end"]) for x in words)
+            if duration is None:
+                raise RuntimeError("Could not measure generated MP3 duration.")
+            status = "aligned" if words else "generated"
+            rel = path.relative_to(root).as_posix()
+            with db() as conn:
+                conn.execute(
+                    """UPDATE voice_segments
+                       SET voice_id=?,audio_path=?,duration_seconds=?,alignment_json=?,
+                           audio_status=?,updated_at=? WHERE id=?""",
+                    (
+                        settings["voice_id"], rel, float(duration),
+                        json.dumps({"words": words, "loss": alignment.get("loss")}, ensure_ascii=False),
+                        status, now(), row["id"],
+                    ),
+                )
+            generated += 1
+            if words:
+                aligned += 1
+        except Exception as exc:
+            errors.append({"segment_id": row["id"], "segment_index": row["segment_index"], "error": str(exc)})
+            with db() as conn:
+                conn.execute(
+                    "UPDATE voice_segments SET audio_status='failed',updated_at=? WHERE id=?",
+                    (now(), row["id"]),
+                )
+
+    with db() as conn:
+        conn.execute(
+            "UPDATE voice_settings SET output_format=?,updated_at=? WHERE project_id=?",
+            (output_format, now(), project_id),
+        )
+        conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
+        save_manifest(conn, project_id)
+        payload = _voice_payload(conn, project_id)
+    payload.update({"generated_this_run": generated, "aligned_this_run": aligned, "errors": errors})
+    return payload
+
+
+@app.get("/api/projects/{project_id}/voice/{segment_id}/audio")
+def narration_audio(project_id: str, segment_id: str):
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        row = conn.execute(
+            "SELECT audio_path FROM voice_segments WHERE project_id=? AND id=?",
+            (project_id, segment_id),
+        ).fetchone()
+    if not row or not row["audio_path"]:
+        raise HTTPException(404, "Narration audio has not been generated.")
+    root = Path(project["root_path"]).resolve()
+    path = (root / row["audio_path"]).resolve()
+    if root not in path.parents or not path.exists():
+        raise HTTPException(404, "Narration audio file is missing.")
+    return FileResponse(path, media_type="audio/mpeg", filename=path.name)
 
 
 def _automatic_media_plan(stories: list[dict], narration_text: str = "") -> dict:
