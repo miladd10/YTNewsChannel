@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from .db import BASE_DIR, PIPELINE, db, init_db
 from .services.ai import generate_text
 from .services.local_cli import all_statuses, launch_login
-from .services.media import download_candidate, search_story_media, story_media_key
+from .services.media import download_candidate, search_story_media, story_media_key, suggested_clip_range
 from .services.project_store import choose_folder, create_project_folder, reveal_in_file_manager, save_manifest
 from .services.prompts import CINEMA_WEEKLY_SECTIONS, MEDIA_PLAN_SYSTEM, NARRATION_SYSTEM
 from .services.research import ai_rank_stories, cluster_articles, fetch_google_news
@@ -514,6 +514,11 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
             if not any(existing.get("page_url") == item.get("page_url") for existing in bucket):
                 bucket.append(dict(item))
 
+    subject_story_counts: dict[str, int] = {}
+    for result in searched:
+        subject_story_counts[result["key"]] = subject_story_counts.get(result["key"], 0) + 1
+    clip_usage_counts: dict[tuple[str, str], int] = {}
+
     for result in searched:
         story = result["story"]
         candidates = list(result["candidates"])
@@ -546,6 +551,20 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
                     item for item in candidates if item.get("media_type") == "image"
                 ]
 
+        for item in candidates:
+            if item.get("media_type") != "video":
+                item["clip_start_sec"] = None
+                item["clip_end_sec"] = None
+                item["shared_source"] = 0
+                continue
+            usage_key = (result["key"], item.get("page_url") or "")
+            usage_index = clip_usage_counts.get(usage_key, 0)
+            start_sec, end_sec = suggested_clip_range(item.get("duration"), usage_index)
+            item["clip_start_sec"] = start_sec
+            item["clip_end_sec"] = end_sec
+            item["shared_source"] = 1 if subject_story_counts.get(result["key"], 0) > 1 else 0
+            clip_usage_counts[usage_key] = usage_index + 1
+
         with db() as conn:
             if body.refresh:
                 conn.execute(
@@ -568,14 +587,15 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
                 conn.execute(
                     """INSERT INTO media_candidates(
                         id,project_id,story_id,media_type,title,page_url,asset_url,thumbnail_url,source,provider,
-                        duration,published_at,width,height,search_query,selected,download_status,stored_path,error,
-                        rights_status,created_at,updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        duration,published_at,width,height,search_query,clip_start_sec,clip_end_sec,shared_source,
+                        selected,download_status,stored_path,error,rights_status,created_at,updated_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         item["id"], project_id, story["id"], item["media_type"], item["title"], item["page_url"],
                         item["asset_url"], item["thumbnail_url"], item["source"], item["provider"], item["duration"],
-                        item["published_at"], item["width"], item["height"], item["search_query"], 0, "not_downloaded",
-                        "", "", "unverified", stamp, stamp,
+                        item["published_at"], item["width"], item["height"], item["search_query"],
+                        item.get("clip_start_sec"), item.get("clip_end_sec"), item.get("shared_source", 0),
+                        0, "not_downloaded", "", "", "unverified", stamp, stamp,
                     ),
                 )
                 existing.add(key)
