@@ -115,6 +115,48 @@ def _max_video_height(item: dict) -> int | None:
     return max(heights) if heights else None
 
 
+def duration_seconds(value) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return max(0, int(value))
+    text = str(value).strip()
+    if not text:
+        return None
+    if re.fullmatch(r"\d+(?:\.\d+)?", text):
+        return max(0, int(float(text)))
+    parts = text.split(":")
+    if not all(part.isdigit() for part in parts):
+        return None
+    if len(parts) == 2:
+        return int(parts[0]) * 60 + int(parts[1])
+    if len(parts) == 3:
+        return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+    return None
+
+
+def suggested_clip_range(duration, usage_index: int = 0, clip_seconds: int = 12) -> tuple[int | None, int | None]:
+    """Give repeated uses of one source distinct, editor-friendly time ranges."""
+    total = duration_seconds(duration)
+    if total is None:
+        # Most trailers/interviews are long enough for these conservative
+        # offsets; the editor can refine them later.
+        start = 5 + max(0, usage_index) * 17
+        return start, start + clip_seconds
+    if total <= 3:
+        return 0, total
+    length = min(clip_seconds, max(4, total - 2))
+    usable_start = 2 if total <= 20 else 5
+    stride = length + 5
+    latest_start = max(0, total - length - 2)
+    start = usable_start + max(0, usage_index) * stride
+    if start > latest_start:
+        span = max(1, latest_start - usable_start + 1)
+        start = usable_start + ((max(0, usage_index) * stride) % span)
+        start = min(start, latest_start)
+    return int(start), int(min(total, start + length))
+
+
 def _story_text(story: dict) -> str:
     parts = [
         str(story.get("canonical_title") or ""),
