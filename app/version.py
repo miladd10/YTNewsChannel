@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.11"
+APP_VERSION = "0.3.12"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Per-Story B-roll Generation"
+APP_RELEASE_NAME = "Always-Visible Story B-roll Actions"
