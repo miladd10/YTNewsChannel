@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.10"
+APP_VERSION = "0.3.11"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Per-Batch B-roll Controls"
+APP_RELEASE_NAME = "Per-Story B-roll Generation"
