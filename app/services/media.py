@@ -960,13 +960,7 @@ def _search_reference_page_videos(
 
     base = clean_story_query(story.get("canonical_title", ""))
     usable = [item for item in raw if video_is_usable_broll(item, story)]
-    usable.sort(
-        key=lambda item: (
-            1 if item.get("_reference_direct_asset") else 0,
-            *_video_rank(item, story, base),
-        ),
-        reverse=True,
-    )
+    usable.sort(key=lambda item: _video_rank(item, story, base), reverse=True)
 
     results: list[dict] = []
     seen_pages: set[str] = set()
