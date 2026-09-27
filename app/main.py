@@ -1442,16 +1442,14 @@ def generate_resolve_plan(project_id: str):
 
     try:
         plan = build_edit_plan(project, voice_rows, candidates, fps=30)
+        if not plan.get("visual_clips"):
+            raise RuntimeError(
+                "No visual clips were planned. Return to Media Sources and Downloads before generating Resolve."
+            )
         plan["input_signature"] = _resolve_input_signature(voice_rows, candidates)
         files = write_resolve_package(Path(project["root_path"]), plan)
     except Exception as exc:
         raise HTTPException(400, f"Could not build Resolve package: {exc}") from exc
-
-    if not plan.get("visual_clips"):
-        raise HTTPException(
-            400,
-            "No visual clips were planned. Return to Media Sources and Downloads before generating Resolve.",
-        )
 
     with db() as conn:
         conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
