@@ -16,6 +16,52 @@ def clean_story_query(title: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
+BROLL_TITLE_TERMS = (
+    "official trailer", "official teaser", "official clip", "official featurette",
+    "behind the scenes", "making of", "first look", "sneak peek",
+    "deleted scene", "red carpet", "world premiere", "premiere footage",
+    "press conference", "official announcement", "official reveal",
+)
+
+GENERIC_BROLL_TERMS = (
+    "trailer", "teaser", "clip", "featurette", "behind the scenes", "making of",
+    "first look", "sneak peek", "deleted scene", "red carpet", "premiere",
+    "press conference", "announcement", "reveal",
+)
+
+COMMENTARY_TITLE_TERMS = (
+    "reaction", "reacts", "review", "breakdown", "explained", "analysis",
+    "commentary", "my thoughts", "what we know", "everything we know",
+    "latest news", "news update", "rumor", "rumour", "theory", "recap",
+    "watchalong", "watch along", "trailer reaction", "ending explained",
+    "fan trailer", "concept trailer", "concept teaser", "ai trailer",
+    "ai concept", "parody trailer",
+)
+
+NEWS_CHANNEL_TERMS = (
+    "abc news", "nbc news", "cbs news", "cnn", "fox news", "bbc news",
+    "sky news", "reuters", "associated press", "ap archive", "cnbc",
+    "bloomberg", "newsnation", "msnbc", "global news", "euronews",
+    "the independent", "forbes", "deadline hollywood", "variety",
+    "hollywood reporter", "entertainment tonight", "access hollywood",
+)
+
+OFFICIAL_CHANNEL_TERMS = (
+    "official", "pictures", "studios", "entertainment", "films", "film",
+    "netflix", "warner bros", "warnerbrospictures", "paramount pictures",
+    "universal pictures", "sony pictures", "marvel entertainment",
+    "dc", "disney", "hbo", "apple tv", "prime video", "amazon mgm",
+    "lionsgate", "a24", "neon", "searchlight pictures", "20th century studios",
+    "focus features", "dreamworks", "pixar", "lucasfilm", "peacock", "hulu",
+    "max", "mubi", "criterion",
+)
+
+SPOKEN_SOURCE_TERMS = (
+    "interview", "podcast", "conversation with", "talks with", "talks to",
+    "speaks with", "speaks to", "sit-down", "sit down",
+)
+
+
 def _youtube_thumbnail(item: dict) -> str:
     thumbnail = str(item.get("thumbnail") or "").strip()
     if thumbnail:
@@ -41,28 +87,112 @@ def _max_video_height(item: dict) -> int | None:
     return max(heights) if heights else None
 
 
-def _video_rank(item: dict, base: str) -> tuple[int, int, int]:
+def _story_text(story: dict) -> str:
+    parts = [
+        str(story.get("canonical_title") or ""),
+        str(story.get("summary") or ""),
+    ]
+    for article in story.get("articles") or []:
+        parts.extend([
+            str(article.get("title") or ""),
+            str(article.get("snippet") or ""),
+        ])
+    return " ".join(parts).lower()
+
+
+def story_allows_interview_or_podcast(story: dict) -> bool:
+    """Only permit spoken-source footage when the news itself is sourced from it."""
+    text = _story_text(story)
+    return any(term in text for term in SPOKEN_SOURCE_TERMS)
+
+
+def _is_news_or_commentary_channel(source: str) -> bool:
+    value = (source or "").lower()
+    return any(term in value for term in NEWS_CHANNEL_TERMS)
+
+
+def _looks_like_official_channel(source: str) -> bool:
+    value = (source or "").lower()
+    return any(term in value for term in OFFICIAL_CHANNEL_TERMS)
+
+
+def _video_rejection_reason(item: dict, story: dict) -> str | None:
+    title = str(item.get("title") or "").lower()
+    source = str(item.get("channel") or item.get("uploader") or "").lower()
+    description = str(item.get("description") or "").lower()
+    haystack = f"{title} {source} {description}"
+    allow_spoken = story_allows_interview_or_podcast(story)
+
+    if any(term in haystack for term in COMMENTARY_TITLE_TERMS):
+        return "commentary/reaction/review"
+
+    spoken = any(term in title for term in SPOKEN_SOURCE_TERMS) or "podcast" in source
+    if spoken and not allow_spoken:
+        return "interview/podcast not relevant to this story"
+
+    # News packages and presenter/commentator channels are not B-roll. They are
+    # only considered for an interview/podcast story, and even then the result
+    # itself must actually be an interview/podcast clip.
+    if _is_news_or_commentary_channel(source):
+        if not allow_spoken or not spoken:
+            return "news/commentary channel"
+
+    return None
+
+
+def _official_broll_strength(item: dict, story: dict) -> tuple[int, str]:
+    title = str(item.get("title") or "").lower()
+    source = str(item.get("channel") or item.get("uploader") or "").lower()
+    verified = bool(item.get("channel_is_verified"))
+    allow_spoken = story_allows_interview_or_podcast(story)
+
+    if allow_spoken and any(term in title for term in SPOKEN_SOURCE_TERMS):
+        # For interview/podcast news, the original interview is the B-roll.
+        if verified or not _is_news_or_commentary_channel(source):
+            return 5, "original interview/podcast"
+
+    if any(term in title for term in BROLL_TITLE_TERMS):
+        if _looks_like_official_channel(source) or verified:
+            return 5, "official B-roll"
+        return 3, "B-roll asset"
+
+    if any(term in title for term in GENERIC_BROLL_TERMS):
+        if _looks_like_official_channel(source):
+            return 4, "studio/distributor B-roll"
+        if verified:
+            return 2, "verified-source B-roll"
+
+    return 0, ""
+
+
+def video_is_usable_broll(item: dict, story: dict) -> bool:
+    if _video_rejection_reason(item, story):
+        return False
+    strength, _ = _official_broll_strength(item, story)
+    return strength >= 3
+
+
+def _video_rank(item: dict, story: dict, base: str) -> tuple[int, int, int, int]:
+    strength, _ = _official_broll_strength(item, story)
     title = str(item.get("title") or "").lower()
     source = str(item.get("channel") or item.get("uploader") or "").lower()
     description = str(item.get("description") or "").lower()
     haystack = f"{title} {source} {description}"
 
-    score = 0
+    score = strength * 50
     priority_terms = {
-        "official trailer": 24,
-        "official teaser": 22,
-        "official clip": 20,
-        "official": 14,
-        "trailer": 12,
-        "teaser": 11,
-        "clip": 10,
-        "interview": 9,
-        "featurette": 8,
-        "behind the scenes": 8,
-        "press conference": 7,
-        "press": 6,
-        "red carpet": 6,
-        "news": 4,
+        "official trailer": 30,
+        "official teaser": 28,
+        "official clip": 26,
+        "official featurette": 24,
+        "behind the scenes": 20,
+        "making of": 18,
+        "first look": 16,
+        "sneak peek": 16,
+        "deleted scene": 14,
+        "red carpet": 12,
+        "world premiere": 12,
+        "press conference": 10,
     }
     for term, weight in priority_terms.items():
         if term in haystack:
@@ -70,40 +200,58 @@ def _video_rank(item: dict, base: str) -> tuple[int, int, int]:
 
     story_terms = [x.lower() for x in re.findall(r"[A-Za-z0-9]+", base) if len(x) >= 4]
     overlap = sum(1 for term in story_terms[:10] if term in haystack)
-    score += overlap * 3
+    score += overlap * 4
 
     height = _max_video_height(item) or 0
     if height >= 2160:
-        score += 30
+        score += 35
     elif height >= 1440:
-        score += 24
+        score += 28
     elif height >= 1080:
-        score += 20
+        score += 22
     elif height >= 720:
-        score += 14
+        score += 15
     elif height:
-        score -= 4
+        score -= 8
 
     views = _as_int(item.get("view_count")) or 0
-    return score, height, views
+    return strength, score, height, views
 
 
-def _youtube_search_query(story: dict) -> str:
+def _quoted_subjects(text: str) -> list[str]:
+    found = re.findall(r"[\"'‘’“”]([^\"'‘’“”]{2,80})[\"'‘’“”]", text or "")
+    return list(dict.fromkeys(x.strip() for x in found if x.strip()))[:3]
+
+
+def _youtube_search_queries(story: dict) -> list[str]:
     base = clean_story_query(story.get("canonical_title", ""))
-    category = str(story.get("category") or "").lower()
-    if category in {"industry", "celebrities"}:
-        return f'{base} video interview news'
-    if category in {"trend", "upcoming_films", "tv_series"}:
-        return f'{base} official trailer clip interview'
-    return f'{base} official video interview'
+    quoted = _quoted_subjects(base)
+    subjects = quoted or [base]
+
+    queries: list[str] = []
+    for subject in subjects[:2]:
+        queries.extend([
+            f'{subject} official trailer',
+            f'{subject} official clip',
+            f'{subject} official featurette behind the scenes',
+        ])
+
+    if story_allows_interview_or_podcast(story):
+        queries.extend([
+            f'{base} full interview',
+            f'{base} podcast interview',
+        ])
+
+    # Preserve order while removing duplicate queries.
+    return list(dict.fromkeys(q.strip() for q in queries if q.strip()))
 
 
 def _search_youtube_videos(story: dict, max_videos: int) -> tuple[list[dict], list[str]]:
     from yt_dlp import YoutubeDL
 
     base = clean_story_query(story.get("canonical_title", ""))
-    query = _youtube_search_query(story)
-    search_count = min(max(max_videos * 2, 12), 30)
+    queries = _youtube_search_queries(story)
+    search_count = min(max(max_videos, 8), 16)
     options = {
         "quiet": True,
         "no_warnings": True,
@@ -113,18 +261,26 @@ def _search_youtube_videos(story: dict, max_videos: int) -> tuple[list[dict], li
         "socket_timeout": 20,
     }
 
-    try:
-        with YoutubeDL(options) as ydl:
-            info = ydl.extract_info(f"ytsearch{search_count}:{query}", download=False)
-    except Exception as exc:
-        return [], [f"YouTube video search failed: {exc}"]
+    raw: list[dict] = []
+    errors: list[str] = []
+    with YoutubeDL(options) as ydl:
+        for query in queries:
+            try:
+                info = ydl.extract_info(f"ytsearch{search_count}:{query}", download=False)
+                for entry in (info or {}).get("entries") or []:
+                    if entry:
+                        item = dict(entry)
+                        item["_search_query"] = query
+                        raw.append(item)
+            except Exception as exc:
+                errors.append(f"YouTube B-roll search failed for '{query}': {exc}")
 
-    raw = [dict(x) for x in (info or {}).get("entries") or [] if x]
-    raw.sort(key=lambda item: _video_rank(item, base), reverse=True)
+    usable = [item for item in raw if video_is_usable_broll(item, story)]
+    usable.sort(key=lambda item: _video_rank(item, story, base), reverse=True)
 
     results: list[dict] = []
     seen: set[str] = set()
-    for item in raw:
+    for item in usable:
         video_id = str(item.get("id") or "").strip()
         page_url = str(item.get("webpage_url") or item.get("original_url") or "").strip()
         if not page_url and video_id:
@@ -134,6 +290,7 @@ def _search_youtube_videos(story: dict, max_videos: int) -> tuple[list[dict], li
         seen.add(page_url)
 
         height = _max_video_height(item)
+        _, source_kind = _official_broll_strength(item, story)
         results.append({
             "id": str(uuid.uuid4()),
             "media_type": "video",
@@ -142,17 +299,17 @@ def _search_youtube_videos(story: dict, max_videos: int) -> tuple[list[dict], li
             "asset_url": page_url,
             "thumbnail_url": _youtube_thumbnail(item),
             "source": str(item.get("channel") or item.get("uploader") or "YouTube").strip(),
-            "provider": "YouTube",
+            "provider": f"YouTube · {source_kind}",
             "duration": str(item.get("duration_string") or item.get("duration") or "").strip(),
             "published_at": str(item.get("upload_date") or item.get("release_date") or "").strip(),
             "width": _as_int(item.get("width")),
             "height": height,
-            "search_query": query,
+            "search_query": str(item.get("_search_query") or ""),
         })
         if len(results) >= max_videos:
             break
 
-    return results, []
+    return results, errors
 
 
 def _image_fallback(base: str, max_images: int) -> tuple[list[dict], list[str]]:
