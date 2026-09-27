@@ -1,4 +1,4 @@
-from app.services.media import _dedupe_quality_first_results, _extract_reference_video_urls, _story_subjects, _youtube_search_queries, story_allows_interview_or_podcast, story_media_key, suggested_clip_range, video_is_usable_broll
+from app.services.media import _contextual_fallback_stories, _dedupe_quality_first_results, _extract_reference_video_urls, _story_subjects, _youtube_search_queries, story_allows_interview_or_podcast, story_media_key, suggested_clip_range, video_is_usable_broll
 
 
 def normal_story():
@@ -482,3 +482,59 @@ def test_narnia_headline_drops_director_credit_clause():
         "articles": [],
     }
     assert _story_subjects(story) == ["Narnia: The Magician’s Nephew"]
+
+
+
+def test_zero_result_upcoming_movie_gets_previous_franchise_fallback():
+    story = {
+        "canonical_title": "Avatar: Fire and Ash reveals a new production update",
+        "summary": "The next Avatar movie has no trailer yet.",
+        "category": "upcoming_films",
+        "articles": [],
+    }
+    variants = _contextual_fallback_stories(story)
+    archive = [(item, kind) for item, kind in variants if kind == "previous installment/franchise"]
+    assert archive
+    fallback_story, kind = archive[0]
+    assert fallback_story["_media_subject_override"] == "Avatar"
+    assert fallback_story["_allow_archive_media"] is True
+    queries = _youtube_search_queries(fallback_story)
+    assert any("avatar official trailer" in q.lower() for q in queries)
+
+
+def test_actor_or_director_quote_context_gets_person_broll_fallback():
+    story = {
+        "canonical_title": "Avatar: Fire and Ash production update",
+        "summary": "Director James Cameron discusses the film.",
+        "_narration_text": 'James Cameron said “we wanted the ocean to feel different this time.”',
+        "category": "upcoming_films",
+        "articles": [],
+    }
+    variants = _contextual_fallback_stories(story)
+    people = [(item, kind) for item, kind in variants if kind == "cast/director"]
+    assert people
+    fallback_story, kind = people[0]
+    assert fallback_story["_media_subject_override"] == "James Cameron"
+    assert fallback_story["_allow_spoken_broll"] is True
+    queries = _youtube_search_queries(fallback_story)
+    assert any("james cameron interview" in q.lower() for q in queries)
+
+
+def test_contextual_archive_broll_allows_older_official_franchise_video():
+    fallback_story = {
+        "canonical_title": "Avatar: Fire and Ash",
+        "summary": "No current footage is available.",
+        "category": "upcoming_films",
+        "_media_subject_override": "Avatar",
+        "_allow_archive_media": True,
+        "_contextual_kind": "previous installment/franchise",
+    }
+    old_official = {
+        "title": "Avatar | Official Trailer",
+        "channel": "20th Century Studios",
+        "channel_is_verified": True,
+        "height": 2160,
+        "upload_date": "20200101",
+        "_search_query": "Avatar official trailer 4K",
+    }
+    assert video_is_usable_broll(old_official, fallback_story)
