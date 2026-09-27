@@ -50,6 +50,7 @@ def _resolve_input_signature(voice_rows: list[dict], candidates: list[dict]) -> 
             "selected_take": int(row.get("selected_take") or 0),
             "approval_status": row.get("approval_status") or "",
             "audio_status": row.get("audio_status") or "",
+            "story_id": row.get("story_id") or "",
         }
         for row in sorted(voice_rows, key=lambda x: int(x.get("segment_index") or 0))
     ]
@@ -65,6 +66,160 @@ def _resolve_input_signature(voice_rows: list[dict], candidates: list[dict]) -> 
     ]
     payload = json.dumps({"voice": voice, "media": media}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+
+def _story_url_set(story: dict) -> set[str]:
+    return {
+        str(article.get("url") or "").strip().lower()
+        for article in story.get("articles") or []
+        if str(article.get("url") or "").strip()
+    }
+
+
+def _resolve_story_match_score(historical: dict, current: dict) -> int:
+    """Score whether an old narration story is the same current Included story."""
+    if not historical or not current:
+        return 0
+    if str(historical.get("id") or "") == str(current.get("id") or ""):
+        return 10_000
+
+    score = 0
+    old_title = " ".join(str(historical.get("canonical_title") or "").casefold().split())
+    new_title = " ".join(str(current.get("canonical_title") or "").casefold().split())
+    if old_title and old_title == new_title:
+        score += 500
+
+    try:
+        old_key = story_media_key(historical)
+        new_key = story_media_key(current)
+    except Exception:
+        old_key = new_key = ""
+    if old_key and old_key == new_key:
+        score += 350
+
+    overlap = _story_url_set(historical) & _story_url_set(current)
+    if overlap:
+        score += 1_000 + len(overlap) * 50
+
+    if historical.get("category") and historical.get("category") == current.get("category"):
+        score += 10
+    return score
+
+
+def _reconcile_voice_story_rows(
+    voice_rows: list[dict],
+    current_stories: list[dict],
+    historical_stories: list[dict],
+) -> tuple[list[dict], dict]:
+    """Map stale narration story IDs to the current Included-story IDs.
+
+    Research can be regenerated after voice has already been approved. Voice
+    audio remains valid, but its STORY markers can then point at story rows from
+    an older research run. Resolve needs the current story IDs because selected
+    media is stored against those rows.
+    """
+    current_by_id = {
+        str(story.get("id") or ""): story
+        for story in current_stories
+        if str(story.get("id") or "")
+    }
+    historical_by_id = {
+        str(story.get("id") or ""): story
+        for story in historical_stories
+        if str(story.get("id") or "")
+    }
+
+    mapping: dict[str, str] = {}
+    unresolved: list[str] = []
+    referenced_ids = list(dict.fromkeys(
+        str(row.get("story_id") or "")
+        for row in voice_rows
+        if str(row.get("story_id") or "")
+    ))
+
+    for story_id in referenced_ids:
+        if story_id in current_by_id:
+            mapping[story_id] = story_id
+            continue
+        historical = historical_by_id.get(story_id)
+        if not historical:
+            unresolved.append(story_id)
+            continue
+
+        scored = sorted(
+            (
+                (_resolve_story_match_score(historical, current), current_id)
+                for current_id, current in current_by_id.items()
+            ),
+            reverse=True,
+        )
+        if not scored or scored[0][0] < 350:
+            unresolved.append(story_id)
+            continue
+
+        top_score, top_id = scored[0]
+        second_score = scored[1][0] if len(scored) > 1 else -1
+        # Exact-title/article matches are safe even if duplicate topic keys exist.
+        # A bare topic-key match must have a unique best current story.
+        if top_score >= 500 or top_score > second_score:
+            mapping[story_id] = top_id
+        else:
+            unresolved.append(story_id)
+
+    resolved_rows: list[dict] = []
+    remapped_count = 0
+    for row in voice_rows:
+        item = dict(row)
+        original = str(item.get("story_id") or "")
+        resolved = mapping.get(original, original)
+        if original and resolved != original:
+            item["original_story_id"] = original
+            item["story_id"] = resolved
+            remapped_count += 1
+        resolved_rows.append(item)
+
+    return resolved_rows, {
+        "story_id_map": mapping,
+        "remapped_segment_count": remapped_count,
+        "unresolved_story_ids": unresolved,
+    }
+
+
+def _load_historical_voice_stories(conn, project_id: str, voice_rows: list[dict]) -> list[dict]:
+    ids = list(dict.fromkeys(
+        str(row.get("story_id") or "")
+        for row in voice_rows
+        if str(row.get("story_id") or "")
+    ))
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        f"SELECT * FROM stories WHERE project_id=? AND id IN ({placeholders})",
+        [project_id, *ids],
+    ).fetchall()
+    output: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        try:
+            article_ids = json.loads(item.get("article_ids_json") or "[]")
+        except Exception:
+            article_ids = []
+        articles = []
+        if article_ids:
+            article_placeholders = ",".join("?" for _ in article_ids)
+            articles = [
+                dict(article) for article in conn.execute(
+                    f"""SELECT title,url,source,published_at,snippet
+                        FROM research_articles
+                        WHERE id IN ({article_placeholders})""",
+                    article_ids,
+                ).fetchall()
+            ]
+        item["articles"] = articles
+        output.append(item)
+    return output
 
 
 def _resolve_prerequisites(voice_rows: list[dict], candidates: list[dict]) -> dict:
