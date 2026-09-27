@@ -1680,9 +1680,17 @@ def get_resolve_plan(project_id: str):
                ORDER BY story_id,media_type,created_at""",
             (project_id,),
         ).fetchall()]
+        current_stories = selected_story_packet(conn, project_id)
+        historical_stories = _load_historical_voice_stories(conn, project_id, voice_rows)
+        resolved_voice_rows, reconciliation = _reconcile_voice_story_rows(
+            voice_rows,
+            current_stories,
+            historical_stories,
+        )
 
-    prerequisites = _resolve_prerequisites(voice_rows, candidates)
-    current_signature = _resolve_input_signature(voice_rows, candidates)
+    prerequisites = _resolve_prerequisites(resolved_voice_rows, candidates)
+    prerequisites["story_id_reconciliation"] = reconciliation
+    current_signature = _resolve_input_signature(resolved_voice_rows, candidates)
     root = Path(project["root_path"])
     plan_path = root / "timing" / "resolve_plan.json"
     manifest_path = root / "resolve" / "package_manifest.json"
@@ -1765,8 +1773,16 @@ def generate_resolve_plan(project_id: str):
                ORDER BY story_id,media_type,created_at""",
             (project_id,),
         ).fetchall()]
+        current_stories = selected_story_packet(conn, project_id)
+        historical_stories = _load_historical_voice_stories(conn, project_id, voice_rows)
+        resolved_voice_rows, reconciliation = _reconcile_voice_story_rows(
+            voice_rows,
+            current_stories,
+            historical_stories,
+        )
 
-    prerequisites = _resolve_prerequisites(voice_rows, candidates)
+    prerequisites = _resolve_prerequisites(resolved_voice_rows, candidates)
+    prerequisites["story_id_reconciliation"] = reconciliation
     if not voice_rows:
         raise HTTPException(400, "Generate the narrator voice first.")
     if prerequisites["voice_pending"]:
@@ -1794,12 +1810,13 @@ def generate_resolve_plan(project_id: str):
         )
 
     try:
-        plan = build_edit_plan(project, voice_rows, candidates, fps=30)
+        plan = build_edit_plan(project, resolved_voice_rows, candidates, fps=30)
         if not plan.get("visual_clips"):
             raise RuntimeError(
                 "No visual clips were planned. Return to Media Sources and Downloads before generating Resolve."
             )
-        plan["input_signature"] = _resolve_input_signature(voice_rows, candidates)
+        plan["input_signature"] = _resolve_input_signature(resolved_voice_rows, candidates)
+        plan["story_id_reconciliation"] = reconciliation
         files = write_resolve_package(Path(project["root_path"]), plan)
     except Exception as exc:
         raise HTTPException(400, f"Could not build Resolve package: {exc}") from exc
