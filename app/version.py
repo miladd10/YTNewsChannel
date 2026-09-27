@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.16"
+APP_VERSION = "0.3.17"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Narration-Aware Multi-B-roll Coverage"
+APP_RELEASE_NAME = "Reference-First B-roll Search"
