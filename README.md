@@ -7,8 +7,10 @@ Local research and narration pipeline for YouTube news channels. The first MVP i
 1. **Research** — searches Google News RSS across cinema query groups for the configured week, stores the raw findings, deduplicates overlapping coverage into unique stories, and optionally asks GPT/Claude to rank the stories.
 2. **Pick News** — human editorial gate with Include / Maybe / Skip decisions.
 3. **Narration** — generates a narration-led weekly cinema-news script from Included stories only.
-4. **Media Sources** — searches real image and video results for every Included story, shows previews and original links, and lets you select the assets you want.
-5. **Downloads** — downloads only the selected media into the portable project folder. Downloaded candidates keep an **unverified rights** status so licensing/permission can be checked before publishing.
+4. **Voice** — connects to ElevenLabs, uses one narrator voice for the complete episode, prepares continuity-aware Eleven v3 performance text without changing spoken words, generates narration audio, measures real MP3 duration, and forced-aligns words for exact timing.
+5. **Media Sources** — searches curated official/original B-roll after voice timing is ready, shows the real narration duration for each news item, and falls back to a small set of relevant images only when suitable HD video is unavailable.
+6. **Downloads** — downloads selected media at the highest available source quality. Shared source videos are downloaded once and can use different source ranges for different stories.
+7. **Resolve Plan** — treats the ElevenLabs voice track as the master timeline, assigns downloaded videos/stills to exact narration windows, keeps video playback at 1.0× with source audio muted, calculates 16:9 crop guidance, and writes a DaVinci Resolve 21 Free compatible OTIO/CSV package for UHD 3840×2160.
 
 No image generation is used. Media discovery uses web image/video search, and video downloading is handled locally for selected public media URLs.
 
@@ -22,6 +24,8 @@ The app can call the official local CLIs:
 Use **AI & Provider Settings** to inspect sign-in state, open the provider login flow, test the connection, and assign providers to Research, Narration, and Media Planning.
 
 Optional OpenAI / Anthropic API keys are also supported and are stored using the operating-system credential store.
+
+The **Voice** step accepts an ElevenLabs API key in the same OS credential store and lists the voices available on that ElevenLabs account, including compatible saved/cloned voices.
 
 ## Run
 
@@ -55,10 +59,20 @@ Cinema Weekly — Sep 21–27/
 │   ├── raw/
 │   └── stories/
 ├── narration/
+├── audio/
+│   └── narration/
+├── timing/
+│   └── resolve_plan.json
 ├── media-plan/
 ├── media/
 │   ├── candidates/
 │   └── selected/
+├── resolve/
+│   ├── news_timeline.otio
+│   ├── voice_timing.csv
+│   ├── media_timing.csv
+│   ├── package_manifest.json
+│   └── README.md
 └── exports/
 ```
 
