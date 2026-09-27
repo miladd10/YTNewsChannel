@@ -1141,6 +1141,18 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
             "SELECT COUNT(*) c FROM voice_segments WHERE project_id=? AND audio_status='aligned' AND approval_status='approved'",
             (project_id,),
         ).fetchone()["c"]
+        narration_rows = conn.execute(
+            """SELECT story_id,source_text
+               FROM voice_segments
+               WHERE project_id=? AND story_id<>''
+               ORDER BY segment_index""",
+            (project_id,),
+        ).fetchall()
+    narration_by_story: dict[str, list[str]] = {}
+    for row in narration_rows:
+        narration_by_story.setdefault(row["story_id"], []).append(str(row["source_text"] or ""))
+    for story in all_stories:
+        story["_narration_text"] = " ".join(narration_by_story.get(story["id"], [])).strip()
     if not voice_total or voice_aligned != voice_total:
         raise HTTPException(
             400,
