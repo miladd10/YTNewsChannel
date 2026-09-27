@@ -82,3 +82,12 @@
 
 .story-broll-btn{min-width:128px;white-space:nowrap}
 .media-story-actions{align-items:center}
+
+#searchMediaBtn.processing,
+#regenerateAllMediaBtn.processing,
+.story-broll-btn.processing{position:relative;padding-left:30px;opacity:1}
+#searchMediaBtn.processing::before,
+#regenerateAllMediaBtn.processing::before,
+.story-broll-btn.processing::before{content:'';position:absolute;left:10px;top:50%;width:10px;height:10px;margin-top:-6px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:mediaSearchSpin .7s linear infinite}
+.media-search-active{box-shadow:0 0 0 1px rgba(157,143,255,.28),0 8px 18px rgba(0,0,0,.16)}
+@keyframes mediaSearchSpin{to{transform:rotate(360deg)}}
