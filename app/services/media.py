@@ -167,8 +167,12 @@ def _query_subject(query: str) -> str:
     lowered = value.lower()
     for suffix in suffixes:
         if lowered.endswith(suffix):
-            return value[: -len(suffix)].strip()
-    return value
+            value = value[: -len(suffix)].strip()
+            break
+    # Search queries may include the current year to steer YouTube toward the
+    # latest installment. The year is validated separately from upload/release
+    # metadata and is not required to appear in the video title itself.
+    return re.sub(r"\s+20\d{2}$", "", value).strip()
 
 
 def _distinctive_subject_words(value: str) -> list[str]:
