@@ -28,20 +28,97 @@ def _video_thumbnail(item: dict) -> str:
     return str(item.get("thumbnail") or "")
 
 
-def search_story_media(story: dict, max_images: int = 10, max_videos: int = 8) -> tuple[list[dict], list[str]]:
+def _video_rank(item: dict, base: str) -> tuple[int, int]:
+    title = str(item.get("title") or "").lower()
+    source = str(item.get("uploader") or item.get("publisher") or "").lower()
+    url = str(item.get("content") or item.get("url") or item.get("href") or "").lower()
+    haystack = f"{title} {source} {url}"
+
+    score = 0
+    priority_terms = {
+        "official": 10,
+        "official trailer": 14,
+        "trailer": 9,
+        "teaser": 8,
+        "clip": 7,
+        "interview": 7,
+        "featurette": 6,
+        "behind the scenes": 6,
+        "press": 5,
+        "red carpet": 5,
+    }
+    for term, weight in priority_terms.items():
+        if term in haystack:
+            score += weight
+
+    if "youtube.com" in url or "youtu.be" in url:
+        score += 4
+
+    story_terms = [x.lower() for x in re.findall(r"[A-Za-z0-9]+", base) if len(x) >= 4]
+    overlap = sum(1 for term in story_terms[:8] if term in haystack)
+    score += overlap * 2
+
+    # Prefer useful full videos over tiny snippets when search metadata exposes duration.
+    duration = str(item.get("duration") or "")
+    return score, len(duration)
+
+
+def search_story_media(story: dict, max_images: int = 3, max_videos: int = 12) -> tuple[list[dict], list[str]]:
     from ddgs import DDGS
 
     base = clean_story_query(story.get("canonical_title", ""))
     if not base:
         return [], ["Story title is empty."]
 
-    image_query = f'{base} movie official still poster'
-    video_query = f'{base} movie official trailer interview'
+    image_query = f'{base} official still poster press photo'
+    video_queries = [
+        f'{base} official trailer clip interview',
+        f'{base} official video featurette press',
+        f'{base} related video movie',
+    ]
     results: list[dict] = []
     errors: list[str] = []
 
+    # Video is the primary source type for weekly-news episodes.
+    raw_videos: list[dict] = []
+    per_query_limit = max(max_videos, 8)
+    for video_query in video_queries:
+        try:
+            for item in DDGS().videos(video_query, max_results=per_query_limit) or []:
+                item = dict(item)
+                item["_search_query"] = video_query
+                raw_videos.append(item)
+        except Exception as exc:
+            errors.append(f"Video search failed for '{video_query}': {exc}")
+
+    raw_videos.sort(key=lambda item: _video_rank(item, base), reverse=True)
+    seen_video_urls: set[str] = set()
+    for item in raw_videos:
+        page_url = str(item.get("content") or item.get("url") or item.get("href") or "").strip()
+        if not page_url or page_url in seen_video_urls:
+            continue
+        seen_video_urls.add(page_url)
+        results.append({
+            "id": str(uuid.uuid4()),
+            "media_type": "video",
+            "title": str(item.get("title") or base).strip(),
+            "page_url": page_url,
+            "asset_url": page_url,
+            "thumbnail_url": _video_thumbnail(item),
+            "source": str(item.get("uploader") or item.get("publisher") or "").strip(),
+            "provider": str(item.get("provider") or "DDGS").strip(),
+            "duration": str(item.get("duration") or "").strip(),
+            "published_at": str(item.get("published") or "").strip(),
+            "width": None,
+            "height": None,
+            "search_query": str(item.get("_search_query") or video_queries[0]),
+        })
+        if len([x for x in results if x["media_type"] == "video"]) >= max_videos:
+            break
+
+    # Images are supporting material only, so keep this list deliberately short.
     try:
-        for item in DDGS().images(image_query, max_results=max_images) or []:
+        for item in DDGS().images(image_query, max_results=max(max_images * 2, 6)) or []:
             page_url = str(item.get("url") or "").strip()
             asset_url = str(item.get("image") or "").strip()
             if not (page_url or asset_url):
@@ -61,31 +138,10 @@ def search_story_media(story: dict, max_images: int = 10, max_videos: int = 8) -
                 "height": _as_int(item.get("height")),
                 "search_query": image_query,
             })
+            if len([x for x in results if x["media_type"] == "image"]) >= max_images:
+                break
     except Exception as exc:
         errors.append(f"Image search failed: {exc}")
-
-    try:
-        for item in DDGS().videos(video_query, max_results=max_videos) or []:
-            page_url = str(item.get("content") or item.get("url") or item.get("href") or "").strip()
-            if not page_url:
-                continue
-            results.append({
-                "id": str(uuid.uuid4()),
-                "media_type": "video",
-                "title": str(item.get("title") or base).strip(),
-                "page_url": page_url,
-                "asset_url": page_url,
-                "thumbnail_url": _video_thumbnail(item),
-                "source": str(item.get("uploader") or item.get("publisher") or "").strip(),
-                "provider": str(item.get("provider") or "DDGS").strip(),
-                "duration": str(item.get("duration") or "").strip(),
-                "published_at": str(item.get("published") or "").strip(),
-                "width": None,
-                "height": None,
-                "search_query": video_query,
-            })
-    except Exception as exc:
-        errors.append(f"Video search failed: {exc}")
 
     seen: set[tuple[str, str]] = set()
     deduped: list[dict] = []
