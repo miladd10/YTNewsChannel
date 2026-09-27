@@ -15,10 +15,12 @@ from .db import BASE_DIR, PIPELINE, db, init_db
 from .services.ai import generate_text
 from .services.local_cli import all_statuses, launch_login
 from .services.media import download_candidate, search_story_media, story_media_key, suggested_clip_range
+from .services.elevenlabs_client import ElevenLabsError, MODEL_ID as ELEVEN_MODEL_ID, forced_alignment, list_voices, mp3_duration_seconds, text_to_speech
+from .services.voice_pipeline import extract_narration_segments, prepare_performance
 from .services.project_store import choose_folder, create_project_folder, reveal_in_file_manager, save_manifest
 from .services.prompts import CINEMA_WEEKLY_SECTIONS, MEDIA_PLAN_SYSTEM, NARRATION_SYSTEM
 from .services.research import ai_rank_stories, cluster_articles, fetch_google_news
-from .services.secrets import delete_api_key, masked_status, save_ai_settings, set_api_key
+from .services.secrets import delete_api_key, get_api_key, masked_status, save_ai_settings, set_api_key
 from .version import APP_RELEASE_NAME, APP_VERSION
 
 STATIC_DIR = BASE_DIR / "static"
