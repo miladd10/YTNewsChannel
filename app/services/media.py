@@ -578,6 +578,32 @@ def _matches_actual_story_subject(item: dict, story: dict) -> bool:
     source = str(item.get("channel") or item.get("uploader") or "")
     query_subject = _query_subject(str(item.get("_search_query") or ""))
 
+    if not story.get("_allow_archive_media"):
+        # A generic franchise name is not enough to call a different installment
+        # "current footage". If an official video adds a colon subtitle whose
+        # meaningful words are absent from the story/narration, treat it as
+        # archive/franchise material so the contextual fallback can label it
+        # honestly instead. Example: a Rings of Power teaser for a new LOTR movie.
+        primary_subjects = _story_subjects(story)
+        primary_subject = primary_subjects[0] if primary_subjects else ""
+        lower_title = title.lower()
+        subject_lower = primary_subject.lower()
+        if primary_subject and ":" in title and subject_lower in lower_title:
+            subtitle = title.split(":", 1)[1]
+            subtitle = re.split(
+                r"\b(?:official|trailer|teaser|clip|featurette|first look)\b",
+                subtitle,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0]
+            subtitle_words = [
+                word for word in _distinctive_subject_words(subtitle)
+                if word not in _distinctive_subject_words(primary_subject)
+            ]
+            story_words = set(_normalized_words(_story_context_text(story)))
+            if subtitle_words and not all(word in story_words for word in subtitle_words[:3]):
+                return False
+
     if _is_corporate_story(story):
         entities = _known_entities(_story_text(story))
         if not entities:
@@ -1164,6 +1190,73 @@ def _extract_reference_video_urls(html_text: str, page_url: str) -> list[tuple[s
         seen.add(normalized)
         out.append((normalized, primary))
     return out[:16]
+
+
+
+def _extract_reference_image_urls(html_text: str, page_url: str) -> list[str]:
+    values: list[str] = []
+    patterns = (
+        r'<meta[^>]+(?:property|name)=["\'](?:og:image|og:image:secure_url|twitter:image|twitter:image:src)["\'][^>]+content=["\']([^"\']+)',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\'](?:og:image|og:image:secure_url|twitter:image|twitter:image:src)["\']',
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, html_text or "", flags=re.IGNORECASE):
+            value = html_lib.unescape(match.group(1).strip()).replace("\\/", "/")
+            if value:
+                values.append(urljoin(page_url, value))
+    seen: set[str] = set()
+    output: list[str] = []
+    for value in values:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or value in seen:
+            continue
+        seen.add(value)
+        output.append(value)
+    return output[:4]
+
+
+def _reference_page_images(
+    story: dict,
+    page_cache: dict[str, tuple[str, str]] | None,
+    max_images: int,
+) -> list[dict]:
+    if not page_cache or max_images <= 0:
+        return []
+    results: list[dict] = []
+    seen: set[str] = set()
+    base = clean_story_query(story.get("canonical_title", ""))
+    article_by_url = {
+        str(article.get("url") or ""): article
+        for article in story.get("articles") or []
+        if str(article.get("url") or "")
+    }
+    for article_url, cached in page_cache.items():
+        resolved_url, html_text = cached
+        if not resolved_url or not html_text:
+            continue
+        article = article_by_url.get(article_url) or {}
+        for image_url in _extract_reference_image_urls(html_text, resolved_url):
+            if image_url in seen:
+                continue
+            seen.add(image_url)
+            results.append({
+                "id": str(uuid.uuid4()),
+                "media_type": "image",
+                "title": str(article.get("title") or base).strip(),
+                "page_url": resolved_url,
+                "asset_url": image_url,
+                "thumbnail_url": image_url,
+                "source": str(article.get("source") or (urlparse(resolved_url).hostname or "Reference article")).strip(),
+                "provider": "Reference article image",
+                "duration": "",
+                "published_at": str(article.get("published_at") or ""),
+                "width": None,
+                "height": None,
+                "search_query": "Reference article hero image",
+            })
+            if len(results) >= max_images:
+                return results
+    return results
 
 
 PUBLISHER_DOMAIN_ALIASES = {
@@ -2034,6 +2127,20 @@ def search_story_media(
 
     images: list[dict] = []
     seen_image_urls: set[str] = set()
+
+    # Publisher/article hero images are more contextually trustworthy than a
+    # random image-search result. Use them first for uncovered visual beats.
+    reference_images = _reference_page_images(story, reference_page_cache, max_images)
+    primary_label = title_subjects[0] if title_subjects else base
+    for item in _tag_coverage(reference_images, primary_label, "supporting image"):
+        key = str(item.get("asset_url") or item.get("page_url") or "")
+        if not key or key in seen_image_urls:
+            continue
+        seen_image_urls.add(key)
+        images.append(item)
+        if len(images) >= max_images:
+            break
+
     for label, kind in image_targets:
         if len(images) >= max_images:
             break
@@ -2150,25 +2257,71 @@ def download_video(url: str, target_stem: Path) -> Path:
 
     target_stem.parent.mkdir(parents=True, exist_ok=True)
     output_template = str(target_stem.parent / f"{target_stem.name}.%(ext)s")
-    options = {
+    before = set(target_stem.parent.glob(f"{target_stem.name}.*"))
+
+    common = {
         "outtmpl": output_template,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "restrictfilenames": True,
-        "format": "bestvideo+bestaudio/best",
         "merge_output_format": "mp4",
+        "retries": 3,
+        "fragment_retries": 3,
+        "socket_timeout": 20,
+        "concurrent_fragment_downloads": 1,
     }
-    before = set(target_stem.parent.glob(f"{target_stem.name}.*"))
-    with YoutubeDL(options) as ydl:
-        info = ydl.extract_info(url, download=True)
-        prepared = Path(ydl.prepare_filename(info))
-    if prepared.exists():
-        return prepared
-    created = [p for p in target_stem.parent.glob(f"{target_stem.name}.*") if p not in before and p.is_file()]
-    if created:
-        return max(created, key=lambda p: p.stat().st_mtime)
-    raise RuntimeError("Video downloader completed but no media file was created.")
+    strategies = [
+        {
+            **common,
+            "format": "bestvideo*+bestaudio/best",
+        },
+        {
+            **common,
+            "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android_vr", "web_safari", "web"],
+                }
+            },
+        },
+        {
+            **common,
+            "format": "best[height<=1080]/best",
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["web_safari", "android"],
+                }
+            },
+        },
+    ]
+
+    errors: list[str] = []
+    for attempt, options in enumerate(strategies, start=1):
+        # Remove partial files from a failed previous strategy, but never remove
+        # anything that existed before this download started.
+        for partial in target_stem.parent.glob(f"{target_stem.name}.*"):
+            if partial not in before and partial.suffix.lower() in {".part", ".ytdl"}:
+                partial.unlink(missing_ok=True)
+        try:
+            with YoutubeDL(options) as ydl:
+                info = ydl.extract_info(url, download=True)
+                prepared = Path(ydl.prepare_filename(info))
+            if prepared.exists():
+                return prepared
+            created = [
+                p for p in target_stem.parent.glob(f"{target_stem.name}.*")
+                if p not in before and p.is_file() and p.suffix.lower() not in {".part", ".ytdl"}
+            ]
+            if created:
+                return max(created, key=lambda p: p.stat().st_mtime)
+        except Exception as exc:
+            errors.append(f"attempt {attempt}: {exc}")
+
+    raise RuntimeError(
+        "Video download failed after fresh-format/player retries: "
+        + " | ".join(errors[-3:])
+    )
 
 
 def download_candidate(candidate: dict, project_root: Path, story_title: str) -> Path:
