@@ -201,6 +201,8 @@ def init_db() -> None:
                 clip_end_sec INTEGER,
                 target_duration_sec REAL,
                 shared_source INTEGER NOT NULL DEFAULT 0,
+                coverage_label TEXT NOT NULL DEFAULT '',
+                coverage_kind TEXT NOT NULL DEFAULT '',
                 selected INTEGER NOT NULL DEFAULT 0,
                 download_status TEXT NOT NULL DEFAULT 'not_downloaded',
                 stored_path TEXT NOT NULL DEFAULT '',
@@ -264,3 +266,7 @@ def init_db() -> None:
             conn.execute("ALTER TABLE media_candidates ADD COLUMN target_duration_sec REAL")
         if not _column_exists(conn, "media_candidates", "shared_source"):
             conn.execute("ALTER TABLE media_candidates ADD COLUMN shared_source INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists(conn, "media_candidates", "coverage_label"):
+            conn.execute("ALTER TABLE media_candidates ADD COLUMN coverage_label TEXT NOT NULL DEFAULT ''")
+        if not _column_exists(conn, "media_candidates", "coverage_kind"):
+            conn.execute("ALTER TABLE media_candidates ADD COLUMN coverage_kind TEXT NOT NULL DEFAULT ''")
