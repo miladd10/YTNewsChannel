@@ -1,3 +1,3 @@
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Included Story Media Picker"
+APP_RELEASE_NAME = "Video-first Media Picker"
