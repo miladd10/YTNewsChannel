@@ -16,107 +16,150 @@ def clean_story_query(title: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-def _video_thumbnail(item: dict) -> str:
-    images = item.get("images")
-    if isinstance(images, dict):
-        return str(images.get("large") or images.get("medium") or images.get("small") or "")
-    if isinstance(images, list) and images:
-        first = images[0]
-        if isinstance(first, dict):
-            return str(first.get("url") or first.get("image") or "")
-        return str(first)
-    return str(item.get("thumbnail") or "")
+def _youtube_thumbnail(item: dict) -> str:
+    thumbnail = str(item.get("thumbnail") or "").strip()
+    if thumbnail:
+        return thumbnail
+    thumbs = item.get("thumbnails") or []
+    if isinstance(thumbs, list):
+        for entry in reversed(thumbs):
+            if isinstance(entry, dict) and entry.get("url"):
+                return str(entry["url"])
+    return ""
 
 
-def _video_rank(item: dict, base: str) -> tuple[int, int]:
+def _max_video_height(item: dict) -> int | None:
+    heights: list[int] = []
+    direct = _as_int(item.get("height"))
+    if direct:
+        heights.append(direct)
+    for fmt in item.get("formats") or []:
+        if isinstance(fmt, dict):
+            height = _as_int(fmt.get("height"))
+            if height:
+                heights.append(height)
+    return max(heights) if heights else None
+
+
+def _video_rank(item: dict, base: str) -> tuple[int, int, int]:
     title = str(item.get("title") or "").lower()
-    source = str(item.get("uploader") or item.get("publisher") or "").lower()
-    url = str(item.get("content") or item.get("url") or item.get("href") or "").lower()
-    haystack = f"{title} {source} {url}"
+    source = str(item.get("channel") or item.get("uploader") or "").lower()
+    description = str(item.get("description") or "").lower()
+    haystack = f"{title} {source} {description}"
 
     score = 0
     priority_terms = {
-        "official": 10,
-        "official trailer": 14,
-        "trailer": 9,
-        "teaser": 8,
-        "clip": 7,
-        "interview": 7,
-        "featurette": 6,
-        "behind the scenes": 6,
-        "press": 5,
-        "red carpet": 5,
+        "official trailer": 24,
+        "official teaser": 22,
+        "official clip": 20,
+        "official": 14,
+        "trailer": 12,
+        "teaser": 11,
+        "clip": 10,
+        "interview": 9,
+        "featurette": 8,
+        "behind the scenes": 8,
+        "press conference": 7,
+        "press": 6,
+        "red carpet": 6,
+        "news": 4,
     }
     for term, weight in priority_terms.items():
         if term in haystack:
             score += weight
 
-    if "youtube.com" in url or "youtu.be" in url:
-        score += 4
-
     story_terms = [x.lower() for x in re.findall(r"[A-Za-z0-9]+", base) if len(x) >= 4]
-    overlap = sum(1 for term in story_terms[:8] if term in haystack)
-    score += overlap * 2
+    overlap = sum(1 for term in story_terms[:10] if term in haystack)
+    score += overlap * 3
 
-    # Prefer useful full videos over tiny snippets when search metadata exposes duration.
-    duration = str(item.get("duration") or "")
-    return score, len(duration)
+    height = _max_video_height(item) or 0
+    if height >= 2160:
+        score += 30
+    elif height >= 1440:
+        score += 24
+    elif height >= 1080:
+        score += 20
+    elif height >= 720:
+        score += 14
+    elif height:
+        score -= 4
+
+    views = _as_int(item.get("view_count")) or 0
+    return score, height, views
 
 
-def search_story_media(story: dict, max_images: int = 3, max_videos: int = 12) -> tuple[list[dict], list[str]]:
-    from ddgs import DDGS
+def _youtube_search_query(story: dict) -> str:
+    base = clean_story_query(story.get("canonical_title", ""))
+    category = str(story.get("category") or "").lower()
+    if category in {"industry", "celebrities"}:
+        return f'{base} video interview news'
+    if category in {"trend", "upcoming_films", "tv_series"}:
+        return f'{base} official trailer clip interview'
+    return f'{base} official video interview'
+
+
+def _search_youtube_videos(story: dict, max_videos: int) -> tuple[list[dict], list[str]]:
+    from yt_dlp import YoutubeDL
 
     base = clean_story_query(story.get("canonical_title", ""))
-    if not base:
-        return [], ["Story title is empty."]
+    query = _youtube_search_query(story)
+    search_count = min(max(max_videos * 2, 12), 30)
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "extract_flat": False,
+        "socket_timeout": 20,
+    }
 
-    image_query = f'{base} official still poster press photo'
-    video_queries = [
-        f'{base} official trailer clip interview',
-        f'{base} official video featurette press',
-        f'{base} related video movie',
-    ]
+    try:
+        with YoutubeDL(options) as ydl:
+            info = ydl.extract_info(f"ytsearch{search_count}:{query}", download=False)
+    except Exception as exc:
+        return [], [f"YouTube video search failed: {exc}"]
+
+    raw = [dict(x) for x in (info or {}).get("entries") or [] if x]
+    raw.sort(key=lambda item: _video_rank(item, base), reverse=True)
+
     results: list[dict] = []
-    errors: list[str] = []
-
-    # Video is the primary source type for weekly-news episodes.
-    raw_videos: list[dict] = []
-    per_query_limit = max(max_videos, 8)
-    for video_query in video_queries:
-        try:
-            for item in DDGS().videos(video_query, max_results=per_query_limit) or []:
-                item = dict(item)
-                item["_search_query"] = video_query
-                raw_videos.append(item)
-        except Exception as exc:
-            errors.append(f"Video search failed for '{video_query}': {exc}")
-
-    raw_videos.sort(key=lambda item: _video_rank(item, base), reverse=True)
-    seen_video_urls: set[str] = set()
-    for item in raw_videos:
-        page_url = str(item.get("content") or item.get("url") or item.get("href") or "").strip()
-        if not page_url or page_url in seen_video_urls:
+    seen: set[str] = set()
+    for item in raw:
+        video_id = str(item.get("id") or "").strip()
+        page_url = str(item.get("webpage_url") or item.get("original_url") or "").strip()
+        if not page_url and video_id:
+            page_url = f"https://www.youtube.com/watch?v={video_id}"
+        if not page_url or page_url in seen:
             continue
-        seen_video_urls.add(page_url)
+        seen.add(page_url)
+
+        height = _max_video_height(item)
         results.append({
             "id": str(uuid.uuid4()),
             "media_type": "video",
             "title": str(item.get("title") or base).strip(),
             "page_url": page_url,
             "asset_url": page_url,
-            "thumbnail_url": _video_thumbnail(item),
-            "source": str(item.get("uploader") or item.get("publisher") or "").strip(),
-            "provider": str(item.get("provider") or "DDGS").strip(),
-            "duration": str(item.get("duration") or "").strip(),
-            "published_at": str(item.get("published") or "").strip(),
-            "width": None,
-            "height": None,
-            "search_query": str(item.get("_search_query") or video_queries[0]),
+            "thumbnail_url": _youtube_thumbnail(item),
+            "source": str(item.get("channel") or item.get("uploader") or "YouTube").strip(),
+            "provider": "YouTube",
+            "duration": str(item.get("duration_string") or item.get("duration") or "").strip(),
+            "published_at": str(item.get("upload_date") or item.get("release_date") or "").strip(),
+            "width": _as_int(item.get("width")),
+            "height": height,
+            "search_query": query,
         })
-        if len([x for x in results if x["media_type"] == "video"]) >= max_videos:
+        if len(results) >= max_videos:
             break
 
-    # Images are supporting material only, so keep this list deliberately short.
+    return results, []
+
+
+def _image_fallback(base: str, max_images: int) -> tuple[list[dict], list[str]]:
+    from ddgs import DDGS
+
+    image_query = f'{base} official still poster press photo'
+    results: list[dict] = []
     try:
         for item in DDGS().images(image_query, max_results=max(max_images * 2, 6)) or []:
             page_url = str(item.get("url") or "").strip()
@@ -138,20 +181,28 @@ def search_story_media(story: dict, max_images: int = 3, max_videos: int = 12) -
                 "height": _as_int(item.get("height")),
                 "search_query": image_query,
             })
-            if len([x for x in results if x["media_type"] == "image"]) >= max_images:
+            if len(results) >= max_images:
                 break
+        return results, []
     except Exception as exc:
-        errors.append(f"Image search failed: {exc}")
+        return [], [f"Image fallback search failed: {exc}"]
 
-    seen: set[tuple[str, str]] = set()
-    deduped: list[dict] = []
-    for item in results:
-        key = (item["media_type"], item["page_url"] or item["asset_url"])
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(item)
-    return deduped, errors
+
+def search_story_media(story: dict, max_images: int = 3, max_videos: int = 12) -> tuple[list[dict], list[str]]:
+    base = clean_story_query(story.get("canonical_title", ""))
+    if not base:
+        return [], ["Story title is empty."]
+
+    videos, errors = _search_youtube_videos(story, max_videos)
+    has_hd_video = any((_as_int(item.get("height")) or 0) >= 720 for item in videos)
+
+    # Images are a true fallback: do not clutter the picker when HD/4K video exists.
+    images: list[dict] = []
+    if not has_hd_video:
+        images, image_errors = _image_fallback(base, max_images)
+        errors.extend(image_errors)
+
+    return videos + images, errors
 
 
 def _as_int(value) -> int | None:
