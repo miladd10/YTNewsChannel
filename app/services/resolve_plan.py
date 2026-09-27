@@ -431,7 +431,7 @@ def build_otio(root: Path, plan: dict) -> dict:
         "metadata": {
             "yt_news_studio": {
                 "generator": "YT News Studio",
-                "fps": staged_plan["fps"],
+                "fps": plan["fps"],
                 "target_resolution": [RESOLVE_WIDTH, RESOLVE_HEIGHT],
                 "voice_master_timing": True,
                 "video_source_audio": "muted",
