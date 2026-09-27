@@ -1528,7 +1528,12 @@ def _search_web_video_sources(
             title = str(result.get("title") or "").strip()
             if not url or not _web_result_might_be_video(url, title):
                 continue
-            urls.append((url, title, query))
+            for expanded_url, expanded_title in _expand_web_video_url(url, title):
+                urls.append((expanded_url, expanded_title, query))
+            if len(urls) >= max(8, max_videos):
+                break
+        if len(urls) >= max(8, max_videos):
+            break
 
     if not urls:
         return [], errors
@@ -1544,7 +1549,7 @@ def _search_web_video_sources(
     raw: list[dict] = []
     seen_urls: set[str] = set()
     with YoutubeDL(options) as ydl:
-        for url, result_title, query in urls[:24]:
+        for url, result_title, query in urls[:max(8, min(12, max_videos + 2))]:
             if url in seen_urls:
                 continue
             seen_urls.add(url)
@@ -1707,6 +1712,18 @@ def _search_youtube_videos(
                 item = dict(entry)
                 item["_search_query"] = query
                 raw.append(item)
+
+            # Do not burn minutes on every query once the current beat already
+            # has several strong official choices. A 4K result is enough to
+            # short-circuit immediately; otherwise stop after multiple HD
+            # choices have been confirmed.
+            usable_so_far = [item for item in raw if video_is_usable_broll(item, story)]
+            if any((_max_video_height(item) or 0) >= 2160 for item in usable_so_far):
+                break
+            if len(usable_so_far) >= min(3, max_videos) and all(
+                (_max_video_height(item) or 0) >= 1080 for item in usable_so_far[:3]
+            ):
+                break
 
     usable = [item for item in raw if video_is_usable_broll(item, story)]
     usable.sort(key=lambda item: _video_rank(item, story, base), reverse=True)
@@ -1901,13 +1918,23 @@ def search_story_media(
         label = _coverage_label_for_item(item, title_subjects)
         gathered_videos.extend(_tag_coverage([item], label, "current"))
 
+    reference_hd_labels = {
+        str(item.get("coverage_label") or "")
+        for item in gathered_videos
+        if (_as_int(item.get("height")) or 0) >= 720
+    }
+
     # Search every distinct narration/title beat independently. This is what
     # lets a comparison story retrieve Avengers footage AND Resident Evil
     # footage instead of letting the first title consume all candidate slots.
+    # If the supplied reference page already contains usable HD footage for a
+    # beat, treat that as authoritative and skip the expensive broad search.
     for beat in beats:
         label = str(beat.get("label") or "").strip()
         kind = str(beat.get("kind") or "title")
         if not label:
+            continue
+        if kind == "title" and label in reference_hd_labels:
             continue
         variant = dict(story)
         variant["_media_subject_override"] = label
