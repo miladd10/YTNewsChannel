@@ -193,7 +193,10 @@ def _story_subjects(story: dict) -> list[str]:
     base = clean_story_query(story.get("canonical_title", ""))
     quoted = _quoted_subjects(base)
     if quoted:
-        return quoted
+        # The first quoted title is the primary subject of the headline.
+        # Do not let a secondary title mentioned later (for example Endgame
+        # Encore in an Avengers: Doomsday headline) replace the main B-roll.
+        return [quoted[0]]
     compact = _compact_subject(base)
     # Strip generic leading/trailing news words so "New Resident Evil film"
     # becomes a useful subject rather than matching unrelated videos.
@@ -204,6 +207,54 @@ def _story_subjects(story: dict) -> list[str]:
         words.pop()
     subject = " ".join(words).strip()
     return [subject] if subject else [base]
+
+
+def _story_reference_year(story: dict) -> int | None:
+    years: list[int] = []
+    for value in [str(story.get("canonical_title") or "")] + [
+        str(article.get("published_at") or "") for article in story.get("articles") or []
+    ]:
+        for match in re.findall(r"\b(20\d{2})\b", value):
+            years.append(int(match))
+    return max(years) if years else None
+
+
+def _item_year(item: dict) -> int | None:
+    for key in ("upload_date", "release_date", "timestamp", "release_timestamp"):
+        value = item.get(key)
+        if value is None:
+            continue
+        text = str(value)
+        match = re.search(r"\b(20\d{2})", text)
+        if match:
+            return int(match.group(1))
+        try:
+            number = int(float(value))
+            if number > 1_000_000_000:
+                from datetime import datetime, timezone
+                return datetime.fromtimestamp(number, tz=timezone.utc).year
+        except (TypeError, ValueError, OSError):
+            pass
+    return None
+
+
+def _requires_recent_media(story: dict) -> bool:
+    if _is_corporate_story(story):
+        return False
+    return str(story.get("category") or "").lower() in {
+        "trend", "upcoming_films", "tv_series", "celebrities",
+    }
+
+
+def _is_recent_enough_for_story(item: dict, story: dict) -> bool:
+    if not _requires_recent_media(story):
+        return True
+    story_year = _story_reference_year(story)
+    item_year = _item_year(item)
+    if not story_year or not item_year:
+        return True
+    # A trailer/teaser can legitimately arrive the year before release/news.
+    return item_year >= story_year - 1
 
 
 def _matches_actual_story_subject(item: dict, story: dict) -> bool:
@@ -276,6 +327,9 @@ def _video_rejection_reason(item: dict, story: dict) -> str | None:
 
     if not _matches_actual_story_subject(item, story):
         return "wrong movie/company/story"
+
+    if not _is_recent_enough_for_story(item, story):
+        return "older franchise/installment footage"
 
     if _is_corporate_story(story):
         if any(term in title for term in ("trailer", "teaser", "movie clip", "featurette")):
@@ -440,8 +494,11 @@ def _youtube_search_queries(story: dict) -> list[str]:
         return list(dict.fromkeys(queries))
 
     subjects = _story_subjects(story)
+    story_year = _story_reference_year(story)
     queries: list[str] = []
-    for subject in subjects[:3]:
+    for subject in subjects[:2]:
+        if story_year:
+            queries.append(f'{subject} {story_year} official trailer')
         queries.extend([
             f'{subject} official trailer',
             f'{subject} official clip',
@@ -450,6 +507,8 @@ def _youtube_search_queries(story: dict) -> list[str]:
 
     if story_allows_interview_or_podcast(story):
         interview_subject = subjects[0] if subjects else base
+        if story_year:
+            queries.append(f'{interview_subject} {story_year} full interview')
         queries.extend([
             f'{interview_subject} full interview',
             f'{interview_subject} podcast interview',
@@ -458,7 +517,11 @@ def _youtube_search_queries(story: dict) -> list[str]:
     return list(dict.fromkeys(q.strip() for q in queries if q.strip()))
 
 
-def _search_youtube_videos(story: dict, max_videos: int) -> tuple[list[dict], list[str]]:
+def _search_youtube_videos(
+    story: dict,
+    max_videos: int,
+    query_cache: dict[str, list[dict]] | None = None,
+) -> tuple[list[dict], list[str]]:
     from yt_dlp import YoutubeDL
 
     base = clean_story_query(story.get("canonical_title", ""))
@@ -475,17 +538,32 @@ def _search_youtube_videos(story: dict, max_videos: int) -> tuple[list[dict], li
 
     raw: list[dict] = []
     errors: list[str] = []
+    query_cache = query_cache if query_cache is not None else {}
     with YoutubeDL(options) as ydl:
         for query in queries:
-            try:
-                info = ydl.extract_info(f"ytsearch{search_count}:{query}", download=False)
-                for entry in (info or {}).get("entries") or []:
-                    if entry:
-                        item = dict(entry)
-                        item["_search_query"] = query
-                        raw.append(item)
-            except Exception as exc:
-                errors.append(f"YouTube B-roll search failed for '{query}': {exc}")
+            cached = query_cache.get(query)
+            if cached is not None:
+                entries = [dict(item) for item in cached]
+            else:
+                entries = []
+                last_error: Exception | None = None
+                for _attempt in range(2):
+                    try:
+                        info = ydl.extract_info(f"ytsearch{search_count}:{query}", download=False)
+                        entries = [dict(entry) for entry in (info or {}).get("entries") or [] if entry]
+                        query_cache[query] = [dict(item) for item in entries]
+                        last_error = None
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                if last_error is not None:
+                    errors.append(f"YouTube B-roll search failed for '{query}': {last_error}")
+                    continue
+
+            for entry in entries:
+                item = dict(entry)
+                item["_search_query"] = query
+                raw.append(item)
 
     usable = [item for item in raw if video_is_usable_broll(item, story)]
     usable.sort(key=lambda item: _video_rank(item, story, base), reverse=True)
@@ -557,12 +635,17 @@ def _image_fallback(base: str, max_images: int) -> tuple[list[dict], list[str]]:
         return [], [f"Image fallback search failed: {exc}"]
 
 
-def search_story_media(story: dict, max_images: int = 3, max_videos: int = 12) -> tuple[list[dict], list[str]]:
+def search_story_media(
+    story: dict,
+    max_images: int = 3,
+    max_videos: int = 12,
+    query_cache: dict[str, list[dict]] | None = None,
+) -> tuple[list[dict], list[str]]:
     base = clean_story_query(story.get("canonical_title", ""))
     if not base:
         return [], ["Story title is empty."]
 
-    videos, errors = _search_youtube_videos(story, max_videos)
+    videos, errors = _search_youtube_videos(story, max_videos, query_cache=query_cache)
     has_hd_video = any((_as_int(item.get("height")) or 0) >= 720 for item in videos)
 
     # Images are a true fallback: do not clutter the picker when HD/4K video exists.
