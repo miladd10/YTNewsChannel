@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from .db import BASE_DIR, PIPELINE, db, init_db
 from .services.ai import generate_text
 from .services.local_cli import all_statuses, launch_login
-from .services.media import download_candidate, search_story_media
+from .services.media import download_candidate, search_story_media, story_media_key
 from .services.project_store import choose_folder, create_project_folder, reveal_in_file_manager, save_manifest
 from .services.prompts import CINEMA_WEEKLY_SECTIONS, MEDIA_PLAN_SYSTEM, NARRATION_SYSTEM
 from .services.research import ai_rank_stories, cluster_articles, fetch_google_news
@@ -487,6 +487,12 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
     total_added = 0
     stamp = now()
     youtube_query_cache: dict[str, list[dict]] = {}
+
+    # Search every Included headline first. We then reconcile duplicate
+    # headlines that describe the same visual subject (for example two
+    # separate Ray Gunn articles) before deciding whether images are needed.
+    searched: list[dict] = []
+    videos_by_subject: dict[str, list[dict]] = {}
     for story in stories:
         candidates, errors = search_story_media(
             story,
@@ -494,6 +500,52 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
             max_videos=body.max_videos_per_story,
             query_cache=youtube_query_cache,
         )
+        key = story_media_key(story)
+        searched.append({
+            "story": story,
+            "key": key,
+            "candidates": candidates,
+            "errors": errors,
+        })
+        for item in candidates:
+            if item.get("media_type") != "video":
+                continue
+            bucket = videos_by_subject.setdefault(key, [])
+            if not any(existing.get("page_url") == item.get("page_url") for existing in bucket):
+                bucket.append(dict(item))
+
+    for result in searched:
+        story = result["story"]
+        candidates = list(result["candidates"])
+        sibling_videos = videos_by_subject.get(result["key"], [])
+
+        # A valid video discovered for any duplicate headline should prevent
+        # another headline about the same title from falling back to images.
+        if sibling_videos:
+            own_video_urls = {
+                item.get("page_url")
+                for item in candidates
+                if item.get("media_type") == "video"
+            }
+            merged_videos = [
+                item for item in candidates if item.get("media_type") == "video"
+            ]
+            for sibling in sibling_videos:
+                if sibling.get("page_url") in own_video_urls:
+                    continue
+                cloned = dict(sibling)
+                cloned["id"] = str(uuid.uuid4())
+                merged_videos.append(cloned)
+                own_video_urls.add(cloned.get("page_url"))
+            merged_videos = merged_videos[: body.max_videos_per_story]
+            has_hd = any((item.get("height") or 0) >= 720 for item in merged_videos)
+            if has_hd:
+                candidates = merged_videos
+            else:
+                candidates = merged_videos + [
+                    item for item in candidates if item.get("media_type") == "image"
+                ]
+
         with db() as conn:
             if body.refresh:
                 conn.execute(
@@ -532,9 +584,15 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
         diagnostics.append({
             "story_id": story["id"],
             "story_title": story["canonical_title"],
+            "subject_key": result["key"],
             "found": len(candidates),
             "added": added,
-            "errors": errors,
+            "reused_subject_videos": max(
+                0,
+                len([x for x in candidates if x.get("media_type") == "video"])
+                - len([x for x in result["candidates"] if x.get("media_type") == "video"]),
+            ),
+            "errors": result["errors"],
         })
 
     with db() as conn:
