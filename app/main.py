@@ -378,16 +378,16 @@ def _automatic_media_plan(stories: list[dict], narration_text: str = "") -> dict
             "narration_excerpt": "",
             "visuals": [
                 {
-                    "type": "image",
-                    "search_intent": f"{title} movie official still poster",
-                    "preferred_source": "official studio / press photography / reputable publication",
-                    "why": "Establish the story visually with a relevant still, poster, event photo, or official announcement image.",
+                    "type": "video",
+                    "search_intent": f"{title} official trailer clip interview featurette",
+                    "preferred_source": "official YouTube channel / studio / broadcaster / original interview",
+                    "why": "Primary source: use relevant motion footage directly connected to the included story.",
                 },
                 {
-                    "type": "video",
-                    "search_intent": f"{title} movie official trailer interview",
-                    "preferred_source": "official YouTube channel / studio / broadcaster / original interview",
-                    "why": "Provide motion footage directly related to the included story.",
+                    "type": "image",
+                    "search_intent": f"{title} official still poster press photo",
+                    "preferred_source": "official studio / press photography / reputable publication",
+                    "why": "Supporting source only when a still, poster, event photo, or announcement image is useful.",
                 },
             ],
         })
@@ -471,8 +471,8 @@ def latest_media_plan(project_id: str):
 
 class MediaSearchBody(BaseModel):
     refresh: bool = True
-    max_images_per_story: int = Field(default=10, ge=1, le=20)
-    max_videos_per_story: int = Field(default=8, ge=1, le=20)
+    max_images_per_story: int = Field(default=3, ge=1, le=8)
+    max_videos_per_story: int = Field(default=12, ge=1, le=24)
 
 
 @app.post("/api/projects/{project_id}/media/search")
