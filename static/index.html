@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>YT News Studio</title>
+  <link rel="stylesheet" href="/static/styles.css?v=1" />
+</head>
+<body>
+  <div id="toast" class="toast"></div>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="mark">YN</div><div><strong>YT News Studio</strong><span>Research → Narration → Media</span></div></div>
+      <button id="newProjectBtn" class="btn primary full">+ New Project</button>
+      <select id="projectSelect" class="project-select"></select>
+      <div class="side-label">PIPELINE</div>
+      <nav id="pipeline" class="pipeline"></nav>
+      <div class="sidebar-foot">
+        <button id="settingsBtn" class="btn ghost full">AI & Provider Settings</button>
+        <small>Local app · port 8787</small>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div><div class="eyebrow">PROJECT</div><h1 id="title">Create a weekly-news project</h1><p id="subtitle">Cinema → Weekly News MVP</p></div>
+        <div class="top-actions"><button id="openFolderBtn" class="btn ghost" disabled>Open Project Folder</button><button id="editProjectBtn" class="btn ghost" disabled>Edit Project</button></div>
+      </header>
+
+      <section id="empty" class="empty-state">
+        <div class="empty-icon">⌕</div>
+        <h2>Build a weekly cinema-news episode</h2>
+        <p>Research the selected week, cluster duplicate coverage into real stories, choose what matters, then generate narration and a sourcing plan for real clips and images.</p>
+        <button id="emptyCreateBtn" class="btn primary">Create Project</button>
+      </section>
+
+      <section id="workspace" class="workspace hidden">
+        <section class="project-card card">
+          <div class="project-card-head"><div><div class="eyebrow">PROJECT SETTINGS</div><h2 id="projectName">—</h2></div><span class="pill fixed">Cinema · Weekly News</span></div>
+          <div class="project-grid">
+            <div><label>Week</label><strong id="projectWeek">—</strong></div>
+            <div><label>Language</label><strong id="projectLanguage">—</strong></div>
+            <div><label>Duration</label><strong id="projectDuration">—</strong></div>
+            <div><label>Focus</label><strong id="projectFocus">—</strong></div>
+          </div>
+        </section>
+        <div id="stage"></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="projectDialog" class="dialog">
+    <form id="projectForm" method="dialog">
+      <div class="dialog-head"><div><div class="eyebrow">PROJECT</div><h2 id="projectDialogTitle">New Project</h2></div><button type="button" class="icon-btn" data-close="projectDialog">×</button></div>
+      <label>Project name<input id="pName" required maxlength="120" placeholder="Cinema Weekly — Sep 21–27" /></label>
+      <div class="two-col">
+        <label>Channel<select id="pChannel"><option value="cinema">Cinema</option><option disabled>Music — later</option><option disabled>Games — later</option></select></label>
+        <label>Content type<select id="pContentType"><option value="weekly_news">Weekly News</option><option disabled>Topic / Deep Dive — later</option></select></label>
+      </div>
+      <div class="two-col"><label>Week starts<input id="pStart" type="date" required /></label><label>Week ends<input id="pEnd" type="date" required /></label></div>
+      <div class="two-col"><label>Language<input id="pLanguage" value="Persian" /></label><label>Target duration<input id="pDuration" type="number" min="1" max="180" value="15" /></label></div>
+      <div class="two-col"><label>Geographic focus<input id="pGeo" value="Worldwide" /></label><label>Editorial focus<select id="pFocus"><option>Balanced</option><option>Mainstream</option><option>Industry-heavy</option><option>Viral-heavy</option></select></label></div>
+      <label>Notes<textarea id="pNotes" rows="3" placeholder="Optional channel/style notes"></textarea></label>
+      <div id="folderField"><label>Save projects inside</label><div class="folder-row"><input id="pParent" readonly placeholder="Choose a folder…" /><button id="chooseFolderBtn" class="btn secondary" type="button">Choose…</button></div></div>
+      <div class="dialog-actions"><button type="button" class="btn ghost" data-close="projectDialog">Cancel</button><button class="btn primary" type="submit">Save Project</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="settingsDialog" class="dialog large">
+    <form id="settingsForm" method="dialog">
+      <div class="dialog-head"><div><div class="eyebrow">AI</div><h2>Provider Settings</h2></div><button type="button" class="icon-btn" data-close="settingsDialog">×</button></div>
+      <p class="muted">Subscription mode calls the official Codex or Claude Code CLI already signed in on this computer. API keys are optional and stored in the OS credential store.</p>
+      <div id="providerStatus" class="provider-grid"></div>
+      <h3>Workflow roles</h3>
+      <div class="role-grid">
+        <label>Research / ranking<select id="sResearchProvider"></select></label>
+        <label>Research model<input id="sResearchModel" value="default" /></label>
+        <label>Narration writer<select id="sWriterProvider"></select></label>
+        <label>Writer model<input id="sWriterModel" value="default" /></label>
+        <label>Media planner / reviewer<select id="sReviewerProvider"></select></label>
+        <label>Reviewer model<input id="sReviewerModel" value="default" /></label>
+      </div>
+      <details class="api-details"><summary>Optional API keys</summary><div class="two-col api-key-row"><label>OpenAI API key<input id="openaiKey" type="password" placeholder="sk-…" /></label><button type="button" class="btn secondary" data-save-key="openai">Save OpenAI Key</button><label>Anthropic API key<input id="anthropicKey" type="password" placeholder="sk-ant-…" /></label><button type="button" class="btn secondary" data-save-key="anthropic">Save Anthropic Key</button></div></details>
+      <div class="dialog-actions"><button type="button" class="btn ghost" data-close="settingsDialog">Cancel</button><button class="btn primary" type="submit">Save Settings</button></div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js?v=1"></script>
+</body>
+</html>
