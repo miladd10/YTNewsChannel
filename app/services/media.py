@@ -446,14 +446,54 @@ def video_is_usable_broll(item: dict, story: dict) -> bool:
     return strength >= 4
 
 
-def _video_rank(item: dict, story: dict, base: str) -> tuple[int, int, int, int]:
+def _video_quality_tier(height) -> int:
+    value = _as_int(height) or 0
+    if value >= 2160:
+        return 5
+    if value >= 1440:
+        return 4
+    if value >= 1080:
+        return 3
+    if value >= 720:
+        return 2
+    if value > 0:
+        return 1
+    return 0
+
+
+def _video_source_cleanliness(item: dict, story: dict) -> int:
+    """Metadata-level proxy for clean/original footage.
+
+    We cannot reliably detect a burned-in visual watermark without decoding and
+    inspecting frames, so discovery prefers original studio/distributor uploads
+    and direct official assets. Those are the sources most likely to be clean or
+    carry only their own official branding.
+    """
+    if _reference_direct_asset_is_official(item, story):
+        return 5
+    source = str(item.get("channel") or item.get("uploader") or "")
+    if _looks_like_official_channel(source):
+        return 5
+    if bool(item.get("channel_is_verified")) and _is_original_visual_source(item, story):
+        return 4
+    if _is_original_visual_source(item, story):
+        return 3
+    return 0
+
+
+def _video_rank(item: dict, story: dict, base: str) -> tuple[int, int, int, int, int]:
+    """Quality-first ranking across all accepted source locations."""
     strength, _ = _official_broll_strength(item, story)
     title = str(item.get("title") or "").lower()
     source = str(item.get("channel") or item.get("uploader") or "").lower()
     description = str(item.get("description") or "").lower()
     haystack = f"{title} {source} {description}"
 
-    score = strength * 50
+    height = _max_video_height(item) or 0
+    quality_tier = _video_quality_tier(height)
+    cleanliness = _video_source_cleanliness(item, story)
+
+    relevance = strength * 50
     priority_terms = {
         "official trailer": 30,
         "official teaser": 28,
@@ -470,26 +510,101 @@ def _video_rank(item: dict, story: dict, base: str) -> tuple[int, int, int, int]
     }
     for term, weight in priority_terms.items():
         if term in haystack:
-            score += weight
+            relevance += weight
 
     story_terms = [x.lower() for x in re.findall(r"[A-Za-z0-9]+", base) if len(x) >= 4]
-    overlap = sum(1 for term in story_terms[:10] if term in haystack)
-    score += overlap * 4
-
-    height = _max_video_height(item) or 0
-    if height >= 2160:
-        score += 35
-    elif height >= 1440:
-        score += 28
-    elif height >= 1080:
-        score += 22
-    elif height >= 720:
-        score += 15
-    elif height:
-        score -= 8
+    relevance += sum(1 for term in story_terms[:10] if term in haystack) * 4
 
     views = _as_int(item.get("view_count")) or 0
-    return strength, score, height, views
+    # Resolution is intentionally first. Among equally good copies, prefer the
+    # cleanest/original source, then exact official/relevance signals.
+    return quality_tier, height, cleanliness, relevance, views
+
+
+def _video_kind_key(title: str) -> str:
+    value = (title or "").lower()
+    kinds = (
+        ("teaser", ("teaser",)),
+        ("trailer", ("trailer",)),
+        ("clip", ("clip", "scene")),
+        ("featurette", ("featurette", "behind the scenes", "making of")),
+        ("first-look", ("first look", "sneak peek")),
+        ("interview", ("interview", "podcast")),
+        ("corporate", CORPORATE_BROLL_TERMS),
+    )
+    for key, terms in kinds:
+        if any(term in value for term in terms):
+            return key
+    return "video"
+
+
+def _result_duration_seconds(item: dict) -> int | None:
+    return duration_seconds(item.get("duration"))
+
+
+def _video_identity_key(item: dict, story: dict) -> str:
+    """Group likely copies of the same trailer/clip across different hosts."""
+    subjects = _story_subjects(story)
+    subject = subjects[0] if subjects else clean_story_query(story.get("canonical_title", ""))
+    subject_key = " ".join(_distinctive_subject_words(subject)[:5])
+    kind = _video_kind_key(str(item.get("title") or ""))
+    duration = _result_duration_seconds(item)
+    # Same official trailer mirrored across regions/hosts is normally within a
+    # couple seconds. Five-second buckets avoid collapsing genuinely different
+    # trailer cuts while deduplicating localized mirrors.
+    duration_bucket = "unknown" if duration is None else str(int(round(duration / 5.0) * 5))
+    return f"{subject_key}|{kind}|{duration_bucket}"
+
+
+def _result_quality_rank(item: dict, story: dict) -> tuple[int, int, int, int]:
+    height = _as_int(item.get("height")) or 0
+    provider = str(item.get("provider") or "").lower()
+    source = str(item.get("source") or "").lower()
+    title = str(item.get("title") or "").lower()
+    clean = 0
+    if any(term in source for term in OFFICIAL_CHANNEL_TERMS):
+        clean = 5
+    elif "official" in provider or "studio/distributor" in provider:
+        clean = 4
+    elif "reference page" in provider:
+        clean = 3
+    official_title = 1 if "official" in title else 0
+    return _video_quality_tier(height), height, clean, official_title
+
+
+def _dedupe_quality_first_results(items: list[dict], story: dict, limit: int) -> list[dict]:
+    """Keep the best-quality copy of a likely-identical video, then rank all."""
+    best_by_identity: dict[str, dict] = {}
+    extras: list[dict] = []
+    for item in items:
+        key = _video_identity_key(item, story)
+        current = best_by_identity.get(key)
+        if current is None:
+            best_by_identity[key] = item
+            continue
+        if _result_quality_rank(item, story) > _result_quality_rank(current, story):
+            extras.append(current)
+            best_by_identity[key] = item
+        else:
+            extras.append(item)
+
+    primary = list(best_by_identity.values())
+    primary.sort(key=lambda item: _result_quality_rank(item, story), reverse=True)
+
+    # Keep alternate copies after the best variant so users can still choose a
+    # different official source when needed.
+    extras.sort(key=lambda item: _result_quality_rank(item, story), reverse=True)
+    seen: set[str] = set()
+    output: list[dict] = []
+    for item in primary + extras:
+        url = str(item.get("page_url") or "")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        output.append(item)
+        if len(output) >= limit:
+            break
+    return output
 
 
 def _quoted_subjects(text: str) -> list[str]:
