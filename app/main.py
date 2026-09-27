@@ -1373,6 +1373,17 @@ def media_candidates(project_id: str):
                 item = dict(row)
                 item["selected"] = bool(item["selected"])
                 candidates.append(item)
+            voice_rows = conn.execute(
+                """SELECT source_text,duration_seconds
+                   FROM voice_segments
+                   WHERE project_id=? AND story_id=?
+                   ORDER BY segment_index""",
+                (project_id, story["id"]),
+            ).fetchall()
+            voice_duration = sum(float(row["duration_seconds"] or 0) for row in voice_rows)
+            story_for_plan = dict(story)
+            story_for_plan["_narration_text"] = " ".join(str(row["source_text"] or "") for row in voice_rows).strip()
+            story_for_plan["_voice_duration_seconds"] = voice_duration
             output.append({
                 "story": {
                     "id": story["id"],
@@ -1380,10 +1391,8 @@ def media_candidates(project_id: str):
                     "summary": story.get("summary", ""),
                     "category": story.get("category", ""),
                     "articles": story.get("articles", []),
-                    "voice_duration_seconds": float(conn.execute(
-                        "SELECT COALESCE(SUM(duration_seconds),0) s FROM voice_segments WHERE project_id=? AND story_id=?",
-                        (project_id, story["id"]),
-                    ).fetchone()["s"] or 0),
+                    "voice_duration_seconds": voice_duration,
+                    "visual_coverage": story_visual_plan(story_for_plan),
                 },
                 "candidates": candidates,
             })
