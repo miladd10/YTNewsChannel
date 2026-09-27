@@ -692,10 +692,42 @@ def download_selected_media(project_id: str):
 
     results = []
     root = Path(project["root_path"])
+    downloaded_by_url: dict[str, str] = {}
+    with db() as conn:
+        reusable = conn.execute(
+            """SELECT page_url,stored_path FROM media_candidates
+               WHERE project_id=? AND download_status='downloaded' AND stored_path<>''""",
+            (project_id,),
+        ).fetchall()
+    for row in reusable:
+        stored = str(row["stored_path"] or "")
+        if stored and (root / stored).exists():
+            downloaded_by_url[str(row["page_url"])] = stored
+
     for candidate in candidates:
         if candidate.get("download_status") == "downloaded" and candidate.get("stored_path"):
+            downloaded_by_url[candidate.get("page_url") or ""] = candidate["stored_path"]
             results.append({"id": candidate["id"], "ok": True, "stored_path": candidate["stored_path"], "already_downloaded": True})
             continue
+
+        page_url = candidate.get("page_url") or ""
+        reused_path = downloaded_by_url.get(page_url)
+        if reused_path:
+            with db() as conn:
+                conn.execute(
+                    "UPDATE media_candidates SET download_status='downloaded',stored_path=?,error='',updated_at=? WHERE id=?",
+                    (reused_path, now(), candidate["id"]),
+                )
+            results.append({
+                "id": candidate["id"],
+                "ok": True,
+                "stored_path": reused_path,
+                "reused_source_file": True,
+                "clip_start_sec": candidate.get("clip_start_sec"),
+                "clip_end_sec": candidate.get("clip_end_sec"),
+            })
+            continue
+
         try:
             path = download_candidate(candidate, root, candidate["story_title"])
             relative = path.resolve().relative_to(root.resolve()).as_posix()
@@ -704,7 +736,14 @@ def download_selected_media(project_id: str):
                     "UPDATE media_candidates SET download_status='downloaded',stored_path=?,error='',updated_at=? WHERE id=?",
                     (relative, now(), candidate["id"]),
                 )
-            results.append({"id": candidate["id"], "ok": True, "stored_path": relative})
+            downloaded_by_url[page_url] = relative
+            results.append({
+                "id": candidate["id"],
+                "ok": True,
+                "stored_path": relative,
+                "clip_start_sec": candidate.get("clip_start_sec"),
+                "clip_end_sec": candidate.get("clip_end_sec"),
+            })
         except Exception as exc:
             message = str(exc)
             with db() as conn:
