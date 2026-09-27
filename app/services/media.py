@@ -644,7 +644,7 @@ def _video_rejection_reason(item: dict, story: dict) -> str | None:
         if not (allow_spoken and spoken and bool(item.get("channel_is_verified"))):
             return "news/commentary/aggregator channel"
 
-    spoken = any(term in title for term in SPOKEN_SOURCE_TERMS) or "podcast" in source
+    spoken = any(term in title for term in PERSON_BROLL_TERMS) or "podcast" in source
     if spoken and not allow_spoken:
         return "interview/podcast not relevant to this story"
 
