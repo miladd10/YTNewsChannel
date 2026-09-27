@@ -294,7 +294,8 @@ def download_video(url: str, target_stem: Path) -> Path:
         "quiet": True,
         "no_warnings": True,
         "restrictfilenames": True,
-        "format": "best[ext=mp4]/best",
+        "format": "bestvideo*+bestaudio/best",
+        "merge_output_format": "mp4",
     }
     before = set(target_stem.parent.glob(f"{target_stem.name}.*"))
     with YoutubeDL(options) as ydl:
