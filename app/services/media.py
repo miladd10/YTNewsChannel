@@ -56,7 +56,6 @@ AGGREGATOR_CHANNEL_TERMS = (
 )
 
 OFFICIAL_CHANNEL_TERMS = (
-    "official", "pictures", "studios", "entertainment", "films",
     "netflix", "warner bros", "warnerbrospictures", "paramount pictures",
     "universal pictures", "sony pictures", "marvel entertainment",
     "dc", "disney", "hbo", "apple tv", "prime video", "amazon mgm",
@@ -77,7 +76,7 @@ CORPORATE_STORY_TERMS = (
 )
 
 CORPORATE_BROLL_TERMS = (
-    "studio lot", "studio tour", "headquarters", "logo", "brand film",
+    "studio lot", "headquarters", "logo", "brand film",
     "company reel", "sizzle reel", "centennial", "100 years", "anniversary",
     "campus", "backlot", "soundstage", "sound stage", "official intro",
 )
@@ -448,9 +447,10 @@ def _youtube_search_queries(story: dict) -> list[str]:
         ])
 
     if story_allows_interview_or_podcast(story):
+        interview_subject = subjects[0] if subjects else base
         queries.extend([
-            f'{base} full interview',
-            f'{base} podcast interview',
+            f'{interview_subject} full interview',
+            f'{interview_subject} podcast interview',
         ])
 
     return list(dict.fromkeys(q.strip() for q in queries if q.strip()))
