@@ -20,6 +20,7 @@ from .services.voice_pipeline import extract_narration_segments, prepare_perform
 from .services.project_store import choose_folder, create_project_folder, reveal_in_file_manager, save_manifest
 from .services.prompts import CINEMA_WEEKLY_SECTIONS, MEDIA_PLAN_SYSTEM, NARRATION_SYSTEM
 from .services.research import ai_rank_stories, cluster_articles, fetch_google_news
+from .services.resolve_plan import build_edit_plan, write_resolve_package
 from .services.secrets import delete_api_key, get_api_key, masked_status, save_ai_settings, set_api_key
 from .version import APP_RELEASE_NAME, APP_VERSION
 
@@ -1092,6 +1093,107 @@ def download_selected_media(project_id: str):
         "results": results,
         "rights_note": "Downloaded files keep an unverified rights status. Verify permission/licensing before publishing reused media.",
     }
+
+
+@app.get("/api/projects/{project_id}/resolve-plan")
+def get_resolve_plan(project_id: str):
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+    root = Path(project["root_path"])
+    plan_path = root / "timing" / "resolve_plan.json"
+    manifest_path = root / "resolve" / "package_manifest.json"
+    if not plan_path.exists():
+        return {
+            "ready": False,
+            "plan": None,
+            "files": [],
+            "message": "Generate the Resolve Plan after voice timing and selected media downloads are ready.",
+        }
+    try:
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    except Exception:
+        plan = None
+    files = []
+    for relative in (
+        "resolve/news_timeline.otio",
+        "resolve/voice_timing.csv",
+        "resolve/media_timing.csv",
+        "resolve/package_manifest.json",
+        "resolve/README.md",
+        "timing/resolve_plan.json",
+    ):
+        path = root / relative
+        files.append({
+            "name": Path(relative).name,
+            "relative_path": relative,
+            "exists": path.exists(),
+            "size": path.stat().st_size if path.exists() else 0,
+        })
+    return {
+        "ready": bool(plan and manifest_path.exists() and all(item["exists"] for item in files)),
+        "plan": plan,
+        "files": files,
+        "resolve_folder": str(root / "resolve"),
+    }
+
+
+@app.post("/api/projects/{project_id}/resolve-plan/generate")
+def generate_resolve_plan(project_id: str):
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        voice_rows = [dict(row) for row in conn.execute(
+            """SELECT * FROM voice_segments
+               WHERE project_id=? ORDER BY segment_index""",
+            (project_id,),
+        ).fetchall()]
+        candidates = [dict(row) for row in conn.execute(
+            """SELECT * FROM media_candidates
+               WHERE project_id=? AND selected=1
+               ORDER BY story_id,media_type,created_at""",
+            (project_id,),
+        ).fetchall()]
+    if not voice_rows:
+        raise HTTPException(400, "Generate the narrator voice first.")
+    pending_voice = [x for x in voice_rows if x.get("audio_status") != "aligned" or not x.get("audio_path") or not x.get("duration_seconds")]
+    if pending_voice:
+        raise HTTPException(
+            400,
+            f"{len(pending_voice)} voice segment(s) still need generation/alignment before Resolve planning.",
+        )
+    if not candidates:
+        raise HTTPException(400, "Select and download media before generating the Resolve Plan.")
+    missing_media = [x for x in candidates if x.get("download_status") != "downloaded" or not x.get("stored_path")]
+    if missing_media:
+        raise HTTPException(
+            400,
+            f"{len(missing_media)} selected media item(s) have not been downloaded yet.",
+        )
+
+    try:
+        plan = build_edit_plan(project, voice_rows, candidates, fps=30)
+        files = write_resolve_package(Path(project["root_path"]), plan)
+    except Exception as exc:
+        raise HTTPException(400, f"Could not build Resolve package: {exc}") from exc
+
+    with db() as conn:
+        conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
+        save_manifest(conn, project_id)
+    return {
+        "ok": True,
+        "plan": plan,
+        "files": files,
+        "warning_count": len(plan.get("warnings") or []),
+    }
+
+
+@app.post("/api/projects/{project_id}/resolve-plan/open-folder")
+def open_resolve_plan_folder(project_id: str):
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+    resolve_dir = Path(project["root_path"]) / "resolve"
+    resolve_dir.mkdir(parents=True, exist_ok=True)
+    reveal_in_file_manager(resolve_dir)
+    return {"ok": True, "path": str(resolve_dir)}
 
 
 @app.get("/api/settings")
