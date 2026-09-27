@@ -32,7 +32,7 @@ def _split_long_text(text: str, limit: int) -> list[str]:
     pieces: list[str] = []
     current = ""
     for paragraph in paragraphs:
-        sentences = re.split(r"(?<=[.!?])\s+", paragraph) if len(paragraph) > limit else [paragraph]
+        sentences = re.split(r"(?<=[.!?؟])\s+", paragraph) if len(paragraph) > limit else [paragraph]
         for sentence in sentences:
             sentence = sentence.strip()
             if not sentence:
