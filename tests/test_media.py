@@ -1,4 +1,4 @@
-from app.services.media import _youtube_search_queries, story_allows_interview_or_podcast, video_is_usable_broll
+from app.services.media import _youtube_search_queries, story_allows_interview_or_podcast, story_media_key, video_is_usable_broll
 
 
 def normal_story():
@@ -247,3 +247,49 @@ def test_primary_quoted_title_wins_over_secondary_title():
     }
     assert not video_is_usable_broll(endgame, story)
     assert video_is_usable_broll(doomsday, story)
+
+
+def test_duplicate_ray_gunn_headlines_share_media_key():
+    first = {
+        "canonical_title": "Brad Bird’s ‘Ray Gunn’ Gets First Trailer, 70mm Theatrical Release, Expanded Voice Cast",
+        "summary": "Brad Bird's Ray Gunn received its first trailer.",
+        "category": "upcoming_films",
+        "articles": [
+            {
+                "title": "Brad Bird’s ‘Ray Gunn’ Gets First Trailer and a Limited 70mm Theatrical Release - What's on Netflix",
+                "published_at": "2026-09-24",
+            },
+            {
+                "title": "Brad Bird’s ‘Ray Gunn’ Gets First Trailer, 70mm Theatrical Release, Expanded Voice Cast - Cartoon Brew",
+                "published_at": "2026-09-24",
+            },
+        ],
+    }
+    second = {
+        "canonical_title": "‘Ray Gunn’ Trailer: Netflix Sets Theatrical Release With First Look",
+        "summary": "Netflix released the first Ray Gunn trailer.",
+        "category": "upcoming_films",
+        "articles": [
+            {
+                "title": "Ray Gunn Trailer: Netflix Sets Theatrical Release With First Look",
+                "published_at": "2026-09-24",
+            }
+        ],
+    }
+    assert story_media_key(first) == story_media_key(second) == "title:ray gunn"
+
+
+def test_ray_gunn_search_uses_distributor_when_story_mentions_netflix():
+    story = {
+        "canonical_title": "Brad Bird’s ‘Ray Gunn’ Gets First Trailer, 70mm Theatrical Release, Expanded Voice Cast",
+        "summary": "Brad Bird's Ray Gunn received its first trailer.",
+        "category": "upcoming_films",
+        "articles": [
+            {
+                "title": "Brad Bird’s ‘Ray Gunn’ Gets First Trailer and a Limited 70mm Theatrical Release - What's on Netflix",
+                "published_at": "2026-09-24",
+            }
+        ],
+    }
+    queries = _youtube_search_queries(story)
+    assert any("ray gunn netflix official trailer" in q.lower() for q in queries)
