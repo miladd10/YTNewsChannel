@@ -1,4 +1,4 @@
-from app.services.media import _dedupe_quality_first_results, _extract_reference_video_urls, _youtube_search_queries, story_allows_interview_or_podcast, story_media_key, suggested_clip_range, video_is_usable_broll
+from app.services.media import _dedupe_quality_first_results, _extract_reference_video_urls, _story_subjects, _youtube_search_queries, story_allows_interview_or_podcast, story_media_key, suggested_clip_range, video_is_usable_broll
 
 
 def normal_story():
@@ -439,3 +439,46 @@ def test_quality_order_is_4k_then_1440_then_1080_then_720():
     ]
     ranked = _dedupe_quality_first_results(items, story, 12)
     assert [x["height"] for x in ranked[:4]] == [2160, 1440, 1080, 720]
+
+
+
+def test_werwulf_headline_uses_movie_title_not_quoted_slogan():
+    story = {
+        "canonical_title": "‘Feed upon the flesh of mankind!’ Robert Eggers sics chilling new ‘Werwulf’ trailer on fans",
+        "summary": "Robert Eggers released a new trailer for Werwulf.",
+        "category": "upcoming_films",
+        "articles": [],
+    }
+    assert _story_subjects(story) == ["Werwulf"]
+    queries = _youtube_search_queries(story)
+    assert any("werwulf official trailer" in q.lower() for q in queries)
+
+
+def test_weekend_box_office_headline_extracts_endgame_encore():
+    story = {
+        "canonical_title": "Weekend Box Office: Avengers: Endgame Encore beats Resident Evil in week two",
+        "summary": "Avengers: Endgame Encore led Resident Evil at the box office.",
+        "category": "trend",
+        "articles": [],
+    }
+    assert _story_subjects(story) == ["Avengers: Endgame Encore"]
+
+
+def test_lord_of_the_rings_headline_extracts_title_before_takes():
+    story = {
+        "canonical_title": "Lord of the Rings takes us back to the Shire in first look at new movie from Andy Serkis",
+        "summary": "A first look at the new Lord of the Rings movie was released.",
+        "category": "upcoming_films",
+        "articles": [],
+    }
+    assert _story_subjects(story) == ["Lord of the Rings"]
+
+
+def test_narnia_headline_drops_director_credit_clause():
+    story = {
+        "canonical_title": "Narnia: The Magician’s Nephew, Directed by Greta Gerwig, Roars to Life in 2027",
+        "summary": "Netflix revealed Narnia: The Magician's Nephew.",
+        "category": "upcoming_films",
+        "articles": [],
+    }
+    assert _story_subjects(story) == ["Narnia: The Magician’s Nephew"]
