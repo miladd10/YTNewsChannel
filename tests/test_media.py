@@ -1,4 +1,4 @@
-from app.services.media import _contextual_fallback_stories, _dedupe_quality_first_results, _extract_reference_video_urls, _story_subjects, _youtube_search_queries, story_allows_interview_or_podcast, story_media_key, suggested_clip_range, video_is_usable_broll
+from app.services.media import _contextual_fallback_stories, _dedupe_quality_first_results, _extract_reference_video_urls, _story_subjects, _youtube_search_queries, story_allows_interview_or_podcast, story_media_key, story_visual_plan, suggested_clip_range, video_is_usable_broll
 
 
 def normal_story():
@@ -538,3 +538,52 @@ def test_contextual_archive_broll_allows_older_official_franchise_video():
         "_search_query": "Avatar official trailer 4K",
     }
     assert video_is_usable_broll(old_official, fallback_story)
+
+
+
+def test_weekend_box_office_story_requires_two_visual_subjects():
+    story = {
+        "canonical_title": "Weekend Box Office: Avengers: Endgame Encore beats Resident Evil in week two",
+        "summary": "Avengers: Endgame Encore stayed ahead while Resident Evil followed in second place.",
+        "_narration_text": "Avengers: Endgame Encore held the top spot. Resident Evil remained close behind in week two.",
+        "_voice_duration_seconds": 28.0,
+        "category": "trend",
+        "articles": [],
+    }
+    plan = story_visual_plan(story)
+    assert plan["subjects"][:2] == ["Avengers: Endgame Encore", "Resident Evil"]
+    assert plan["target_count"] >= 2
+    assert [beat["label"] for beat in plan["beats"][:2]] == [
+        "Avengers: Endgame Encore",
+        "Resident Evil",
+    ]
+
+
+def test_longer_single_subject_narration_recommends_multiple_visual_changes():
+    story = {
+        "canonical_title": "Resident Evil breaks franchise box office records",
+        "summary": "The new film opened strongly.",
+        "_narration_text": "Resident Evil opened strongly. The film set a new franchise benchmark. Its second weekend remained solid.",
+        "_voice_duration_seconds": 31.0,
+        "category": "trend",
+        "articles": [],
+    }
+    plan = story_visual_plan(story)
+    assert plan["subjects"] == ["Resident Evil"]
+    assert plan["target_count"] == 2
+
+
+def test_quote_story_can_add_director_as_separate_visual_beat():
+    story = {
+        "canonical_title": "Avatar: Fire and Ash production update",
+        "summary": "Director James Cameron discusses the film.",
+        "_narration_text": 'James Cameron said “we wanted the ocean to feel different this time.”',
+        "_voice_duration_seconds": 26.0,
+        "category": "upcoming_films",
+        "articles": [],
+    }
+    plan = story_visual_plan(story)
+    labels = [beat["label"] for beat in plan["beats"]]
+    assert labels[0] == "Avatar: Fire and Ash production update"
+    assert "James Cameron" in labels
+    assert plan["target_count"] >= 2
