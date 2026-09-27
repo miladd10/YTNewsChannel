@@ -1015,6 +1015,7 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
     total_added = 0
     stamp = now()
     youtube_query_cache: dict[str, list[dict]] = {}
+    reference_page_cache: dict[str, tuple[str, str]] = {}
 
     # Search every Included headline first. We then reconcile duplicate
     # headlines that describe the same visual subject (for example two
@@ -1027,6 +1028,7 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
             max_images=body.max_images_per_story,
             max_videos=body.max_videos_per_story,
             query_cache=youtube_query_cache,
+            reference_page_cache=reference_page_cache,
         )
         key = story_media_key(story)
         searched.append({
