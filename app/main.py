@@ -54,7 +54,7 @@ def latest_run_id(conn, project_id: str) -> str | None:
 def project_payload(conn, project_id: str) -> dict:
     project = project_or_404(conn, project_id)
     run_id = latest_run_id(conn, project_id)
-    counts = {"articles": 0, "stories": 0, "included": 0, "narrations": 0, "voice_segments": 0, "voice_generated": 0, "voice_seconds": 0.0, "media_plans": 0, "media_candidates": 0, "media_selected": 0, "media_downloaded": 0}
+    counts = {"articles": 0, "stories": 0, "included": 0, "narrations": 0, "voice_segments": 0, "voice_generated": 0, "voice_aligned": 0, "voice_seconds": 0.0, "media_plans": 0, "media_candidates": 0, "media_selected": 0, "media_downloaded": 0}
     if run_id:
         counts["articles"] = conn.execute("SELECT COUNT(*) c FROM research_articles WHERE run_id=?", (run_id,)).fetchone()["c"]
         counts["stories"] = conn.execute("SELECT COUNT(*) c FROM stories WHERE run_id=?", (run_id,)).fetchone()["c"]
@@ -62,6 +62,7 @@ def project_payload(conn, project_id: str) -> dict:
     counts["narrations"] = conn.execute("SELECT COUNT(*) c FROM narrations WHERE project_id=?", (project_id,)).fetchone()["c"]
     counts["voice_segments"] = conn.execute("SELECT COUNT(*) c FROM voice_segments WHERE project_id=?", (project_id,)).fetchone()["c"]
     counts["voice_generated"] = conn.execute("SELECT COUNT(*) c FROM voice_segments WHERE project_id=? AND audio_status IN ('generated','aligned')", (project_id,)).fetchone()["c"]
+    counts["voice_aligned"] = conn.execute("SELECT COUNT(*) c FROM voice_segments WHERE project_id=? AND audio_status='aligned'", (project_id,)).fetchone()["c"]
     counts["voice_seconds"] = round(float(conn.execute("SELECT COALESCE(SUM(duration_seconds),0) s FROM voice_segments WHERE project_id=?", (project_id,)).fetchone()["s"] or 0), 3)
     counts["media_plans"] = conn.execute("SELECT COUNT(*) c FROM media_plans WHERE project_id=?", (project_id,)).fetchone()["c"]
     counts["media_candidates"] = conn.execute("SELECT COUNT(*) c FROM media_candidates WHERE project_id=?", (project_id,)).fetchone()["c"]
@@ -847,6 +848,21 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
         stories = selected_story_packet(conn, project_id)
     if not stories:
         raise HTTPException(400, "Include at least one story before searching for media.")
+    with db() as conn:
+        voice_total = conn.execute(
+            "SELECT COUNT(*) c FROM voice_segments WHERE project_id=?",
+            (project_id,),
+        ).fetchone()["c"]
+        voice_aligned = conn.execute(
+            "SELECT COUNT(*) c FROM voice_segments WHERE project_id=? AND audio_status='aligned'",
+            (project_id,),
+        ).fetchone()["c"]
+    if not voice_total or voice_aligned != voice_total:
+        raise HTTPException(
+            400,
+            "Generate and align the complete narrator voice in Step 4 before searching media. "
+            "Media timing is based on the real ElevenLabs audio duration.",
+        )
 
     diagnostics = []
     total_added = 0
