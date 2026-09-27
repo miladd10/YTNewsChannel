@@ -1,4 +1,4 @@
-from app.services.media import _extract_reference_video_urls, _youtube_search_queries, story_allows_interview_or_podcast, story_media_key, suggested_clip_range, video_is_usable_broll
+from app.services.media import _dedupe_quality_first_results, _extract_reference_video_urls, _youtube_search_queries, story_allows_interview_or_podcast, story_media_key, suggested_clip_range, video_is_usable_broll
 
 
 def normal_story():
@@ -394,3 +394,48 @@ def test_official_reference_embed_for_title_named_in_multi_title_story_is_accept
         "_reference_article_title": "Weekend Box Office: Avengers: Endgame Encore beats Resident Evil in week two",
     }
     assert video_is_usable_broll(item, story)
+
+
+
+def test_same_video_prefers_4k_over_1080_reference_copy():
+    story = {
+        "canonical_title": "‘Ray Gunn’ Trailer: Netflix Sets Theatrical Release With First Look",
+        "summary": "Netflix released the first Ray Gunn trailer.",
+        "category": "upcoming_films",
+        "articles": [{"title": "Ray Gunn gets first trailer", "source": "Deadline"}],
+    }
+    reference_1080 = {
+        "id": "ref",
+        "media_type": "video",
+        "title": "Ray Gunn | Official Trailer | Netflix",
+        "page_url": "https://example.com/embed/ray-gunn",
+        "source": "Netflix",
+        "provider": "Reference page · official B-roll",
+        "duration": "2:37",
+        "height": 1080,
+    }
+    youtube_4k = {
+        "id": "yt",
+        "media_type": "video",
+        "title": "Ray Gunn | Official Trailer | Netflix",
+        "page_url": "https://www.youtube.com/watch?v=raygunn4k",
+        "source": "Netflix",
+        "provider": "YouTube · official B-roll",
+        "duration": "2:37",
+        "height": 2160,
+    }
+    ranked = _dedupe_quality_first_results([reference_1080, youtube_4k], story, 12)
+    assert ranked[0]["id"] == "yt"
+    assert ranked[0]["height"] == 2160
+
+
+def test_quality_order_is_4k_then_1440_then_1080_then_720():
+    story = normal_story()
+    items = [
+        {"id": "720", "media_type": "video", "title": "Resident Evil Official Trailer", "page_url": "https://x/720", "source": "Sony Pictures Entertainment", "provider": "YouTube · official B-roll", "duration": "2:30", "height": 720},
+        {"id": "1080", "media_type": "video", "title": "Resident Evil Official Trailer", "page_url": "https://x/1080", "source": "Sony Pictures Entertainment", "provider": "Reference page · official B-roll", "duration": "2:30", "height": 1080},
+        {"id": "1440", "media_type": "video", "title": "Resident Evil Official Trailer", "page_url": "https://x/1440", "source": "Sony Pictures Entertainment", "provider": "Web video · official B-roll", "duration": "2:30", "height": 1440},
+        {"id": "2160", "media_type": "video", "title": "Resident Evil Official Trailer", "page_url": "https://x/2160", "source": "Sony Pictures Entertainment", "provider": "YouTube · official B-roll", "duration": "2:30", "height": 2160},
+    ]
+    ranked = _dedupe_quality_first_results(items, story, 12)
+    assert [x["height"] for x in ranked[:4]] == [2160, 1440, 1080, 720]
