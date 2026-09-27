@@ -984,19 +984,111 @@ def latest_media_plan(project_id: str):
         return item
 
 
+
+def _build_media_search_chunks(conn, project_id: str, chunk_minutes: float | None = None) -> dict:
+    project = project_or_404(conn, project_id)
+    target_minutes = float(chunk_minutes if chunk_minutes is not None else project.get("media_chunk_minutes") or 1.0)
+    target_minutes = max(0.25, min(10.0, target_minutes))
+    target_seconds = target_minutes * 60.0
+
+    stories = selected_story_packet(conn, project_id)
+    story_by_id = {story["id"]: story for story in stories}
+    duration_rows = conn.execute(
+        """SELECT story_id,
+                  COALESCE(SUM(duration_seconds),0) AS duration_seconds,
+                  MIN(segment_index) AS first_segment
+           FROM voice_segments
+           WHERE project_id=? AND story_id<>''
+           GROUP BY story_id
+           ORDER BY first_segment""",
+        (project_id,),
+    ).fetchall()
+    durations = {
+        row["story_id"]: float(row["duration_seconds"] or 0)
+        for row in duration_rows
+    }
+
+    ordered_ids = [row["story_id"] for row in duration_rows if row["story_id"] in story_by_id]
+    ordered_ids.extend(story["id"] for story in stories if story["id"] not in set(ordered_ids))
+
+    chunks: list[dict] = []
+    current_ids: list[str] = []
+    current_seconds = 0.0
+    timeline_cursor = 0.0
+
+    def flush() -> None:
+        nonlocal current_ids, current_seconds, timeline_cursor
+        if not current_ids:
+            return
+        chunks.append({
+            "index": len(chunks) + 1,
+            "story_ids": list(current_ids),
+            "story_count": len(current_ids),
+            "duration_seconds": round(current_seconds, 3),
+            "timeline_start_seconds": round(timeline_cursor, 3),
+            "timeline_end_seconds": round(timeline_cursor + current_seconds, 3),
+            "titles": [story_by_id[story_id]["canonical_title"] for story_id in current_ids],
+        })
+        timeline_cursor += current_seconds
+        current_ids = []
+        current_seconds = 0.0
+
+    for story_id in ordered_ids:
+        duration = max(0.0, durations.get(story_id, 0.0))
+        if current_ids and current_seconds + duration > target_seconds:
+            flush()
+        current_ids.append(story_id)
+        current_seconds += duration
+        if current_seconds >= target_seconds:
+            flush()
+    flush()
+
+    total_story_seconds = round(sum(durations.get(story_id, 0.0) for story_id in ordered_ids), 3)
+    return {
+        "chunk_minutes": target_minutes,
+        "chunk_seconds": target_seconds,
+        "target_episode_minutes": int(project.get("target_minutes") or 0),
+        "actual_story_voice_seconds": total_story_seconds,
+        "total_chunks": len(chunks),
+        "total_stories": len(ordered_ids),
+        "chunks": chunks,
+    }
+
+
+@app.get("/api/projects/{project_id}/media/search-plan")
+def media_search_plan(project_id: str, chunk_minutes: float | None = None):
+    if chunk_minutes is not None and not 0.25 <= chunk_minutes <= 10:
+        raise HTTPException(400, "B-roll search chunk must be between 0.25 and 10 minutes.")
+    with db() as conn:
+        return _build_media_search_chunks(conn, project_id, chunk_minutes)
+
+
 class MediaSearchBody(BaseModel):
     refresh: bool = True
     max_images_per_story: int = Field(default=3, ge=1, le=8)
     max_videos_per_story: int = Field(default=8, ge=1, le=16)
+    story_ids: list[str] | None = None
 
 
 @app.post("/api/projects/{project_id}/media/search")
 def search_included_story_media(project_id: str, body: MediaSearchBody):
     with db() as conn:
         project = project_or_404(conn, project_id)
-        stories = selected_story_packet(conn, project_id)
-    if not stories:
+        all_stories = selected_story_packet(conn, project_id)
+    if not all_stories:
         raise HTTPException(400, "Include at least one story before searching for media.")
+
+    stories = all_stories
+    if body.story_ids is not None:
+        requested = list(dict.fromkeys(body.story_ids))
+        allowed_ids = {story["id"] for story in all_stories}
+        invalid = [story_id for story_id in requested if story_id not in allowed_ids]
+        if invalid:
+            raise HTTPException(400, "Media search chunk contains a story that is no longer Included.")
+        story_by_id = {story["id"]: story for story in all_stories}
+        stories = [story_by_id[story_id] for story_id in requested]
+        if not stories:
+            raise HTTPException(400, "Media search chunk is empty.")
     with db() as conn:
         voice_total = conn.execute(
             "SELECT COUNT(*) c FROM voice_segments WHERE project_id=?",
@@ -1020,11 +1112,27 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
     reference_page_cache: dict[str, tuple[str, str]] = {}
     web_video_cache: dict[str, list[dict]] = {}
 
-    # Search every Included headline first. We then reconcile duplicate
-    # headlines that describe the same visual subject (for example two
-    # separate Ray Gunn articles) before deciding whether images are needed.
+    # Search this narration-time chunk only. Reuse high-quality videos already
+    # saved for duplicate subjects in earlier chunks.
     searched: list[dict] = []
     videos_by_subject: dict[str, list[dict]] = {}
+    current_story_ids = {story["id"] for story in stories}
+    with db() as conn:
+        for existing_story in all_stories:
+            if body.refresh and existing_story["id"] in current_story_ids:
+                continue
+            subject_key = story_media_key(existing_story)
+            rows = conn.execute(
+                """SELECT * FROM media_candidates
+                   WHERE project_id=? AND story_id=? AND media_type='video'
+                   ORDER BY selected DESC, height DESC, created_at DESC""",
+                (project_id, existing_story["id"]),
+            ).fetchall()
+            bucket = videos_by_subject.setdefault(subject_key, [])
+            for row in rows:
+                item = dict(row)
+                if not any(existing.get("page_url") == item.get("page_url") for existing in bucket):
+                    bucket.append(item)
     for story in stories:
         candidates, errors = search_story_media(
             story,
@@ -1173,7 +1281,13 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
     with db() as conn:
         conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
         save_manifest(conn, project_id)
-    return {"ok": True, "stories": len(stories), "added": total_added, "diagnostics": diagnostics}
+    return {
+        "ok": True,
+        "stories": len(stories),
+        "story_ids": [story["id"] for story in stories],
+        "added": total_added,
+        "diagnostics": diagnostics,
+    }
 
 
 @app.get("/api/projects/{project_id}/media/candidates")
