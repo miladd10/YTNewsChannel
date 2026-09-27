@@ -1,3 +1,3 @@
-APP_VERSION = "0.2.5"
+APP_VERSION = "0.2.6"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Exact-Relevance B-roll Picker"
+APP_RELEASE_NAME = "Current-Story B-roll Picker"
