@@ -79,3 +79,6 @@
 .media-iteration-stories{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
 .media-iteration-stories span{display:inline-flex;max-width:100%;padding:4px 7px;border:1px solid #2d3744;border-radius:999px;background:#111821;color:#aeb9c7;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(max-width:760px){.media-iteration-head{flex-direction:column}.media-iteration-head .btn{width:100%}}
+
+.story-broll-btn{min-width:128px;white-space:nowrap}
+.media-story-actions{align-items:center}
