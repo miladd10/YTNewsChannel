@@ -16,7 +16,7 @@ from .services.ai import generate_text
 from .services.local_cli import all_statuses, launch_login
 from .services.media import download_candidate, search_story_media, story_media_key, suggested_clip_range
 from .services.elevenlabs_client import ElevenLabsError, MODEL_ID as ELEVEN_MODEL_ID, forced_alignment, list_voices, mp3_duration_seconds, text_to_speech
-from .services.voice_pipeline import extract_narration_segments, prepare_performance
+from .services.voice_pipeline import extract_narration_segments, performance_text_is_safe, prepare_performance
 from .services.project_store import choose_folder, create_project_folder, reveal_in_file_manager, save_manifest
 from .services.prompts import CINEMA_WEEKLY_SECTIONS, MEDIA_PLAN_SYSTEM, NARRATION_SYSTEM
 from .services.research import ai_rank_stories, cluster_articles, fetch_google_news
@@ -383,6 +383,10 @@ class NarratorVoiceBody(BaseModel):
     voice_name: str = ""
 
 
+class PerformanceTextBody(BaseModel):
+    performance_text: str = Field(min_length=1)
+
+
 def _latest_narration(conn, project_id: str):
     return conn.execute(
         "SELECT * FROM narrations WHERE project_id=? ORDER BY version_number DESC LIMIT 1",
@@ -425,13 +429,14 @@ def _voice_payload(conn, project_id: str) -> dict:
             "voice_id": "",
             "voice_name": "",
             "model_id": ELEVEN_MODEL_ID,
-            "output_format": "mp3_44100_192",
+            "output_format": "mp3_44100_128",
             "prepared_narration_id": "",
         },
         "segments": segments,
         "story_durations": story_durations,
         "total_duration_seconds": round(sum(float(x.get("duration_seconds") or 0) for x in segments), 3),
-        "generated_count": sum(1 for x in segments if x.get("audio_status") in {"generated", "aligned"}),
+        "generated_count": sum(1 for x in segments if x.get("take1_path") or x.get("take2_path")),
+        "approved_count": sum(1 for x in segments if x.get("approval_status") == "approved"),
         "aligned_count": sum(1 for x in segments if x.get("audio_status") == "aligned"),
     }
 
@@ -499,14 +504,15 @@ def save_narrator_voice(project_id: str, body: NarratorVoiceBody):
                    updated_at=excluded.updated_at""",
             (
                 project_id, body.voice_id, body.voice_name, ELEVEN_MODEL_ID,
-                "mp3_44100_192", "", stamp,
+                "mp3_44100_128", "", stamp,
             ),
         )
         if voice_changed:
             conn.execute(
                 """UPDATE voice_segments
                    SET voice_id=?,audio_path='',duration_seconds=NULL,alignment_json='{}',
-                       audio_status='pending',updated_at=?
+                       audio_status='pending',take1_path='',take2_path='',selected_take=0,
+                       approval_status='pending',updated_at=?
                    WHERE project_id=?""",
                 (body.voice_id, stamp, project_id),
             )
@@ -546,13 +552,14 @@ def prepare_narrator_voice(project_id: str):
             conn.execute(
                 """INSERT INTO voice_segments(
                     id,project_id,narration_id,story_id,segment_index,source_text,performance_text,
-                    voice_id,audio_path,duration_seconds,alignment_json,audio_status,created_at,updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    voice_id,audio_path,duration_seconds,alignment_json,audio_status,
+                    take1_path,take2_path,selected_take,approval_status,created_at,updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     segment["id"], project_id, narration["id"], segment.get("story_id", ""),
                     segment["segment_index"], segment["source_text"],
                     performance.get(segment["id"], segment["source_text"]),
-                    settings["voice_id"], "", None, "{}", "prepared", stamp, stamp,
+                    settings["voice_id"], "", None, "{}", "prepared", "", "", 0, "pending", stamp, stamp,
                 ),
             )
         conn.execute(
