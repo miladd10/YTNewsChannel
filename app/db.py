@@ -15,6 +15,7 @@ PIPELINE = [
     (4, "voice", "Voice"),
     (5, "media-sources", "Media Sources"),
     (6, "downloads", "Downloads"),
+    (7, "resolve-plan", "Resolve Plan"),
 ]
 
 
