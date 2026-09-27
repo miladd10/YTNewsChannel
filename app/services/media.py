@@ -26,7 +26,8 @@ BROLL_TITLE_TERMS = (
 GENERIC_BROLL_TERMS = (
     "trailer", "teaser", "clip", "featurette", "behind the scenes", "making of",
     "first look", "sneak peek", "deleted scene", "red carpet", "premiere",
-    "press conference", "announcement", "reveal",
+    "press conference", "announcement", "reveal", "studio tour", "sizzle reel",
+    "showreel", "anniversary", "studio logo",
 )
 
 COMMENTARY_TITLE_TERMS = (
@@ -47,7 +48,7 @@ NEWS_CHANNEL_TERMS = (
 )
 
 OFFICIAL_CHANNEL_TERMS = (
-    "official", "pictures", "studios", "entertainment", "films", "film",
+    "official", "pictures", "studios", "entertainment", "films",
     "netflix", "warner bros", "warnerbrospictures", "paramount pictures",
     "universal pictures", "sony pictures", "marvel entertainment",
     "dc", "disney", "hbo", "apple tv", "prime video", "amazon mgm",
@@ -154,7 +155,7 @@ def _official_broll_strength(item: dict, story: dict) -> tuple[int, str]:
     if any(term in title for term in BROLL_TITLE_TERMS):
         if _looks_like_official_channel(source) or verified:
             return 5, "official B-roll"
-        return 3, "B-roll asset"
+        return 2, "unverified B-roll asset"
 
     if any(term in title for term in GENERIC_BROLL_TERMS):
         if _looks_like_official_channel(source):
@@ -223,17 +224,81 @@ def _quoted_subjects(text: str) -> list[str]:
     return list(dict.fromkeys(x.strip() for x in found if x.strip()))[:3]
 
 
+NEWS_VERBS = (
+    " gets ", " get ", " sets ", " set ", " breaks ", " reaches ", " settles ",
+    " sues ", " rejects ", " reveals ", " announces ", " adds ", " casts ",
+    " opens ", " wins ", " has ", " faces ", " plans ", " agrees ", " says ",
+)
+
+
+def _known_entities(text: str) -> list[str]:
+    lowered = (text or "").lower()
+    aliases = {
+        "paramount": "Paramount Pictures",
+        "warner": "Warner Bros",
+        "netflix": "Netflix",
+        "disney": "Disney",
+        "marvel": "Marvel",
+        "dc": "DC Studios",
+        "universal": "Universal Pictures",
+        "sony": "Sony Pictures",
+        "amazon mgm": "Amazon MGM",
+        "apple tv": "Apple TV",
+        "hbo": "HBO",
+        "a24": "A24",
+        "lionsgate": "Lionsgate",
+        "20th century": "20th Century Studios",
+        "searchlight": "Searchlight Pictures",
+        "focus features": "Focus Features",
+        "dreamworks": "DreamWorks",
+        "pixar": "Pixar",
+        "lucasfilm": "Lucasfilm",
+        "neon": "Neon",
+    }
+    found = []
+    for needle, canonical in aliases.items():
+        if re.search(rf"\b{re.escape(needle)}\b", lowered):
+            found.append(canonical)
+    return list(dict.fromkeys(found))[:3]
+
+
+def _compact_subject(text: str) -> str:
+    value = clean_story_query(text)
+    lower = f" {value.lower()} "
+    cut = len(value)
+    for verb in NEWS_VERBS:
+        index = lower.find(verb)
+        if index >= 0:
+            cut = min(cut, max(0, index - 1))
+    candidate = value[:cut].strip(" :-–—")
+    words = candidate.split()
+    if len(words) >= 2:
+        return " ".join(words[:8])
+    return value
+
+
 def _youtube_search_queries(story: dict) -> list[str]:
     base = clean_story_query(story.get("canonical_title", ""))
     quoted = _quoted_subjects(base)
-    subjects = quoted or [base]
+    entities = _known_entities(base)
+    compact = _compact_subject(base)
 
+    subjects = list(dict.fromkeys(quoted + ([compact] if compact else [])))
     queries: list[str] = []
-    for subject in subjects[:2]:
+    for subject in subjects[:3]:
         queries.extend([
             f'{subject} official trailer',
             f'{subject} official clip',
             f'{subject} official featurette behind the scenes',
+        ])
+
+    # Corporate/merger/legal stories often do not have event-specific footage.
+    # Pull clean corporate/studio B-roll from the companies involved instead.
+    for entity in entities:
+        queries.extend([
+            f'{entity} official studio tour',
+            f'{entity} official sizzle reel',
+            f'{entity} official trailer',
         ])
 
     if story_allows_interview_or_podcast(story):
@@ -242,7 +307,6 @@ def _youtube_search_queries(story: dict) -> list[str]:
             f'{base} podcast interview',
         ])
 
-    # Preserve order while removing duplicate queries.
     return list(dict.fromkeys(q.strip() for q in queries if q.strip()))
 
 
