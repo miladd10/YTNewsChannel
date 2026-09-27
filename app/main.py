@@ -741,6 +741,83 @@ def narration_audio(project_id: str, segment_id: str):
     return FileResponse(path, media_type="audio/mpeg", filename=path.name)
 
 
+
+@app.put("/api/projects/{project_id}/voice/{segment_id}/performance")
+def update_voice_performance(project_id: str, segment_id: str, body: PerformanceTextBody):
+    candidate = body.performance_text.strip()
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        row = conn.execute(
+            "SELECT * FROM voice_segments WHERE project_id=? AND id=?",
+            (project_id, segment_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Voice segment not found.")
+        row = dict(row)
+    if not performance_text_is_safe(row["source_text"], candidate):
+        raise HTTPException(
+            400,
+            "Performance text may change Eleven v3 tags, punctuation, pauses, capitalization, and spacing, "
+            "but it must keep the exact same spoken words in the same order.",
+        )
+    if candidate == (row.get("performance_text") or "").strip():
+        return {"ok": True, "changed": False}
+    clear_segment_files(Path(project["root_path"]), row)
+    with db() as conn:
+        conn.execute(
+            """UPDATE voice_segments
+               SET performance_text=?,audio_path='',duration_seconds=NULL,alignment_json='{}',
+                   audio_status='prepared',take1_path='',take2_path='',selected_take=0,
+                   approval_status='pending',updated_at=? WHERE id=?""",
+            (candidate, now(), segment_id),
+        )
+        save_manifest(conn, project_id)
+    return {"ok": True, "changed": True}
+
+
+@app.post("/api/projects/{project_id}/voice/{segment_id}/takes/{take_number}/generate")
+def generate_voice_take(project_id: str, segment_id: str, take_number: int):
+    try:
+        result = generate_voice_take_service(project_id, segment_id, take_number, now())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    with db() as conn:
+        save_manifest(conn, project_id)
+    return result
+
+
+@app.post("/api/projects/{project_id}/voice/{segment_id}/takes/{take_number}/approve")
+def approve_voice_take(project_id: str, segment_id: str, take_number: int):
+    try:
+        result = approve_voice_take_service(project_id, segment_id, take_number, now())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    with db() as conn:
+        save_manifest(conn, project_id)
+        result["workspace"] = _voice_payload(conn, project_id)
+    return result
+
+
+@app.get("/api/projects/{project_id}/voice/{segment_id}/takes/{take_number}/audio")
+def voice_take_audio(project_id: str, segment_id: str, take_number: int):
+    if take_number not in (1, 2):
+        raise HTTPException(400, "Take number must be 1 or 2.")
+    column = "take1_path" if take_number == 1 else "take2_path"
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        row = conn.execute(
+            f"SELECT {column} AS take_path FROM voice_segments WHERE project_id=? AND id=?",
+            (project_id, segment_id),
+        ).fetchone()
+    if not row or not row["take_path"]:
+        raise HTTPException(404, f"Take {take_number} has not been generated.")
+    root = Path(project["root_path"]).resolve()
+    path = (root / row["take_path"]).resolve()
+    if root not in path.parents or not path.exists():
+        raise HTTPException(404, "Audio file is missing.")
+    return FileResponse(path, media_type="audio/mpeg", filename=path.name)
+
+
 def _automatic_media_plan(stories: list[dict], narration_text: str = "") -> dict:
     beats = []
     for index, story in enumerate(stories, start=1):
