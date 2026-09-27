@@ -1,3 +1,3 @@
-APP_VERSION = "0.2.7"
+APP_VERSION = "0.2.8"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Shared-Subject Video Picker"
+APP_RELEASE_NAME = "Shared Clips + Run Progress"
