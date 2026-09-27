@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from .db import BASE_DIR, PIPELINE, db, init_db
 from .services.ai import generate_text
 from .services.local_cli import all_statuses, launch_login
+from .services.media import download_candidate, search_story_media
 from .services.project_store import choose_folder, create_project_folder, reveal_in_file_manager, save_manifest
 from .services.prompts import CINEMA_WEEKLY_SECTIONS, MEDIA_PLAN_SYSTEM, NARRATION_SYSTEM
 from .services.research import ai_rank_stories, cluster_articles, fetch_google_news
@@ -50,13 +51,16 @@ def latest_run_id(conn, project_id: str) -> str | None:
 def project_payload(conn, project_id: str) -> dict:
     project = project_or_404(conn, project_id)
     run_id = latest_run_id(conn, project_id)
-    counts = {"articles": 0, "stories": 0, "included": 0, "narrations": 0, "media_plans": 0}
+    counts = {"articles": 0, "stories": 0, "included": 0, "narrations": 0, "media_plans": 0, "media_candidates": 0, "media_selected": 0, "media_downloaded": 0}
     if run_id:
         counts["articles"] = conn.execute("SELECT COUNT(*) c FROM research_articles WHERE run_id=?", (run_id,)).fetchone()["c"]
         counts["stories"] = conn.execute("SELECT COUNT(*) c FROM stories WHERE run_id=?", (run_id,)).fetchone()["c"]
         counts["included"] = conn.execute("SELECT COUNT(*) c FROM stories WHERE run_id=? AND decision='include'", (run_id,)).fetchone()["c"]
     counts["narrations"] = conn.execute("SELECT COUNT(*) c FROM narrations WHERE project_id=?", (project_id,)).fetchone()["c"]
     counts["media_plans"] = conn.execute("SELECT COUNT(*) c FROM media_plans WHERE project_id=?", (project_id,)).fetchone()["c"]
+    counts["media_candidates"] = conn.execute("SELECT COUNT(*) c FROM media_candidates WHERE project_id=?", (project_id,)).fetchone()["c"]
+    counts["media_selected"] = conn.execute("SELECT COUNT(*) c FROM media_candidates WHERE project_id=? AND selected=1", (project_id,)).fetchone()["c"]
+    counts["media_downloaded"] = conn.execute("SELECT COUNT(*) c FROM media_candidates WHERE project_id=? AND download_status='downloaded'", (project_id,)).fetchone()["c"]
     project["latest_run_id"] = run_id
     project["counts"] = counts
     project["pipeline"] = PIPELINE
@@ -363,8 +367,40 @@ def list_narrations(project_id: str):
         return [dict(row) for row in conn.execute("SELECT * FROM narrations WHERE project_id=? ORDER BY version_number DESC", (project_id,)).fetchall()]
 
 
+def _automatic_media_plan(stories: list[dict], narration_text: str = "") -> dict:
+    beats = []
+    for index, story in enumerate(stories, start=1):
+        title = story.get("canonical_title", "")
+        beats.append({
+            "id": f"M{index:03d}",
+            "story_id": story.get("id", ""),
+            "story_title": title,
+            "narration_excerpt": "",
+            "visuals": [
+                {
+                    "type": "image",
+                    "search_intent": f"{title} movie official still poster",
+                    "preferred_source": "official studio / press photography / reputable publication",
+                    "why": "Establish the story visually with a relevant still, poster, event photo, or official announcement image.",
+                },
+                {
+                    "type": "video",
+                    "search_intent": f"{title} movie official trailer interview",
+                    "preferred_source": "official YouTube channel / studio / broadcaster / original interview",
+                    "why": "Provide motion footage directly related to the included story.",
+                },
+            ],
+        })
+    return {"beats": beats, "source": "automatic_included_story_plan", "has_narration": bool(narration_text.strip())}
+
+
 @app.post("/api/projects/{project_id}/media-plan")
 def generate_media_plan(project_id: str, body: GenerateBody):
+    """Build a reliable plan from Included stories.
+
+    AI enrichment is optional. A valid deterministic plan is always produced, so
+    media discovery never depends on a provider returning perfectly formatted JSON.
+    """
     settings = masked_status()
     provider = body.provider or settings.get("reviewer_provider", "claude_local")
     model = body.model or settings.get("reviewer_model", "default")
@@ -372,41 +408,56 @@ def generate_media_plan(project_id: str, body: GenerateBody):
         project = project_or_404(conn, project_id)
         narration = conn.execute("SELECT * FROM narrations WHERE project_id=? ORDER BY version_number DESC LIMIT 1", (project_id,)).fetchone()
         stories = selected_story_packet(conn, project_id)
-    if not narration:
-        raise HTTPException(400, "Generate narration first.")
-    packet = {"narration": narration["content"], "stories": stories, "instructions": body.instructions}
-    try:
-        text, actual_provider, actual_model = generate_text(provider, model, MEDIA_PLAN_SYSTEM, json.dumps(packet, ensure_ascii=False))
-        raw = text.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-        plan = json.loads(raw)
-        if not isinstance(plan, dict) or not isinstance(plan.get("beats"), list):
-            raise ValueError("AI did not return the expected media-plan JSON.")
-    except Exception as exc:
-        raise HTTPException(400, str(exc)) from exc
+    if not stories:
+        raise HTTPException(400, "Include at least one story before building media sources.")
+
+    narration_text = narration["content"] if narration else ""
+    plan = _automatic_media_plan(stories, narration_text)
+    actual_provider, actual_model = "automatic", "included-stories"
+    ai_error = ""
+    if narration and body.instructions.strip():
+        packet = {"narration": narration_text, "stories": stories, "instructions": body.instructions}
+        try:
+            text, actual_provider, actual_model = generate_text(provider, model, MEDIA_PLAN_SYSTEM, json.dumps(packet, ensure_ascii=False))
+            raw = text.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
+            ai_plan = json.loads(raw)
+            if isinstance(ai_plan, dict) and isinstance(ai_plan.get("beats"), list):
+                plan = ai_plan
+        except Exception as exc:
+            ai_error = str(exc)
+
     plan_id = str(uuid.uuid4())
     stamp = now()
+    narration_id = narration["id"] if narration else ""
     with db() as conn:
-        conn.execute(
-            "INSERT INTO media_plans(id,project_id,narration_id,content_json,provider,model,created_at) VALUES (?,?,?,?,?,?,?)",
-            (plan_id, project_id, narration["id"], json.dumps(plan, ensure_ascii=False), actual_provider, actual_model, stamp),
-        )
+        # Legacy table requires a narration FK. Store on disk only when narration
+        # does not exist yet; the media-search workflow itself does not require it.
+        if narration_id:
+            conn.execute(
+                "INSERT INTO media_plans(id,project_id,narration_id,content_json,provider,model,created_at) VALUES (?,?,?,?,?,?,?)",
+                (plan_id, project_id, narration_id, json.dumps(plan, ensure_ascii=False), actual_provider, actual_model, stamp),
+            )
         root = Path(project["root_path"])
         (root / "media-plan" / f"{plan_id}.json").write_text(json.dumps(plan, indent=2, ensure_ascii=False), encoding="utf-8")
         save_manifest(conn, project_id)
-    return {"id": plan_id, "plan": plan, "provider": actual_provider, "model": actual_model}
+    return {"id": plan_id, "plan": plan, "provider": actual_provider, "model": actual_model, "ai_error": ai_error}
 
 
 @app.get("/api/projects/{project_id}/media-plan")
 def latest_media_plan(project_id: str):
     with db() as conn:
         project_or_404(conn, project_id)
+        stories = selected_story_packet(conn, project_id)
         row = conn.execute("SELECT * FROM media_plans WHERE project_id=? ORDER BY created_at DESC LIMIT 1", (project_id,)).fetchone()
-        if not row:
+        if row:
+            item = dict(row)
+            item["plan"] = json.loads(item.pop("content_json") or "{}")
+        elif stories:
+            item = {"id": "automatic", "provider": "automatic", "model": "included-stories", "plan": _automatic_media_plan(stories)}
+        else:
             return None
-        item = dict(row)
-        item["plan"] = json.loads(item.pop("content_json") or "{}")
         for beat in item["plan"].get("beats", []):
             for visual in beat.get("visuals", []):
                 q = visual.get("search_intent", "")
@@ -416,6 +467,182 @@ def latest_media_plan(project_id: str):
                     "reddit": f"https://www.reddit.com/search/?q={quote_plus(q)}",
                 }
         return item
+
+
+class MediaSearchBody(BaseModel):
+    refresh: bool = True
+    max_images_per_story: int = Field(default=10, ge=1, le=20)
+    max_videos_per_story: int = Field(default=8, ge=1, le=20)
+
+
+@app.post("/api/projects/{project_id}/media/search")
+def search_included_story_media(project_id: str, body: MediaSearchBody):
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        stories = selected_story_packet(conn, project_id)
+    if not stories:
+        raise HTTPException(400, "Include at least one story before searching for media.")
+
+    diagnostics = []
+    total_added = 0
+    stamp = now()
+    for story in stories:
+        candidates, errors = search_story_media(
+            story,
+            max_images=body.max_images_per_story,
+            max_videos=body.max_videos_per_story,
+        )
+        with db() as conn:
+            if body.refresh:
+                conn.execute(
+                    """DELETE FROM media_candidates
+                       WHERE project_id=? AND story_id=? AND selected=0 AND download_status<>'downloaded'""",
+                    (project_id, story["id"]),
+                )
+            existing = {
+                (row["media_type"], row["page_url"])
+                for row in conn.execute(
+                    "SELECT media_type,page_url FROM media_candidates WHERE project_id=? AND story_id=?",
+                    (project_id, story["id"]),
+                ).fetchall()
+            }
+            added = 0
+            for item in candidates:
+                key = (item["media_type"], item["page_url"])
+                if key in existing:
+                    continue
+                conn.execute(
+                    """INSERT INTO media_candidates(
+                        id,project_id,story_id,media_type,title,page_url,asset_url,thumbnail_url,source,provider,
+                        duration,published_at,width,height,search_query,selected,download_status,stored_path,error,
+                        rights_status,created_at,updated_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        item["id"], project_id, story["id"], item["media_type"], item["title"], item["page_url"],
+                        item["asset_url"], item["thumbnail_url"], item["source"], item["provider"], item["duration"],
+                        item["published_at"], item["width"], item["height"], item["search_query"], 0, "not_downloaded",
+                        "", "", "unverified", stamp, stamp,
+                    ),
+                )
+                existing.add(key)
+                added += 1
+            total_added += added
+        diagnostics.append({
+            "story_id": story["id"],
+            "story_title": story["canonical_title"],
+            "found": len(candidates),
+            "added": added,
+            "errors": errors,
+        })
+
+    with db() as conn:
+        conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
+        save_manifest(conn, project_id)
+    return {"ok": True, "stories": len(stories), "added": total_added, "diagnostics": diagnostics}
+
+
+@app.get("/api/projects/{project_id}/media/candidates")
+def media_candidates(project_id: str):
+    with db() as conn:
+        project_or_404(conn, project_id)
+        stories = selected_story_packet(conn, project_id)
+        output = []
+        for story in stories:
+            rows = conn.execute(
+                """SELECT * FROM media_candidates
+                   WHERE project_id=? AND story_id=?
+                   ORDER BY media_type, selected DESC, created_at""",
+                (project_id, story["id"]),
+            ).fetchall()
+            candidates = []
+            for row in rows:
+                item = dict(row)
+                item["selected"] = bool(item["selected"])
+                candidates.append(item)
+            output.append({
+                "story": {
+                    "id": story["id"],
+                    "title": story["canonical_title"],
+                    "summary": story.get("summary", ""),
+                    "category": story.get("category", ""),
+                    "articles": story.get("articles", []),
+                },
+                "candidates": candidates,
+            })
+        return output
+
+
+class MediaSelectionBody(BaseModel):
+    selected: bool
+
+
+@app.patch("/api/projects/{project_id}/media/candidates/{candidate_id}")
+def set_media_candidate_selected(project_id: str, candidate_id: str, body: MediaSelectionBody):
+    with db() as conn:
+        project_or_404(conn, project_id)
+        row = conn.execute(
+            "SELECT 1 FROM media_candidates WHERE id=? AND project_id=?",
+            (candidate_id, project_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Media candidate not found")
+        conn.execute(
+            "UPDATE media_candidates SET selected=?,updated_at=? WHERE id=?",
+            (1 if body.selected else 0, now(), candidate_id),
+        )
+        save_manifest(conn, project_id)
+    return {"ok": True, "selected": body.selected}
+
+
+@app.post("/api/projects/{project_id}/media/download-selected")
+def download_selected_media(project_id: str):
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        rows = conn.execute(
+            """SELECT c.*,s.canonical_title AS story_title
+               FROM media_candidates c
+               JOIN stories s ON s.id=c.story_id
+               WHERE c.project_id=? AND c.selected=1
+               ORDER BY c.story_id,c.media_type,c.created_at""",
+            (project_id,),
+        ).fetchall()
+        candidates = [dict(row) for row in rows]
+    if not candidates:
+        raise HTTPException(400, "Select at least one image or video first.")
+
+    results = []
+    root = Path(project["root_path"])
+    for candidate in candidates:
+        if candidate.get("download_status") == "downloaded" and candidate.get("stored_path"):
+            results.append({"id": candidate["id"], "ok": True, "stored_path": candidate["stored_path"], "already_downloaded": True})
+            continue
+        try:
+            path = download_candidate(candidate, root, candidate["story_title"])
+            relative = path.resolve().relative_to(root.resolve()).as_posix()
+            with db() as conn:
+                conn.execute(
+                    "UPDATE media_candidates SET download_status='downloaded',stored_path=?,error='',updated_at=? WHERE id=?",
+                    (relative, now(), candidate["id"]),
+                )
+            results.append({"id": candidate["id"], "ok": True, "stored_path": relative})
+        except Exception as exc:
+            message = str(exc)
+            with db() as conn:
+                conn.execute(
+                    "UPDATE media_candidates SET download_status='failed',error=?,updated_at=? WHERE id=?",
+                    (message[:1200], now(), candidate["id"]),
+                )
+            results.append({"id": candidate["id"], "ok": False, "error": message})
+
+    with db() as conn:
+        save_manifest(conn, project_id)
+    return {
+        "ok": all(item["ok"] for item in results),
+        "downloaded": sum(1 for item in results if item["ok"]),
+        "failed": sum(1 for item in results if not item["ok"]),
+        "results": results,
+        "rights_note": "Downloaded files keep an unverified rights status. Verify permission/licensing before publishing reused media.",
+    }
 
 
 @app.get("/api/settings")
