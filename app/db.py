@@ -167,6 +167,10 @@ def init_db() -> None:
                 duration_seconds REAL,
                 alignment_json TEXT NOT NULL DEFAULT '{}',
                 audio_status TEXT NOT NULL DEFAULT 'pending',
+                take1_path TEXT NOT NULL DEFAULT '',
+                take2_path TEXT NOT NULL DEFAULT '',
+                selected_take INTEGER NOT NULL DEFAULT 0,
+                approval_status TEXT NOT NULL DEFAULT 'pending',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -214,6 +218,14 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_media_candidates_selected ON media_candidates(project_id, selected);
             """
         )
+        if not _column_exists(conn, "voice_segments", "take1_path"):
+            conn.execute("ALTER TABLE voice_segments ADD COLUMN take1_path TEXT NOT NULL DEFAULT ''")
+        if not _column_exists(conn, "voice_segments", "take2_path"):
+            conn.execute("ALTER TABLE voice_segments ADD COLUMN take2_path TEXT NOT NULL DEFAULT ''")
+        if not _column_exists(conn, "voice_segments", "selected_take"):
+            conn.execute("ALTER TABLE voice_segments ADD COLUMN selected_take INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists(conn, "voice_segments", "approval_status"):
+            conn.execute("ALTER TABLE voice_segments ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'pending'")
         if not _column_exists(conn, "media_candidates", "clip_start_sec"):
             conn.execute("ALTER TABLE media_candidates ADD COLUMN clip_start_sec INTEGER")
         if not _column_exists(conn, "media_candidates", "clip_end_sec"):
