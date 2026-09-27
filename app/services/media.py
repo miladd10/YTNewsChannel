@@ -280,9 +280,8 @@ def _matches_actual_story_subject(item: dict, story: dict) -> bool:
         corporate_visual = any(term in title.lower() for term in CORPORATE_BROLL_TERMS)
         return entity_match and corporate_visual
 
-    if query_subject and _distinctive_subject_words(query_subject):
-        return _subject_matches(query_subject, f"{title} {description}")
-
+    # Search queries may add a year or distributor name to improve discovery,
+    # but acceptance is always based on the actual primary story subject.
     return any(_subject_matches(subject, f"{title} {description}") for subject in _story_subjects(story))
 
 
@@ -484,6 +483,32 @@ def _compact_subject(text: str) -> str:
     return value
 
 
+def story_media_key(story: dict) -> str:
+    """Stable key for duplicate headlines covering the same visual subject."""
+    if _is_corporate_story(story):
+        entities = _known_entities(_story_text(story))
+        return "corporate:" + "|".join(sorted(x.lower() for x in entities))
+    subjects = _story_subjects(story)
+    subject = subjects[0] if subjects else clean_story_query(story.get("canonical_title", ""))
+    words = _distinctive_subject_words(subject)
+    return "title:" + " ".join(words or _normalized_words(subject))
+
+
+def _story_distributors(story: dict) -> list[str]:
+    """Known studio/distributor names mentioned anywhere in the story packet."""
+    if _is_corporate_story(story):
+        return []
+    subject_words = set(_distinctive_subject_words((_story_subjects(story) or [""])[0]))
+    distributors = []
+    for entity in _known_entities(_story_text(story)):
+        # Do not treat a title word that happens to resemble a company as a
+        # distributor unless the entity contributes something beyond the title.
+        entity_words = set(_distinctive_subject_words(entity))
+        if entity_words and entity_words != subject_words:
+            distributors.append(entity)
+    return list(dict.fromkeys(distributors))[:3]
+
+
 def _youtube_search_queries(story: dict) -> list[str]:
     base = clean_story_query(story.get("canonical_title", ""))
 
@@ -500,9 +525,13 @@ def _youtube_search_queries(story: dict) -> list[str]:
     subjects = _story_subjects(story)
     story_year = _story_reference_year(story)
     queries: list[str] = []
+    distributors = _story_distributors(story)
     for subject in subjects[:2]:
         if story_year:
             queries.append(f'{subject} {story_year} official trailer')
+        for distributor in distributors:
+            queries.append(f'{subject} {distributor} official trailer')
+            queries.append(f'{subject} {distributor} official clip')
         queries.extend([
             f'{subject} official trailer',
             f'{subject} official clip',
