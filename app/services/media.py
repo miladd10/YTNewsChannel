@@ -159,18 +159,32 @@ def suggested_clip_range(duration, usage_index: int = 0, clip_seconds: int = 12)
     return int(start), int(min(total, start + length))
 
 
-def _story_text(story: dict) -> str:
+def _story_context_text(story: dict) -> str:
     parts = [
         str(story.get("canonical_title") or ""),
         str(story.get("summary") or ""),
+        str(story.get("_narration_text") or ""),
     ]
     for article in story.get("articles") or []:
         parts.append(str(article.get("title") or ""))
-    return " ".join(parts).lower()
+    return " ".join(parts)
+
+
+def _story_text(story: dict) -> str:
+    return _story_context_text(story).lower()
+
+
+PERSON_BROLL_TERMS = (
+    "interview", "press junket", "press conference", "red carpet",
+    "world premiere", "premiere", "conversation with", "talks with",
+    "talks to", "speaks with", "speaks to", "behind the scenes",
+)
 
 
 def story_allows_interview_or_podcast(story: dict) -> bool:
-    """Only permit spoken-source footage when the news itself is sourced from it."""
+    """Permit spoken/event footage only for a story or contextual fallback that calls for it."""
+    if story.get("_allow_spoken_broll"):
+        return True
     text = _story_text(story)
     return any(term in text for term in SPOKEN_SOURCE_TERMS)
 
@@ -238,6 +252,9 @@ def _subject_matches(value: str, target_text: str) -> bool:
 
 
 def _story_subjects(story: dict) -> list[str]:
+    override = str(story.get("_media_subject_override") or "").strip()
+    if override:
+        return [override]
     base = clean_story_query(story.get("canonical_title", ""))
 
     # Prefer a quoted phrase that behaves like an actual title. Entertainment
@@ -321,6 +338,8 @@ def _item_year(item: dict) -> int | None:
 
 
 def _requires_recent_media(story: dict) -> bool:
+    if story.get("_allow_archive_media"):
+        return False
     if _is_corporate_story(story):
         return False
     return str(story.get("category") or "").lower() in {
@@ -418,7 +437,7 @@ def _video_rejection_reason(item: dict, story: dict) -> str | None:
     if _is_news_or_commentary_channel(source):
         # A verified publication can be the original interview source, but only
         # when this story is explicitly about that interview/podcast.
-        spoken = any(term in title for term in SPOKEN_SOURCE_TERMS) or "podcast" in source
+        spoken = any(term in title for term in PERSON_BROLL_TERMS) or "podcast" in source
         if not (allow_spoken and spoken and bool(item.get("channel_is_verified"))):
             return "news/commentary/aggregator channel"
 
@@ -458,7 +477,7 @@ def _official_broll_strength(item: dict, story: dict) -> tuple[int, str]:
             return 5, "official company B-roll"
         return 0, ""
 
-    if allow_spoken and (any(term in title for term in SPOKEN_SOURCE_TERMS) or "podcast" in source):
+    if allow_spoken and (any(term in title for term in PERSON_BROLL_TERMS) or "podcast" in source):
         return 5, "original interview/podcast"
 
     if _reference_direct_asset_is_official(item, story):
@@ -743,6 +762,89 @@ def _story_distributors(story: dict) -> list[str]:
             distributors.append(entity)
     return list(dict.fromkeys(distributors))[:3]
 
+
+
+
+PERSON_ROLE_PATTERN = re.compile(
+    r"\b(?:directed\s+by|director|filmmaker|actor|actress|star|starring|creator|showrunner)\s+"
+    r"([A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’.-]+(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’.-]+){1,3})"
+)
+PERSON_SPEECH_PATTERN = re.compile(
+    r"\b([A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’.-]+(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’.-]+){1,2})\s+"
+    r"(?:says|said|tells|reveals|explains|discusses|talks|speaks)\b"
+)
+
+
+def _story_people(story: dict) -> list[str]:
+    text = _story_context_text(story)
+    found: list[str] = []
+    for pattern in (PERSON_ROLE_PATTERN, PERSON_SPEECH_PATTERN):
+        for match in pattern.finditer(text):
+            name = re.sub(r"\s+", " ", match.group(1)).strip(" ,:-")
+            if len(name.split()) >= 2 and name not in found:
+                found.append(name)
+    return found[:3]
+
+
+def _story_has_quote_or_person_context(story: dict) -> bool:
+    narration = str(story.get("_narration_text") or "")
+    text = _story_text(story)
+    quote_in_narration = bool(re.search(r'["“”‘’][^"“”‘’]{4,}["“”‘’]', narration))
+    role_or_speech = bool(re.search(
+        r"\b(director|filmmaker|actor|actress|star|cast|creator|showrunner|"
+        r"says|said|tells|reveals|explains|discusses|quote|quoted)\b",
+        text,
+    ))
+    return quote_in_narration or role_or_speech
+
+
+def _franchise_subject(subject: str) -> str:
+    value = re.sub(r"\s+", " ", subject or "").strip(" :-–—")
+    if not value:
+        return ""
+    if ":" in value:
+        prefix = value.split(":", 1)[0].strip()
+        if len(_distinctive_subject_words(prefix)) >= 1:
+            return prefix
+    # Common numbered/sequel suffixes can still use the franchise name.
+    value = re.sub(r"\s+(?:part|chapter|volume|season)\s+[ivx0-9]+.*$", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s+[2-9]\d*\s*$", "", value)
+    return value.strip()
+
+
+def _contextual_fallback_stories(story: dict) -> list[tuple[dict, str]]:
+    """Build controlled fallback searches without weakening exact-title rules."""
+    variants: list[tuple[dict, str]] = []
+
+    if _story_has_quote_or_person_context(story):
+        for person in _story_people(story):
+            variant = dict(story)
+            variant["_media_subject_override"] = person
+            variant["_allow_spoken_broll"] = True
+            variant["_allow_archive_media"] = True
+            variant["_contextual_kind"] = "cast/director"
+            variant["category"] = "celebrities"
+            variants.append((variant, "cast/director"))
+
+    subject = (_story_subjects(story) or [""])[0]
+    franchise = _franchise_subject(subject)
+    if franchise and not _is_corporate_story(story):
+        variant = dict(story)
+        variant["_media_subject_override"] = franchise
+        variant["_allow_archive_media"] = True
+        variant["_contextual_kind"] = "previous installment/franchise"
+        variants.append((variant, "previous installment/franchise"))
+
+    # Deduplicate equivalent subject+kind fallbacks.
+    seen: set[tuple[str, str]] = set()
+    output: list[tuple[dict, str]] = []
+    for variant, kind in variants:
+        key = (str(variant.get("_media_subject_override") or "").lower(), kind)
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append((variant, kind))
+    return output
 
 
 REFERENCE_VIDEO_HOSTS = (
@@ -1044,6 +1146,23 @@ OFFICIAL_WEB_DOMAIN_TERMS = (
 
 
 def _web_video_search_queries(story: dict) -> list[str]:
+    contextual_kind = str(story.get("_contextual_kind") or "")
+    contextual_subject = (_story_subjects(story) or [clean_story_query(story.get("canonical_title", ""))])[0]
+    if contextual_kind == "cast/director":
+        return list(dict.fromkeys([
+            f'"{contextual_subject}" interview 4K',
+            f'"{contextual_subject}" press junket 1080p',
+            f'"{contextual_subject}" red carpet premiere',
+            f'"{contextual_subject}" behind the scenes',
+        ]))
+    if contextual_kind == "previous installment/franchise":
+        return list(dict.fromkeys([
+            f'"{contextual_subject}" "official trailer" 4K',
+            f'"{contextual_subject}" "official clip" 4K',
+            f'"{contextual_subject}" official featurette',
+            f'"{contextual_subject}" official trailer site:vimeo.com',
+        ]))
+
     if _is_corporate_story(story):
         queries: list[str] = []
         for entity in _known_entities(_story_text(story)):
@@ -1183,6 +1302,24 @@ def _search_web_video_sources(
 
 def _youtube_search_queries(story: dict) -> list[str]:
     base = clean_story_query(story.get("canonical_title", ""))
+
+    contextual_kind = str(story.get("_contextual_kind") or "")
+    contextual_subject = (_story_subjects(story) or [base])[0]
+    if contextual_kind == "cast/director":
+        return list(dict.fromkeys([
+            f'{contextual_subject} interview',
+            f'{contextual_subject} press junket',
+            f'{contextual_subject} press conference',
+            f'{contextual_subject} red carpet premiere',
+            f'{contextual_subject} behind the scenes',
+        ]))
+    if contextual_kind == "previous installment/franchise":
+        return list(dict.fromkeys([
+            f'{contextual_subject} official trailer 4K',
+            f'{contextual_subject} official trailer',
+            f'{contextual_subject} official clip',
+            f'{contextual_subject} official featurette',
+        ]))
 
     if _is_corporate_story(story):
         queries: list[str] = []
