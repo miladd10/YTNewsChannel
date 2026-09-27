@@ -1,5 +1,5 @@
 import app.services.media as media_module
-from app.services.media import _contextual_fallback_stories, _dedupe_quality_first_results, _extract_reference_video_urls, _reference_resolution_queries, _story_subjects, _youtube_search_queries, search_story_media, story_allows_interview_or_podcast, story_media_key, story_visual_plan, suggested_clip_range, video_is_usable_broll
+from app.services.media import _contextual_fallback_stories, _dedupe_quality_first_results, _extract_reference_image_urls, _extract_reference_video_urls, _reference_resolution_queries, _story_subjects, _youtube_search_queries, search_story_media, story_allows_interview_or_podcast, story_media_key, story_visual_plan, suggested_clip_range, video_is_usable_broll
 
 
 def normal_story():
@@ -657,3 +657,40 @@ def test_reference_hd_video_skips_broad_search_for_covered_story(monkeypatch):
     assert len(results) == 1
     assert results[0]["coverage_label"] == "Werwulf"
     assert results[0]["coverage_kind"] == "current"
+
+
+
+def test_lord_of_rings_tv_series_is_not_current_movie_footage():
+    story = {
+        "canonical_title": "Lord of the Rings takes us back to the Shire in first look at new movie from Andy Serkis",
+        "summary": "A first look at the new Lord of the Rings movie from Andy Serkis was released.",
+        "category": "upcoming_films",
+        "articles": [{"title": "Lord of the Rings first look at new movie", "published_at": "2026-09-26"}],
+    }
+    rings_of_power = {
+        "title": "The Lord of The Rings: The Rings of Power - Official Teaser Trailer | Prime Video",
+        "channel": "Amazon Prime Video UK & IE",
+        "channel_is_verified": True,
+        "height": 1080,
+        "upload_date": "20260701",
+        "_search_query": "Lord of the Rings official trailer",
+    }
+    assert not video_is_usable_broll(rings_of_power, story)
+
+    archive_story = dict(story)
+    archive_story["_media_subject_override"] = "Lord of the Rings"
+    archive_story["_allow_archive_media"] = True
+    archive_story["_contextual_kind"] = "previous installment/franchise"
+    assert video_is_usable_broll(rings_of_power, archive_story)
+
+
+def test_reference_article_image_extracts_og_image_before_web_search_fallback():
+    html = """
+    <html><head>
+      <meta property="og:image" content="https://cdn.example.com/narnia-first-look.jpg">
+      <meta name="twitter:image" content="/images/narnia-twitter.jpg">
+    </head></html>
+    """
+    images = _extract_reference_image_urls(html, "https://www.netflix.com/tudum/articles/narnia")
+    assert images[0] == "https://cdn.example.com/narnia-first-look.jpg"
+    assert "https://www.netflix.com/images/narnia-twitter.jpg" in images
