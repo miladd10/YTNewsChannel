@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.1"
+APP_VERSION = "0.3.2"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Per-Segment Voice Takes"
+APP_RELEASE_NAME = "Resolve Media Relink Fix"
