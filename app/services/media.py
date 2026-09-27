@@ -1003,6 +1003,155 @@ def _search_reference_page_videos(
     return results, errors
 
 
+
+OFFICIAL_WEB_DOMAIN_TERMS = (
+    "netflix.com", "warnerbros.com", "warnerbros.co.uk", "paramount.com",
+    "paramountpictures.com", "sonypictures.com", "marvel.com", "disney.com",
+    "universalpictures.com", "focusfeatures.com", "a24films.com", "lionsgate.com",
+    "20thcenturystudios.com", "searchlightpictures.com", "dreamworks.com",
+    "pixar.com", "lucasfilm.com", "max.com", "hbomax.com", "primevideo.com",
+    "amazon.com", "apple.com", "tv.apple.com", "imax.com",
+)
+
+
+def _web_video_search_queries(story: dict) -> list[str]:
+    if _is_corporate_story(story):
+        queries: list[str] = []
+        for entity in _known_entities(_story_text(story)):
+            queries.extend([
+                f'"{entity}" official studio video 4K',
+                f'"{entity}" official company video 1080p',
+            ])
+        return list(dict.fromkeys(queries))
+
+    subject = (_story_subjects(story) or [clean_story_query(story.get("canonical_title", ""))])[0]
+    queries = [
+        f'"{subject}" "official trailer" 4K',
+        f'"{subject}" "official trailer" 1080p',
+        f'"{subject}" "official clip" 4K',
+        f'"{subject}" official video',
+        f'"{subject}" official trailer site:vimeo.com',
+        f'"{subject}" official trailer site:dailymotion.com',
+    ]
+    for distributor in _story_distributors(story):
+        queries.insert(0, f'"{subject}" "{distributor}" official trailer 4K')
+    if story_allows_interview_or_podcast(story):
+        queries.extend([
+            f'"{subject}" full interview 4K',
+            f'"{subject}" full interview 1080p',
+        ])
+    return list(dict.fromkeys(q.strip() for q in queries if q.strip()))
+
+
+def _web_result_might_be_video(url: str, title: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    if any(term in host for term in REFERENCE_VIDEO_HOSTS):
+        return True
+    if any(term in host for term in OFFICIAL_WEB_DOMAIN_TERMS):
+        lowered = (title or "").lower()
+        return any(term in lowered for term in GENERIC_BROLL_TERMS + BROLL_TITLE_TERMS)
+    return False
+
+
+def _search_web_video_sources(
+    story: dict,
+    max_videos: int,
+    search_cache: dict[str, list[dict]] | None = None,
+) -> tuple[list[dict], list[str]]:
+    """Search beyond YouTube/reference pages, then let yt-dlp inspect candidates."""
+    from ddgs import DDGS
+    from yt_dlp import YoutubeDL
+
+    search_cache = search_cache if search_cache is not None else {}
+    urls: list[tuple[str, str, str]] = []
+    errors: list[str] = []
+    for query in _web_video_search_queries(story):
+        cached = search_cache.get(query)
+        if cached is None:
+            try:
+                cached = [dict(x) for x in (DDGS().text(query, max_results=10) or [])]
+                search_cache[query] = [dict(x) for x in cached]
+            except Exception as exc:
+                errors.append(f"Web video search failed for '{query}': {exc}")
+                continue
+        for result in cached:
+            url = str(result.get("href") or result.get("url") or "").strip()
+            title = str(result.get("title") or "").strip()
+            if not url or not _web_result_might_be_video(url, title):
+                continue
+            urls.append((url, title, query))
+
+    if not urls:
+        return [], errors
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "extract_flat": False,
+        "socket_timeout": 20,
+    }
+    raw: list[dict] = []
+    seen_urls: set[str] = set()
+    with YoutubeDL(options) as ydl:
+        for url, result_title, query in urls[:24]:
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            try:
+                info = ydl.extract_info(url, download=False)
+                entries = (info or {}).get("entries") if isinstance(info, dict) else None
+                items = [x for x in entries or [] if x] if entries else [info]
+                for source_item in items:
+                    if not isinstance(source_item, dict):
+                        continue
+                    item = dict(source_item)
+                    item["_search_query"] = query
+                    item["_web_discovery"] = True
+                    if not item.get("title"):
+                        item["title"] = result_title
+                    raw.append(item)
+            except Exception as exc:
+                errors.append(f"Web video candidate could not be inspected: {url} · {exc}")
+
+    base = clean_story_query(story.get("canonical_title", ""))
+    usable = [item for item in raw if video_is_usable_broll(item, story)]
+    usable.sort(key=lambda item: _video_rank(item, story, base), reverse=True)
+
+    results: list[dict] = []
+    seen_pages: set[str] = set()
+    for item in usable:
+        video_id = str(item.get("id") or "").strip()
+        page_url = str(item.get("webpage_url") or item.get("original_url") or item.get("url") or "").strip()
+        if not page_url and video_id:
+            page_url = f"https://www.youtube.com/watch?v={video_id}"
+        if not page_url or page_url in seen_pages:
+            continue
+        seen_pages.add(page_url)
+        height = _max_video_height(item)
+        _, source_kind = _official_broll_strength(item, story)
+        host = (urlparse(page_url).hostname or "web").replace("www.", "")
+        results.append({
+            "id": str(uuid.uuid4()),
+            "media_type": "video",
+            "title": str(item.get("title") or base).strip(),
+            "page_url": page_url,
+            "asset_url": page_url,
+            "thumbnail_url": _youtube_thumbnail(item),
+            "source": str(item.get("channel") or item.get("uploader") or host).strip(),
+            "provider": f"Web video · {source_kind or 'official/original source'}",
+            "duration": str(item.get("duration_string") or item.get("duration") or "").strip(),
+            "published_at": str(item.get("upload_date") or item.get("release_date") or "").strip(),
+            "width": _as_int(item.get("width")),
+            "height": height,
+            "search_query": str(item.get("_search_query") or ""),
+        })
+        if len(results) >= max_videos:
+            break
+    return results, errors
+
+
 def _youtube_search_queries(story: dict) -> list[str]:
     base = clean_story_query(story.get("canonical_title", ""))
 
@@ -1253,6 +1402,7 @@ def search_story_media(
     max_videos: int = 12,
     query_cache: dict[str, list[dict]] | None = None,
     reference_page_cache: dict[str, tuple[str, str]] | None = None,
+    web_video_cache: dict[str, list[dict]] | None = None,
 ) -> tuple[list[dict], list[str]]:
     base = clean_story_query(story.get("canonical_title", ""))
     if not base:
@@ -1268,18 +1418,21 @@ def search_story_media(
         max_videos,
         query_cache=query_cache,
     )
-    errors = reference_errors + youtube_errors
+    web_videos, web_errors = _search_web_video_sources(
+        story,
+        max_videos=max_videos,
+        search_cache=web_video_cache,
+    )
+    errors = reference_errors + youtube_errors + web_errors
 
-    videos: list[dict] = []
-    seen_video_urls: set[str] = set()
-    for item in reference_videos + youtube_videos:
-        key = str(item.get("page_url") or "")
-        if not key or key in seen_video_urls:
-            continue
-        seen_video_urls.add(key)
-        videos.append(item)
-        if len(videos) >= max_videos:
-            break
+    # Source location is not priority. Compare every accepted copy globally and
+    # rank by resolution first: 4K > 1440p > 1080p > 720p. For likely mirrors of
+    # the same trailer/clip, keep the highest-quality/original copy first.
+    videos = _dedupe_quality_first_results(
+        reference_videos + youtube_videos + web_videos,
+        story,
+        max_videos,
+    )
 
     has_hd_video = any((_as_int(item.get("height")) or 0) >= 720 for item in videos)
 
