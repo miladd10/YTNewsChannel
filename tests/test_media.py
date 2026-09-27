@@ -367,3 +367,30 @@ def test_direct_video_on_news_site_is_not_automatically_official_broll():
         "_reference_article_title": "The Further Mis-Adventures of Cliff Booth trailer released",
     }
     assert not video_is_usable_broll(item, story)
+
+
+
+def test_official_reference_embed_for_title_named_in_multi_title_story_is_accepted():
+    story = {
+        "canonical_title": "Weekend Box Office: Avengers: Endgame Encore beats Resident Evil in week two",
+        "summary": "The weekend box office compared Avengers: Endgame Encore and Resident Evil.",
+        "category": "trend",
+        "articles": [
+            {
+                "title": "Weekend Box Office: Avengers: Endgame Encore beats Resident Evil in week two",
+                "source": "JoBlo",
+                "published_at": "2026-09-26",
+            }
+        ],
+    }
+    item = {
+        "title": "Avengers: Endgame Encore | Official Trailer",
+        "channel": "IMAX",
+        "channel_is_verified": True,
+        "height": 1080,
+        "upload_date": "20260920",
+        "_reference_page_url": "https://example.com/weekend-box-office",
+        "_reference_article_source": "JoBlo",
+        "_reference_article_title": "Weekend Box Office: Avengers: Endgame Encore beats Resident Evil in week two",
+    }
+    assert video_is_usable_broll(item, story)
