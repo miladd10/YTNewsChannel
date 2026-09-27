@@ -12,8 +12,7 @@ from .secrets import get_api_key
 
 BASE_URL = "https://api.elevenlabs.io"
 MODEL_ID = "eleven_v3"
-PREFERRED_OUTPUT_FORMAT = "mp3_44100_192"
-FALLBACK_OUTPUT_FORMAT = "mp3_44100_128"
+OUTPUT_FORMAT = "mp3_44100_128"
 V3_END_GUARD_TAG = "[short pause]"
 V3_ENDING_PAUSE_RE = re.compile(r"\[(?:short\s+|long\s+)?pause\]\s*$", re.IGNORECASE)
 V3_VOICE_SETTINGS = {
@@ -21,7 +20,6 @@ V3_VOICE_SETTINGS = {
     "similarity_boost": 0.75,
     "style": 0.0,
     "use_speaker_boost": True,
-    "speed": 1.0,
 }
 
 
@@ -76,32 +74,37 @@ def apply_v3_end_guard(text: str) -> tuple[str, bool]:
     return value + "\n\n" + V3_END_GUARD_TAG, True
 
 
-def _tts_once(voice_id: str, text: str, output_format: str) -> bytes:
+def text_to_speech(
+    voice_id: str,
+    text: str,
+    *,
+    previous_text: str | None = None,
+    next_text: str | None = None,
+    ensure_end_guard: bool = True,
+) -> bytes:
     encoded = urllib.parse.quote(voice_id, safe="")
-    synthesis_text, _ = apply_v3_end_guard(text)
+    synthesis_text, _ = apply_v3_end_guard(text) if ensure_end_guard else ((text or "").rstrip(), False)
     body = {
         "text": synthesis_text,
         "model_id": MODEL_ID,
         "apply_text_normalization": "auto",
         "voice_settings": dict(V3_VOICE_SETTINGS),
     }
+    # Keep the same behavior as video-studio: Eleven v3 does not accept
+    # previous_text / next_text request stitching, so continuity is handled by
+    # the prepared performance text rather than sending unsupported fields.
+    if MODEL_ID != "eleven_v3":
+        if previous_text:
+            body["previous_text"] = previous_text
+        if next_text:
+            body["next_text"] = next_text
     audio, _ = request(
         "POST",
-        f"/v1/text-to-speech/{encoded}?output_format={output_format}",
+        f"/v1/text-to-speech/{encoded}?output_format={OUTPUT_FORMAT}",
         body,
         timeout=240,
     )
     return audio
-
-
-def text_to_speech(voice_id: str, text: str) -> tuple[bytes, str]:
-    try:
-        return _tts_once(voice_id, text, PREFERRED_OUTPUT_FORMAT), PREFERRED_OUTPUT_FORMAT
-    except ElevenLabsError as first:
-        try:
-            return _tts_once(voice_id, text, FALLBACK_OUTPUT_FORMAT), FALLBACK_OUTPUT_FORMAT
-        except ElevenLabsError:
-            raise first
 
 
 def forced_alignment(audio_path: Path, text: str) -> dict:
