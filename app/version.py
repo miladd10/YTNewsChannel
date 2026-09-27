@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.8"
+APP_VERSION = "0.3.9"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Dismissible Run Progress"
+APP_RELEASE_NAME = "Selective B-roll Search"
