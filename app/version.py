@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.14"
+APP_VERSION = "0.3.15"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "B-roll Result Accuracy"
+APP_RELEASE_NAME = "Contextual B-roll Fallbacks"
