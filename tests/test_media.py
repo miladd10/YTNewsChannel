@@ -89,3 +89,13 @@ def test_interview_queries_only_added_for_interview_story():
     }
     queries = _youtube_search_queries(story)
     assert any("podcast interview" in q.lower() for q in queries)
+
+
+def test_trailer_aggregator_reupload_is_rejected():
+    item = {
+        "title": "Resident Evil Official Trailer",
+        "channel": "IGN",
+        "channel_is_verified": True,
+        "height": 2160,
+    }
+    assert not video_is_usable_broll(item, normal_story())
