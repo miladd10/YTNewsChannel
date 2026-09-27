@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -38,6 +39,67 @@ def default_week() -> tuple[str, str]:
     end = date.today() + timedelta(days=1)
     start = end - timedelta(days=7)
     return start.isoformat(), end.isoformat()
+
+
+def _resolve_input_signature(voice_rows: list[dict], candidates: list[dict]) -> str:
+    voice = [
+        {
+            "id": row.get("id"),
+            "audio_path": row.get("audio_path"),
+            "duration_seconds": round(float(row.get("duration_seconds") or 0), 6),
+            "selected_take": int(row.get("selected_take") or 0),
+            "approval_status": row.get("approval_status") or "",
+            "audio_status": row.get("audio_status") or "",
+        }
+        for row in sorted(voice_rows, key=lambda x: int(x.get("segment_index") or 0))
+    ]
+    media = [
+        {
+            "id": row.get("id"),
+            "story_id": row.get("story_id"),
+            "stored_path": row.get("stored_path"),
+            "download_status": row.get("download_status") or "",
+            "selected": int(row.get("selected") or 0),
+        }
+        for row in sorted(candidates, key=lambda x: (str(x.get("story_id") or ""), str(x.get("id") or "")))
+    ]
+    payload = json.dumps({"voice": voice, "media": media}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _resolve_prerequisites(voice_rows: list[dict], candidates: list[dict]) -> dict:
+    pending_voice = [
+        row for row in voice_rows
+        if row.get("approval_status") != "approved"
+        or row.get("audio_status") != "aligned"
+        or not row.get("audio_path")
+        or not row.get("duration_seconds")
+    ]
+    downloaded_by_story: dict[str, int] = {}
+    selected_downloaded = []
+    for row in candidates:
+        if not row.get("selected"):
+            continue
+        if row.get("download_status") != "downloaded" or not row.get("stored_path"):
+            continue
+        selected_downloaded.append(row)
+        story_id = str(row.get("story_id") or "")
+        downloaded_by_story[story_id] = downloaded_by_story.get(story_id, 0) + 1
+
+    narrated_story_ids = sorted({
+        str(row.get("story_id") or "")
+        for row in voice_rows
+        if str(row.get("story_id") or "")
+    })
+    missing_story_media = [story_id for story_id in narrated_story_ids if not downloaded_by_story.get(story_id)]
+    return {
+        "voice_total": len(voice_rows),
+        "voice_pending": len(pending_voice),
+        "selected_downloaded": len(selected_downloaded),
+        "narrated_story_count": len(narrated_story_ids),
+        "stories_missing_downloaded_media": missing_story_media,
+        "ready": bool(voice_rows) and not pending_voice and bool(selected_downloaded) and not missing_story_media,
+    }
 
 
 def project_or_404(conn, project_id: str) -> dict:
@@ -1255,20 +1317,38 @@ def download_selected_media(project_id: str):
 def get_resolve_plan(project_id: str):
     with db() as conn:
         project = project_or_404(conn, project_id)
+        voice_rows = [dict(row) for row in conn.execute(
+            "SELECT * FROM voice_segments WHERE project_id=? ORDER BY segment_index",
+            (project_id,),
+        ).fetchall()]
+        candidates = [dict(row) for row in conn.execute(
+            """SELECT * FROM media_candidates
+               WHERE project_id=? AND selected=1
+               ORDER BY story_id,media_type,created_at""",
+            (project_id,),
+        ).fetchall()]
+
+    prerequisites = _resolve_prerequisites(voice_rows, candidates)
+    current_signature = _resolve_input_signature(voice_rows, candidates)
     root = Path(project["root_path"])
     plan_path = root / "timing" / "resolve_plan.json"
     manifest_path = root / "resolve" / "package_manifest.json"
+
     if not plan_path.exists():
         return {
             "ready": False,
+            "stale": False,
             "plan": None,
             "files": [],
-            "message": "Generate the Resolve Plan after voice timing and selected media downloads are ready.",
+            "prerequisites": prerequisites,
+            "message": "Generate the Resolve Plan after approved voice timing and downloaded selected media are ready.",
         }
+
     try:
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
     except Exception:
         plan = None
+
     files = []
     for relative in (
         "resolve/news_timeline.otio",
@@ -1285,11 +1365,35 @@ def get_resolve_plan(project_id: str):
             "exists": path.exists(),
             "size": path.stat().st_size if path.exists() else 0,
         })
+
+    package_signature = str((plan or {}).get("input_signature") or "")
+    stale = not package_signature or package_signature != current_signature
+    files_complete = bool(plan and manifest_path.exists() and all(item["exists"] for item in files))
+    ready = bool(files_complete and prerequisites["ready"] and not stale)
+
+    message = ""
+    if prerequisites["voice_pending"]:
+        message = f"{prerequisites['voice_pending']} voice segment(s) still need an approved aligned take in Step 4."
+    elif prerequisites["stories_missing_downloaded_media"]:
+        message = (
+            f"{len(prerequisites['stories_missing_downloaded_media'])} narrated story/stories have no downloaded selected media. "
+            "Complete Steps 5–6 before Resolve planning."
+        )
+    elif not prerequisites["selected_downloaded"]:
+        message = "Select and download media in Steps 5–6 before Resolve planning."
+    elif stale:
+        message = "The existing Resolve package is from an older voice/media state. Regenerate it before importing into Resolve."
+    elif not files_complete:
+        message = "The Resolve package is incomplete. Regenerate it."
+
     return {
-        "ready": bool(plan and manifest_path.exists() and all(item["exists"] for item in files)),
-        "plan": plan,
+        "ready": ready,
+        "stale": stale,
+        "plan": plan if ready else None,
         "files": files,
+        "prerequisites": prerequisites,
         "resolve_folder": str(root / "resolve"),
+        "message": message,
     }
 
 
@@ -1308,28 +1412,46 @@ def generate_resolve_plan(project_id: str):
                ORDER BY story_id,media_type,created_at""",
             (project_id,),
         ).fetchall()]
+
+    prerequisites = _resolve_prerequisites(voice_rows, candidates)
     if not voice_rows:
         raise HTTPException(400, "Generate the narrator voice first.")
-    pending_voice = [x for x in voice_rows if x.get("approval_status") != "approved" or x.get("audio_status") != "aligned" or not x.get("audio_path") or not x.get("duration_seconds")]
-    if pending_voice:
+    if prerequisites["voice_pending"]:
         raise HTTPException(
             400,
-            f"{len(pending_voice)} voice segment(s) still need generation/alignment before Resolve planning.",
+            f"{prerequisites['voice_pending']} voice segment(s) still need an approved aligned take in Step 4.",
         )
     if not candidates:
         raise HTTPException(400, "Select and download media before generating the Resolve Plan.")
-    missing_media = [x for x in candidates if x.get("download_status") != "downloaded" or not x.get("stored_path")]
+
+    missing_media = [
+        row for row in candidates
+        if row.get("download_status") != "downloaded" or not row.get("stored_path")
+    ]
     if missing_media:
         raise HTTPException(
             400,
             f"{len(missing_media)} selected media item(s) have not been downloaded yet.",
         )
+    if prerequisites["stories_missing_downloaded_media"]:
+        raise HTTPException(
+            400,
+            f"{len(prerequisites['stories_missing_downloaded_media'])} narrated story/stories have no downloaded selected media. "
+            "Choose at least one media item for each narrated story in Step 5 and download them in Step 6.",
+        )
 
     try:
         plan = build_edit_plan(project, voice_rows, candidates, fps=30)
+        plan["input_signature"] = _resolve_input_signature(voice_rows, candidates)
         files = write_resolve_package(Path(project["root_path"]), plan)
     except Exception as exc:
         raise HTTPException(400, f"Could not build Resolve package: {exc}") from exc
+
+    if not plan.get("visual_clips"):
+        raise HTTPException(
+            400,
+            "No visual clips were planned. Return to Media Sources and Downloads before generating Resolve.",
+        )
 
     with db() as conn:
         conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
