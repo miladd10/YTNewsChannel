@@ -17,6 +17,7 @@ from .services.local_cli import all_statuses, launch_login
 from .services.media import download_candidate, search_story_media, story_media_key, suggested_clip_range
 from .services.elevenlabs_client import ElevenLabsError, MODEL_ID as ELEVEN_MODEL_ID, forced_alignment, list_voices, mp3_duration_seconds, text_to_speech
 from .services.voice_pipeline import extract_narration_segments, performance_text_is_safe, prepare_performance
+from .services.voice_takes import approve_take as approve_voice_take_service, clear_segment_files, generate_take as generate_voice_take_service
 from .services.project_store import choose_folder, create_project_folder, reveal_in_file_manager, save_manifest
 from .services.prompts import CINEMA_WEEKLY_SECTIONS, MEDIA_PLAN_SYSTEM, NARRATION_SYSTEM
 from .services.research import ai_rank_stories, cluster_articles, fetch_google_news
@@ -622,11 +623,11 @@ def generate_narrator_voice(project_id: str):
                 duration = float(row["duration_seconds"])
                 reused_audio += 1
             else:
-                audio, used_format = text_to_speech(
+                audio = text_to_speech(
                     settings["voice_id"],
                     row["performance_text"] or row["source_text"],
                 )
-                output_format = used_format
+                output_format = "mp3_44100_128"
                 path = expected_path
                 path.write_bytes(audio)
                 duration = mp3_duration_seconds(path)
