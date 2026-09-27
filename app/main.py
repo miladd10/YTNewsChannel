@@ -826,6 +826,18 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
     subject_story_counts: dict[str, int] = {}
     for result in searched:
         subject_story_counts[result["key"]] = subject_story_counts.get(result["key"], 0) + 1
+    with db() as conn:
+        voice_duration_rows = conn.execute(
+            """SELECT story_id,COALESCE(SUM(duration_seconds),0) AS duration_seconds
+               FROM voice_segments
+               WHERE project_id=? AND story_id<>''
+               GROUP BY story_id""",
+            (project_id,),
+        ).fetchall()
+    story_voice_durations = {
+        row["story_id"]: float(row["duration_seconds"] or 0)
+        for row in voice_duration_rows
+    }
     clip_usage_counts: dict[tuple[str, str], int] = {}
 
     for result in searched:
@@ -860,7 +872,9 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
                     item for item in candidates if item.get("media_type") == "image"
                 ]
 
+        story_voice_duration = float(story_voice_durations.get(story["id"], 0) or 0)
         for item in candidates:
+            item["target_duration_sec"] = story_voice_duration or None
             if item.get("media_type") != "video":
                 item["clip_start_sec"] = None
                 item["clip_end_sec"] = None
@@ -868,7 +882,10 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
                 continue
             usage_key = (result["key"], item.get("page_url") or "")
             usage_index = clip_usage_counts.get(usage_key, 0)
-            start_sec, end_sec = suggested_clip_range(item.get("duration"), usage_index)
+            # Keep candidate previews concise for now; the later edit-plan stage
+            # will divide the full story narration across all selected assets.
+            preview_len = 12 if story_voice_duration <= 0 else max(8, min(24, int(round(story_voice_duration))))
+            start_sec, end_sec = suggested_clip_range(item.get("duration"), usage_index, clip_seconds=preview_len)
             item["clip_start_sec"] = start_sec
             item["clip_end_sec"] = end_sec
             item["shared_source"] = 1 if subject_story_counts.get(result["key"], 0) > 1 else 0
@@ -896,14 +913,14 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
                 conn.execute(
                     """INSERT INTO media_candidates(
                         id,project_id,story_id,media_type,title,page_url,asset_url,thumbnail_url,source,provider,
-                        duration,published_at,width,height,search_query,clip_start_sec,clip_end_sec,shared_source,
+                        duration,published_at,width,height,search_query,clip_start_sec,clip_end_sec,target_duration_sec,shared_source,
                         selected,download_status,stored_path,error,rights_status,created_at,updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         item["id"], project_id, story["id"], item["media_type"], item["title"], item["page_url"],
                         item["asset_url"], item["thumbnail_url"], item["source"], item["provider"], item["duration"],
                         item["published_at"], item["width"], item["height"], item["search_query"],
-                        item.get("clip_start_sec"), item.get("clip_end_sec"), item.get("shared_source", 0),
+                        item.get("clip_start_sec"), item.get("clip_end_sec"), item.get("target_duration_sec"), item.get("shared_source", 0),
                         0, "not_downloaded", "", "", "unverified", stamp, stamp,
                     ),
                 )
@@ -955,6 +972,10 @@ def media_candidates(project_id: str):
                     "summary": story.get("summary", ""),
                     "category": story.get("category", ""),
                     "articles": story.get("articles", []),
+                    "voice_duration_seconds": float(conn.execute(
+                        "SELECT COALESCE(SUM(duration_seconds),0) s FROM voice_segments WHERE project_id=? AND story_id=?",
+                        (project_id, story["id"]),
+                    ).fetchone()["s"] or 0),
                 },
                 "candidates": candidates,
             })
