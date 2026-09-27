@@ -1308,12 +1308,18 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
                 existing.add(key)
                 added += 1
             total_added += added
+        with db() as conn:
+            result_count = conn.execute(
+                "SELECT COUNT(*) c FROM media_candidates WHERE project_id=? AND story_id=?",
+                (project_id, story["id"]),
+            ).fetchone()["c"]
         diagnostics.append({
             "story_id": story["id"],
             "story_title": story["canonical_title"],
             "subject_key": result["key"],
             "found": len(candidates),
             "added": added,
+            "result_count": int(result_count or 0),
             "reused_subject_videos": max(
                 0,
                 len([x for x in candidates if x.get("media_type") == "video"])
@@ -1325,11 +1331,14 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
     with db() as conn:
         conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
         save_manifest(conn, project_id)
+    stories_with_results = sum(1 for item in diagnostics if int(item.get("result_count") or 0) > 0)
     return {
         "ok": True,
         "stories": len(stories),
         "story_ids": [story["id"] for story in stories],
         "added": total_added,
+        "stories_with_results": stories_with_results,
+        "stories_without_results": len(stories) - stories_with_results,
         "diagnostics": diagnostics,
     }
 
