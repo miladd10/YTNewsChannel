@@ -120,7 +120,7 @@ def _is_news_or_commentary_channel(source: str) -> bool:
 
 def _looks_like_official_channel(source: str) -> bool:
     value = (source or "").lower()
-    return any(term in value for term in OFFICIAL_CHANNEL_TERMS)
+    return any(re.search(rf"\b{re.escape(term)}\b", value) for term in OFFICIAL_CHANNEL_TERMS)
 
 
 def _video_rejection_reason(item: dict, story: dict) -> str | None:
