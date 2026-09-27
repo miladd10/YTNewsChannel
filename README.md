@@ -77,3 +77,10 @@ Cinema Weekly — Sep 21–27/
 ```
 
 The local SQLite index lives in `data/ytnews.db` and is intentionally ignored by Git.
+
+
+### v0.3.18 media reliability
+- Selected YouTube videos retry with fresh format extraction and alternate player-client strategies before failing.
+- Step 6 shows Retry Failed / Pending after a partial download and skips files already downloaded.
+- Generic franchise footage is no longer labeled as current footage when its subtitle/installment is absent from the story; it is eligible only as contextual franchise/archive B-roll.
+- Reference article OG/Twitter hero images are preferred over generic image-search fallback when a story still needs supporting stills.
