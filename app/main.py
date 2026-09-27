@@ -63,7 +63,7 @@ def project_payload(conn, project_id: str) -> dict:
     counts["narrations"] = conn.execute("SELECT COUNT(*) c FROM narrations WHERE project_id=?", (project_id,)).fetchone()["c"]
     counts["voice_segments"] = conn.execute("SELECT COUNT(*) c FROM voice_segments WHERE project_id=?", (project_id,)).fetchone()["c"]
     counts["voice_generated"] = conn.execute("SELECT COUNT(*) c FROM voice_segments WHERE project_id=? AND audio_status IN ('generated','aligned')", (project_id,)).fetchone()["c"]
-    counts["voice_aligned"] = conn.execute("SELECT COUNT(*) c FROM voice_segments WHERE project_id=? AND audio_status='aligned'", (project_id,)).fetchone()["c"]
+    counts["voice_aligned"] = conn.execute("SELECT COUNT(*) c FROM voice_segments WHERE project_id=? AND audio_status='aligned' AND approval_status='approved'", (project_id,)).fetchone()["c"]
     counts["voice_seconds"] = round(float(conn.execute("SELECT COALESCE(SUM(duration_seconds),0) s FROM voice_segments WHERE project_id=?", (project_id,)).fetchone()["s"] or 0), 3)
     counts["media_plans"] = conn.execute("SELECT COUNT(*) c FROM media_plans WHERE project_id=?", (project_id,)).fetchone()["c"]
     counts["media_candidates"] = conn.execute("SELECT COUNT(*) c FROM media_candidates WHERE project_id=?", (project_id,)).fetchone()["c"]
@@ -939,7 +939,7 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
             (project_id,),
         ).fetchone()["c"]
         voice_aligned = conn.execute(
-            "SELECT COUNT(*) c FROM voice_segments WHERE project_id=? AND audio_status='aligned'",
+            "SELECT COUNT(*) c FROM voice_segments WHERE project_id=? AND audio_status='aligned' AND approval_status='approved'",
             (project_id,),
         ).fetchone()["c"]
     if not voice_total or voice_aligned != voice_total:
@@ -1310,7 +1310,7 @@ def generate_resolve_plan(project_id: str):
         ).fetchall()]
     if not voice_rows:
         raise HTTPException(400, "Generate the narrator voice first.")
-    pending_voice = [x for x in voice_rows if x.get("audio_status") != "aligned" or not x.get("audio_path") or not x.get("duration_seconds")]
+    pending_voice = [x for x in voice_rows if x.get("approval_status") != "approved" or x.get("audio_status") != "aligned" or not x.get("audio_path") or not x.get("duration_seconds")]
     if pending_voice:
         raise HTTPException(
             400,
