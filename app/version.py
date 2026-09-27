@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.6"
+APP_VERSION = "0.3.7"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Quality-First Video Discovery"
+APP_RELEASE_NAME = "Chunked B-roll Search"
