@@ -51,7 +51,8 @@ AGGREGATOR_CHANNEL_TERMS = (
     "screen rant", "collider", "ign", "watchmojo", "looper", "movieclips",
     "rotten tomatoes trailers", "joblo", "emergency awesome", "heavy spoilers",
     "new rockstars", "john campea", "beyond the trailer", "comicbook.com",
-    "fandom entertainment",
+    "fandom entertainment", "kinocheck", "one media", "rapid trailer",
+    "filmspot trailer", "moviegasm", "stream wars",
 )
 
 OFFICIAL_CHANNEL_TERMS = (
@@ -68,6 +69,26 @@ SPOKEN_SOURCE_TERMS = (
     "interview", "podcast", "conversation with", "talks with", "talks to",
     "speaks with", "speaks to", "sit-down", "sit down",
 )
+
+CORPORATE_STORY_TERMS = (
+    "merger", "acquisition", "acquire", "deal", "lawsuit", "sues", "settle",
+    "settlement", "antitrust", "attorney general", "bid", "shareholder",
+    "investor", "regulator", "regulatory", "states over", "close merger",
+)
+
+CORPORATE_BROLL_TERMS = (
+    "studio lot", "studio tour", "headquarters", "logo", "brand film",
+    "company reel", "sizzle reel", "centennial", "100 years", "anniversary",
+    "campus", "backlot", "soundstage", "sound stage", "official intro",
+)
+
+SUBJECT_STOPWORDS = {
+    "official", "trailer", "teaser", "clip", "featurette", "behind", "scenes",
+    "making", "first", "look", "sneak", "peek", "film", "movie", "series",
+    "season", "video", "news", "new", "the", "and", "with", "from", "gets",
+    "sets", "release", "date", "details", "breaks", "records", "massive",
+    "opening", "box", "office",
+}
 
 
 def _youtube_thumbnail(item: dict) -> str:
@@ -123,6 +144,114 @@ def _looks_like_official_channel(source: str) -> bool:
     return any(re.search(rf"\b{re.escape(term)}\b", value) for term in OFFICIAL_CHANNEL_TERMS)
 
 
+def _is_corporate_story(story: dict) -> bool:
+    text = _story_text(story)
+    return str(story.get("category") or "").lower() == "industry" and any(term in text for term in CORPORATE_STORY_TERMS)
+
+
+def _normalized_words(value: str) -> list[str]:
+    return [
+        token.lower()
+        for token in re.findall(r"[A-Za-z0-9]+", value or "")
+        if len(token) >= 2
+    ]
+
+
+def _query_subject(query: str) -> str:
+    value = (query or "").strip()
+    suffixes = (
+        " official featurette behind the scenes", " official studio tour",
+        " official company reel", " official studio lot", " official logo",
+        " official trailer", " official clip", " full interview",
+        " podcast interview",
+    )
+    lowered = value.lower()
+    for suffix in suffixes:
+        if lowered.endswith(suffix):
+            return value[: -len(suffix)].strip()
+    return value
+
+
+def _distinctive_subject_words(value: str) -> list[str]:
+    words = _normalized_words(value)
+    return [w for w in words if w not in SUBJECT_STOPWORDS and len(w) >= 3]
+
+
+def _subject_matches(value: str, target_text: str) -> bool:
+    words = _distinctive_subject_words(value)
+    if not words:
+        return False
+    target_words = set(_normalized_words(target_text))
+    if len(words) == 1:
+        return words[0] in target_words
+    # Require all meaningful words for short title/entity names such as
+    # "Ray Gunn", "Resident Evil" and "Avengers Doomsday".
+    required = words[:4]
+    return all(word in target_words for word in required)
+
+
+def _story_subjects(story: dict) -> list[str]:
+    base = clean_story_query(story.get("canonical_title", ""))
+    quoted = _quoted_subjects(base)
+    if quoted:
+        return quoted
+    compact = _compact_subject(base)
+    # Strip generic leading/trailing news words so "New Resident Evil film"
+    # becomes a useful subject rather than matching unrelated videos.
+    words = compact.split()
+    while words and words[0].lower().strip("’'") in {"new", "the", "a", "an"}:
+        words.pop(0)
+    while words and words[-1].lower().strip("’'") in {"film", "movie", "series", "show"}:
+        words.pop()
+    subject = " ".join(words).strip()
+    return [subject] if subject else [base]
+
+
+def _matches_actual_story_subject(item: dict, story: dict) -> bool:
+    title = str(item.get("title") or "")
+    description = str(item.get("description") or "")
+    source = str(item.get("channel") or item.get("uploader") or "")
+    query_subject = _query_subject(str(item.get("_search_query") or ""))
+
+    if _is_corporate_story(story):
+        entities = _known_entities(_story_text(story))
+        if not entities:
+            return False
+        # Corporate B-roll may identify the company in either the title or its
+        # actual official channel, but it must still be corporate/studio footage.
+        entity_match = any(
+            _subject_matches(entity, f"{title} {source}")
+            for entity in entities
+        )
+        corporate_visual = any(term in title.lower() for term in CORPORATE_BROLL_TERMS)
+        return entity_match and corporate_visual
+
+    if query_subject and _distinctive_subject_words(query_subject):
+        return _subject_matches(query_subject, f"{title} {description}")
+
+    return any(_subject_matches(subject, f"{title} {description}") for subject in _story_subjects(story))
+
+
+def _is_original_visual_source(item: dict, story: dict) -> bool:
+    source = str(item.get("channel") or item.get("uploader") or "")
+    source_lower = source.lower()
+    verified = bool(item.get("channel_is_verified"))
+
+    if _is_news_or_commentary_channel(source):
+        return False
+
+    if _is_corporate_story(story):
+        entities = _known_entities(_story_text(story))
+        return any(_subject_matches(entity, source) for entity in entities)
+
+    # Known studios/distributors are acceptable. For less-famous companies,
+    # require verification plus an explicit production-company style name.
+    if _looks_like_official_channel(source):
+        return True
+    production_name = bool(re.search(r"\b(pictures|studios|films|filmworks|productions|releasing|distribution)\b", source_lower))
+    return verified and production_name
+
+
 def _video_rejection_reason(item: dict, story: dict) -> str | None:
     title = str(item.get("title") or "").lower()
     source = str(item.get("channel") or item.get("uploader") or "").lower()
@@ -133,16 +262,32 @@ def _video_rejection_reason(item: dict, story: dict) -> str | None:
     if any(term in haystack for term in COMMENTARY_TITLE_TERMS):
         return "commentary/reaction/review"
 
+    if _is_news_or_commentary_channel(source):
+        # A verified publication can be the original interview source, but only
+        # when this story is explicitly about that interview/podcast.
+        spoken = any(term in title for term in SPOKEN_SOURCE_TERMS) or "podcast" in source
+        if not (allow_spoken and spoken and bool(item.get("channel_is_verified"))):
+            return "news/commentary/aggregator channel"
+
     spoken = any(term in title for term in SPOKEN_SOURCE_TERMS) or "podcast" in source
     if spoken and not allow_spoken:
         return "interview/podcast not relevant to this story"
 
-    # News packages and presenter/commentator channels are not B-roll. They are
-    # only considered for an interview/podcast story, and even then the result
-    # itself must actually be an interview/podcast clip.
-    if _is_news_or_commentary_channel(source):
-        if not allow_spoken or not spoken:
-            return "news/commentary channel"
+    if not _matches_actual_story_subject(item, story):
+        return "wrong movie/company/story"
+
+    if _is_corporate_story(story):
+        if any(term in title for term in ("trailer", "teaser", "movie clip", "featurette")):
+            return "movie promo is not corporate B-roll"
+        if not _is_original_visual_source(item, story):
+            return "not an original company source"
+        return None
+
+    if allow_spoken and spoken:
+        return None if bool(item.get("channel_is_verified")) else "interview is not from an original/verified source"
+
+    if not _is_original_visual_source(item, story):
+        return "not an original studio/distributor source"
 
     return None
 
@@ -150,31 +295,21 @@ def _video_rejection_reason(item: dict, story: dict) -> str | None:
 def _official_broll_strength(item: dict, story: dict) -> tuple[int, str]:
     title = str(item.get("title") or "").lower()
     source = str(item.get("channel") or item.get("uploader") or "").lower()
-    verified = bool(item.get("channel_is_verified"))
     allow_spoken = story_allows_interview_or_podcast(story)
 
-    if allow_spoken and any(term in title for term in SPOKEN_SOURCE_TERMS):
-        # For interview/podcast news, require signs that this is the original
-        # conversation source rather than a re-upload or commentary recap.
-        original_spoken_source = (
-            verified
-            or "official" in source
-            or "podcast" in source
-            or "podcast" in title
-        )
-        if original_spoken_source:
-            return 5, "original interview/podcast"
+    if _is_corporate_story(story):
+        if any(term in title for term in CORPORATE_BROLL_TERMS):
+            return 5, "official company B-roll"
+        return 0, ""
+
+    if allow_spoken and (any(term in title for term in SPOKEN_SOURCE_TERMS) or "podcast" in source):
+        return 5, "original interview/podcast"
 
     if any(term in title for term in BROLL_TITLE_TERMS):
-        if _looks_like_official_channel(source) or verified:
-            return 5, "official B-roll"
-        return 2, "unverified B-roll asset"
+        return 5, "official B-roll"
 
     if any(term in title for term in GENERIC_BROLL_TERMS):
-        if _looks_like_official_channel(source):
-            return 4, "studio/distributor B-roll"
-        if verified:
-            return 2, "verified-source B-roll"
+        return 4, "studio/distributor B-roll"
 
     return 0, ""
 
@@ -183,7 +318,7 @@ def video_is_usable_broll(item: dict, story: dict) -> bool:
     if _video_rejection_reason(item, story):
         return False
     strength, _ = _official_broll_strength(item, story)
-    return strength >= 3
+    return strength >= 4
 
 
 def _video_rank(item: dict, story: dict, base: str) -> tuple[int, int, int, int]:
@@ -292,26 +427,24 @@ def _compact_subject(text: str) -> str:
 
 def _youtube_search_queries(story: dict) -> list[str]:
     base = clean_story_query(story.get("canonical_title", ""))
-    quoted = _quoted_subjects(base)
-    entities = _known_entities(base)
-    compact = _compact_subject(base)
 
-    subjects = list(dict.fromkeys(quoted + ([compact] if compact else [])))
+    if _is_corporate_story(story):
+        queries: list[str] = []
+        for entity in _known_entities(_story_text(story)):
+            queries.extend([
+                f'{entity} official studio lot',
+                f'{entity} official logo',
+                f'{entity} official company reel',
+            ])
+        return list(dict.fromkeys(queries))
+
+    subjects = _story_subjects(story)
     queries: list[str] = []
     for subject in subjects[:3]:
         queries.extend([
             f'{subject} official trailer',
             f'{subject} official clip',
             f'{subject} official featurette behind the scenes',
-        ])
-
-    # Corporate/merger/legal stories often do not have event-specific footage.
-    # Pull clean corporate/studio B-roll from the companies involved instead.
-    for entity in entities:
-        queries.extend([
-            f'{entity} official studio tour',
-            f'{entity} official sizzle reel',
-            f'{entity} official trailer',
         ])
 
     if story_allows_interview_or_podcast(story):
