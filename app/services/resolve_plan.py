@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 import json
 import math
+import os
+import shutil
 from pathlib import Path
 
 from .media import duration_seconds
@@ -75,7 +77,10 @@ def _clip(
             "available_range": _range(0, available_frames, fps),
             "metadata": meta,
             "name": path.name,
-            "target_url": path.resolve().as_uri(),
+            # Resolve 20/21 is more reliable with a raw absolute filesystem
+            # path here than a file:// URI. The Resolve package stages every
+            # referenced asset under resolve/media before this is written.
+            "target_url": str(path.resolve()),
         },
         "metadata": meta,
         "name": name,
@@ -426,7 +431,7 @@ def build_otio(root: Path, plan: dict) -> dict:
         "metadata": {
             "yt_news_studio": {
                 "generator": "YT News Studio",
-                "fps": plan["fps"],
+                "fps": staged_plan["fps"],
                 "target_resolution": [RESOLVE_WIDTH, RESOLVE_HEIGHT],
                 "voice_master_timing": True,
                 "video_source_audio": "muted",
@@ -450,15 +455,88 @@ def build_otio(root: Path, plan: dict) -> dict:
     }
 
 
+def _stage_file(source: Path, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        target.unlink()
+    try:
+        os.link(source, target)
+    except Exception:
+        shutil.copy2(source, target)
+
+
+def _safe_stage_name(prefix: str, index: int, source: Path) -> str:
+    suffix = source.suffix.lower()
+    stem = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in source.stem).strip("_")
+    stem = stem[:72] or "media"
+    return f"{prefix}_{index:03d}_{stem}{suffix}"
+
+
+def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
+    """Create a Resolve-local media folder and rewrite plan paths to it.
+
+    Resolve's OTIO importer can ignore/lose file:// targets and then search only
+    by filename. Keeping every referenced file together under resolve/media and
+    emitting raw absolute paths makes the handoff deterministic.
+    """
+    resolve_media = root / "resolve" / "media"
+    if resolve_media.exists():
+        shutil.rmtree(resolve_media)
+    resolve_media.mkdir(parents=True, exist_ok=True)
+
+    staged = json.loads(json.dumps(plan))
+    cache: dict[str, str] = {}
+    voice_count = 0
+    visual_count = 0
+
+    for item in staged.get("voice_segments") or []:
+        source = _safe_path(root, item.get("audio_path") or "")
+        if not source:
+            raise RuntimeError(f"Narration audio is missing: {item.get('audio_path')}")
+        key = str(source)
+        relative = cache.get(key)
+        if not relative:
+            voice_count += 1
+            target = resolve_media / _safe_stage_name("voice", int(item.get("segment_index") or voice_count), source)
+            _stage_file(source, target)
+            relative = target.relative_to(root).as_posix()
+            cache[key] = relative
+        item["source_audio_path"] = item.get("audio_path") or ""
+        item["audio_path"] = relative
+
+    for item in staged.get("visual_clips") or []:
+        source = _safe_path(root, item.get("stored_path") or "")
+        if not source:
+            raise RuntimeError(f"Resolve media is missing: {item.get('stored_path')}")
+        key = str(source)
+        relative = cache.get(key)
+        if not relative:
+            visual_count += 1
+            target = resolve_media / _safe_stage_name("visual", visual_count, source)
+            _stage_file(source, target)
+            relative = target.relative_to(root).as_posix()
+            cache[key] = relative
+        item["source_stored_path"] = item.get("stored_path") or ""
+        item["stored_path"] = relative
+
+    return staged, {
+        "media_folder": str(resolve_media),
+        "staged_unique_files": len(cache),
+        "staged_voice_files": voice_count,
+        "staged_visual_files": visual_count,
+    }
+
+
 def write_resolve_package(root: Path, plan: dict) -> dict:
     resolve_dir = root / "resolve"
     resolve_dir.mkdir(parents=True, exist_ok=True)
+    staged_plan, staged_info = _stage_resolve_media(root, plan)
 
     plan_path = root / "timing" / "resolve_plan.json"
     plan_path.parent.mkdir(parents=True, exist_ok=True)
-    plan_path.write_text(json.dumps(plan, indent=2, ensure_ascii=False), encoding="utf-8")
+    plan_path.write_text(json.dumps(staged_plan, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    otio = build_otio(root, plan)
+    otio = build_otio(root, staged_plan)
     otio_path = resolve_dir / "news_timeline.otio"
     otio_path.write_text(json.dumps(otio, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -468,7 +546,7 @@ def write_resolve_package(root: Path, plan: dict) -> dict:
             "segment_index", "story_id", "start_seconds", "end_seconds",
             "duration_seconds", "audio_path", "alignment_mode",
         ])
-        for item in plan.get("voice_segments") or []:
+        for item in staged_plan.get("voice_segments") or []:
             writer.writerow([
                 item.get("segment_index"), item.get("story_id"), item.get("start"),
                 item.get("end"), item.get("duration"), item.get("audio_path"),
@@ -482,7 +560,7 @@ def write_resolve_package(root: Path, plan: dict) -> dict:
             "duration", "source_in", "source_out", "playback_speed", "source_audio",
             "crop_mode", "crop_axis", "crop_fraction", "stored_path",
         ])
-        for item in plan.get("visual_clips") or []:
+        for item in staged_plan.get("visual_clips") or []:
             crop = item.get("crop") or {}
             writer.writerow([
                 item.get("story_id"), item.get("candidate_id"), item.get("media_type"),
@@ -506,7 +584,9 @@ def write_resolve_package(root: Path, plan: dict) -> dict:
             "fps": plan["fps"],
             "external_scripting_required": False,
         },
-        "warnings": plan.get("warnings") or [],
+        "media_folder": "resolve/media",
+        "staged_unique_files": staged_info["staged_unique_files"],
+        "warnings": staged_plan.get("warnings") or [],
     }
     manifest_path = resolve_dir / "package_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -516,13 +596,17 @@ def write_resolve_package(root: Path, plan: dict) -> dict:
 This package uses the generated ElevenLabs narration as the master timeline.
 
 - Timeline: {RESOLVE_WIDTH} x {RESOLVE_HEIGHT} UHD
-- Frame rate: {plan['fps']} fps
+- Frame rate: {staged_plan['fps']} fps
 - Voice playback speed: unchanged
 - Video playback speed: unchanged
 - Source video audio: muted
 - Scaling target: Scale full frame with crop
 
 Import **news_timeline.otio** through File > Import > Timeline.
+
+All media referenced by the OTIO is staged under **resolve/media/** and the OTIO
+uses raw absolute filesystem paths for DaVinci Resolve compatibility. Do not import
+an older package after changing/approving voice takes; regenerate this Resolve package first.
 
 The OTIO source ranges trim each downloaded video to the planned source in/out range.
 Still images are held only for their assigned narration interval.
@@ -543,4 +627,6 @@ focal position in Resolve when a more specific visual moment is desired.
         "manifest_path": str(manifest_path),
         "voice_timing_path": str(resolve_dir / "voice_timing.csv"),
         "media_timing_path": str(resolve_dir / "media_timing.csv"),
+        "media_folder": staged_info["media_folder"],
+        "staged_unique_files": staged_info["staged_unique_files"],
     }
