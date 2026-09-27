@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.17"
+APP_VERSION = "0.3.18"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Reference-First B-roll Search"
+APP_RELEASE_NAME = "Reliable Downloads & Truthful Fallbacks"
