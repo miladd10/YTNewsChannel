@@ -1,3 +1,3 @@
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Cinema Weekly News MVP"
+APP_RELEASE_NAME = "Included Story Media Picker"
