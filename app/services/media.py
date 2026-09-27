@@ -1337,7 +1337,9 @@ def _search_reference_page_videos(
         "skip_download": True,
         "noplaylist": True,
         "extract_flat": False,
-        "socket_timeout": 20,
+        "socket_timeout": 12,
+        "retries": 1,
+        "extractor_retries": 1,
     }
     raw: list[dict] = []
     seen_urls: set[str] = set()
@@ -1489,7 +1491,13 @@ def _expand_web_video_url(url: str, title: str) -> list[tuple[str, str]]:
             return [(video_url, title) for video_url, _primary in embedded[:6]]
     except Exception:
         pass
-    return [(url, title)]
+    # yt-dlp is not a general webpage parser. Passing arbitrary studio pages
+    # here can sit on network/extractor timeouts for minutes. Keep only actual
+    # direct media when no embedded player was discovered.
+    suffix = Path(urlparse(url).path).suffix.lower()
+    if suffix in {".mp4", ".m3u8", ".webm", ".mov"}:
+        return [(url, title)]
+    return []
 
 
 def _web_result_might_be_video(url: str, title: str) -> bool:
@@ -1694,18 +1702,12 @@ def _search_youtube_videos(
                 entries = [dict(item) for item in cached]
             else:
                 entries = []
-                last_error: Exception | None = None
-                for _attempt in range(2):
-                    try:
-                        info = ydl.extract_info(f"ytsearch{search_count}:{query}", download=False)
-                        entries = [dict(entry) for entry in (info or {}).get("entries") or [] if entry]
-                        query_cache[query] = [dict(item) for item in entries]
-                        last_error = None
-                        break
-                    except Exception as exc:
-                        last_error = exc
-                if last_error is not None:
-                    errors.append(f"YouTube B-roll search failed for '{query}': {last_error}")
+                try:
+                    info = ydl.extract_info(f"ytsearch{search_count}:{query}", download=False)
+                    entries = [dict(entry) for entry in (info or {}).get("entries") or [] if entry]
+                    query_cache[query] = [dict(item) for item in entries]
+                except Exception as exc:
+                    errors.append(f"YouTube B-roll search failed for '{query}': {exc}")
                     continue
 
             for entry in entries:
