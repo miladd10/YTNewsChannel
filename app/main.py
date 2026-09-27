@@ -1031,10 +1031,35 @@ def _build_media_search_chunks(conn, project_id: str, chunk_minutes: float | Non
     durations = {
         row["story_id"]: float(row["duration_seconds"] or 0)
         for row in duration_rows
+        if row["story_id"] in story_by_id
     }
 
     ordered_ids = [row["story_id"] for row in duration_rows if row["story_id"] in story_by_id]
-    ordered_ids.extend(story["id"] for story in stories if story["id"] not in set(ordered_ids))
+    ordered_set = set(ordered_ids)
+    ordered_ids.extend(story["id"] for story in stories if story["id"] not in ordered_set)
+
+    # Older projects can contain approved narration whose STORY ids came from a
+    # previous research run. Do not collapse those current stories to 0 seconds:
+    # distribute the remaining real approved voice duration across stories that
+    # have no direct duration match. If no usable voice duration exists, use the
+    # configured target episode duration as the final planning fallback.
+    approved_voice_seconds = float(conn.execute(
+        """SELECT COALESCE(SUM(duration_seconds),0) s
+           FROM voice_segments
+           WHERE project_id=? AND audio_status='aligned' AND approval_status='approved'""",
+        (project_id,),
+    ).fetchone()["s"] or 0)
+    known_seconds = sum(max(0.0, durations.get(story_id, 0.0)) for story_id in ordered_ids)
+    missing_duration_ids = [story_id for story_id in ordered_ids if durations.get(story_id, 0.0) <= 0]
+    if missing_duration_ids:
+        remaining_voice = max(0.0, approved_voice_seconds - known_seconds)
+        if remaining_voice > 0:
+            fallback_each = remaining_voice / len(missing_duration_ids)
+        else:
+            fallback_total = approved_voice_seconds or float(project.get("target_minutes") or 0) * 60.0
+            fallback_each = fallback_total / max(1, len(ordered_ids))
+        for story_id in missing_duration_ids:
+            durations[story_id] = max(0.0, fallback_each)
 
     chunks: list[dict] = []
     timeline_cursor = 0.0
@@ -1057,11 +1082,16 @@ def _build_media_search_chunks(conn, project_id: str, chunk_minutes: float | Non
         timeline_cursor += group_seconds
 
     total_story_seconds = round(sum(durations.get(story_id, 0.0) for story_id in ordered_ids), 3)
+    duration_source = "story_voice"
+    if any(story_id in missing_duration_ids for story_id in ordered_ids):
+        duration_source = "approved_voice_fallback" if approved_voice_seconds > 0 else "target_duration_fallback"
     return {
         "chunk_minutes": target_minutes,
         "chunk_seconds": target_seconds,
         "target_episode_minutes": int(project.get("target_minutes") or 0),
         "actual_story_voice_seconds": total_story_seconds,
+        "approved_voice_seconds": round(approved_voice_seconds, 3),
+        "duration_source": duration_source,
         "total_chunks": len(chunks),
         "total_stories": len(ordered_ids),
         "chunks": chunks,
