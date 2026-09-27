@@ -6,11 +6,13 @@ import re
 import subprocess
 from pathlib import Path
 
-PROJECT_SCHEMA_VERSION = 2
+PROJECT_SCHEMA_VERSION = 3
 PROJECT_DIRS = [
     "research/raw",
     "research/stories",
     "narration",
+    "audio/narration",
+    "timing",
     "media-plan",
     "media/candidates",
     "media/selected",
@@ -95,6 +97,12 @@ def save_manifest(conn, project_id: str) -> Path:
     narrations = [dict(row) for row in conn.execute(
         "SELECT * FROM narrations WHERE project_id=? ORDER BY version_number", (project_id,)
     ).fetchall()]
+    voice_settings = conn.execute(
+        "SELECT * FROM voice_settings WHERE project_id=?", (project_id,)
+    ).fetchone()
+    voice_segments = [dict(row) for row in conn.execute(
+        "SELECT * FROM voice_segments WHERE project_id=? ORDER BY segment_index", (project_id,)
+    ).fetchall()]
     media_plans = [dict(row) for row in conn.execute(
         "SELECT * FROM media_plans WHERE project_id=? ORDER BY created_at", (project_id,)
     ).fetchall()]
@@ -107,6 +115,8 @@ def save_manifest(conn, project_id: str) -> Path:
         "latest_research_run": dict(latest_run) if latest_run else None,
         "stories": stories,
         "narrations": narrations,
+        "voice_settings": dict(voice_settings) if voice_settings else None,
+        "voice_segments": voice_segments,
         "media_plans": media_plans,
         "media_candidates": media_candidates,
     }
