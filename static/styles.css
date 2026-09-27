@@ -57,3 +57,11 @@
 .voice-take .btn.processing:before{content:'';position:absolute;left:9px;top:50%;width:10px;height:10px;margin-top:-6px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:voiceSpin .7s linear infinite}
 @keyframes voiceSpin{to{transform:rotate(360deg)}}
 @keyframes voiceIndeterminate{0%{transform:translateX(-120%)}50%{transform:translateX(210%)}100%{transform:translateX(-120%)}}
+
+.field-help{display:block;margin-top:5px;color:var(--muted);font-size:9px;font-weight:500;line-height:1.4}
+.media-chunk-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin:0 0 12px;overflow:hidden}
+.media-chunk-summary>div{padding:12px 14px;border-right:1px solid var(--border);display:flex;flex-direction:column;justify-content:center}
+.media-chunk-summary>div:last-child{border-right:0;align-items:flex-end}
+.media-chunk-summary strong{font-size:17px}
+.media-chunk-summary span{margin-top:2px;color:var(--muted);font-size:9px}
+@media(max-width:760px){.media-chunk-summary{grid-template-columns:1fr 1fr}.media-chunk-summary>div:nth-child(2){border-right:0}.media-chunk-summary>div{border-bottom:1px solid var(--border)}.media-chunk-summary>div:nth-last-child(-n+2){border-bottom:0}.media-chunk-summary>div:last-child{align-items:flex-start}}
