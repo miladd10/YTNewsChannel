@@ -61,7 +61,7 @@ OFFICIAL_CHANNEL_TERMS = (
     "dc", "disney", "hbo", "apple tv", "prime video", "amazon mgm",
     "lionsgate", "a24", "neon", "searchlight pictures", "20th century studios",
     "focus features", "dreamworks", "pixar", "lucasfilm", "peacock", "hulu",
-    "max", "mubi", "criterion",
+    "max", "mubi", "criterion", "imax",
 )
 
 SPOKEN_SOURCE_TERMS = (
@@ -246,6 +246,8 @@ def _is_original_visual_source(item: dict, story: dict) -> bool:
     # Known studios/distributors are acceptable. For less-famous companies,
     # require verification plus an explicit production-company style name.
     if _looks_like_official_channel(source):
+        return True
+    if verified and any(_subject_matches(subject, source) for subject in _story_subjects(story)):
         return True
     production_name = bool(re.search(r"\b(pictures|studios|films|filmworks|productions|releasing|distribution)\b", source_lower))
     return verified and production_name
