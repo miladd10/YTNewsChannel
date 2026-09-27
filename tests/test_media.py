@@ -1,4 +1,4 @@
-from app.services.media import _youtube_search_queries, story_allows_interview_or_podcast, story_media_key, suggested_clip_range, video_is_usable_broll
+from app.services.media import _extract_reference_video_urls, _youtube_search_queries, story_allows_interview_or_podcast, story_media_key, suggested_clip_range, video_is_usable_broll
 
 
 def normal_story():
@@ -308,3 +308,62 @@ def test_reused_video_gets_distinct_clip_ranges():
 def test_short_video_clip_range_stays_inside_duration():
     start, end = suggested_clip_range("0:10", 2)
     assert 0 <= start < end <= 10
+
+
+
+def test_reference_page_extracts_embedded_video_urls():
+    html = """
+    <html><head>
+      <meta property="og:video" content="https://cdn.netflix.com/ray-gunn/trailer.mp4">
+    </head><body>
+      <iframe src="https://www.youtube.com/embed/AbCdEf12345?autoplay=1"></iframe>
+      <video><source src="/media/official-trailer.m3u8"></video>
+    </body></html>
+    """
+    urls = _extract_reference_video_urls(html, "https://www.netflix.com/tudum/articles/ray-gunn")
+    found = {url for url, _primary in urls}
+    assert "https://www.youtube.com/watch?v=AbCdEf12345" in found
+    assert "https://cdn.netflix.com/ray-gunn/trailer.mp4" in found
+    assert "https://www.netflix.com/media/official-trailer.m3u8" in found
+
+
+def test_official_direct_video_from_reference_page_can_be_broll():
+    story = {
+        "canonical_title": "Narnia: The Magician’s Nephew, Directed by Greta Gerwig, Roars to Life in 2027",
+        "summary": "Netflix revealed a new look at Narnia: The Magician's Nephew.",
+        "category": "upcoming_films",
+        "articles": [
+            {
+                "title": "Narnia: The Magician’s Nephew, Directed by Greta Gerwig, Roars to Life in 2027",
+                "source": "Netflix",
+                "published_at": "2026-09-25",
+            }
+        ],
+    }
+    item = {
+        "title": "video",
+        "channel": "Netflix",
+        "height": 1080,
+        "_reference_direct_asset": True,
+        "_reference_article_source": "Netflix",
+        "_reference_article_title": "Narnia: The Magician’s Nephew, Directed by Greta Gerwig, Roars to Life in 2027",
+    }
+    assert video_is_usable_broll(item, story)
+
+
+def test_direct_video_on_news_site_is_not_automatically_official_broll():
+    story = {
+        "canonical_title": "The Further Mis-Adventures of Cliff Booth trailer released",
+        "summary": "The trailer was released this week.",
+        "category": "upcoming_films",
+        "articles": [{"title": "Cliff Booth trailer released", "source": "Random News"}],
+    }
+    item = {
+        "title": "video",
+        "channel": "Random News",
+        "height": 1080,
+        "_reference_direct_asset": True,
+        "_reference_article_source": "Random News",
+        "_reference_article_title": "The Further Mis-Adventures of Cliff Booth trailer released",
+    }
+    assert not video_is_usable_broll(item, story)
