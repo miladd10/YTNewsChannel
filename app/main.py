@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from .db import BASE_DIR, PIPELINE, db, init_db
 from .services.ai import generate_text
 from .services.local_cli import all_statuses, launch_login
-from .services.media import download_candidate, search_story_media, story_media_key, suggested_clip_range
+from .services.media import _dedupe_quality_first_results, download_candidate, search_story_media, story_media_key, suggested_clip_range
 from .services.elevenlabs_client import ElevenLabsError, MODEL_ID as ELEVEN_MODEL_ID, forced_alignment, list_voices, mp3_duration_seconds, text_to_speech
 from .services.voice_pipeline import extract_narration_segments, performance_text_is_safe, prepare_performance
 from .services.voice_takes import approve_take as approve_voice_take_service, clear_segment_files, generate_take as generate_voice_take_service
@@ -1016,6 +1016,7 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
     stamp = now()
     youtube_query_cache: dict[str, list[dict]] = {}
     reference_page_cache: dict[str, tuple[str, str]] = {}
+    web_video_cache: dict[str, list[dict]] = {}
 
     # Search every Included headline first. We then reconcile duplicate
     # headlines that describe the same visual subject (for example two
@@ -1029,6 +1030,7 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
             max_videos=body.max_videos_per_story,
             query_cache=youtube_query_cache,
             reference_page_cache=reference_page_cache,
+            web_video_cache=web_video_cache,
         )
         key = story_media_key(story)
         searched.append({
@@ -1084,7 +1086,11 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
                 cloned["id"] = str(uuid.uuid4())
                 merged_videos.append(cloned)
                 own_video_urls.add(cloned.get("page_url"))
-            merged_videos = merged_videos[: body.max_videos_per_story]
+            merged_videos = _dedupe_quality_first_results(
+                merged_videos,
+                story,
+                body.max_videos_per_story,
+            )
             has_hd = any((item.get("height") or 0) >= 720 for item in merged_videos)
             if has_hd:
                 candidates = merged_videos
