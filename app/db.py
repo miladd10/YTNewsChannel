@@ -12,8 +12,9 @@ PIPELINE = [
     (1, "research", "Research"),
     (2, "pick-news", "Pick News"),
     (3, "narration", "Narration"),
-    (4, "media-sources", "Media Sources"),
-    (5, "downloads", "Downloads"),
+    (4, "voice", "Voice"),
+    (5, "media-sources", "Media Sources"),
+    (6, "downloads", "Downloads"),
 ]
 
 
@@ -140,6 +141,39 @@ def init_db() -> None:
                 FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
                 FOREIGN KEY(narration_id) REFERENCES narrations(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS voice_settings (
+                project_id TEXT PRIMARY KEY,
+                voice_id TEXT NOT NULL DEFAULT '',
+                voice_name TEXT NOT NULL DEFAULT '',
+                model_id TEXT NOT NULL DEFAULT 'eleven_v3',
+                output_format TEXT NOT NULL DEFAULT 'mp3_44100_192',
+                prepared_narration_id TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS voice_segments (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                narration_id TEXT NOT NULL,
+                story_id TEXT NOT NULL DEFAULT '',
+                segment_index INTEGER NOT NULL,
+                source_text TEXT NOT NULL,
+                performance_text TEXT NOT NULL DEFAULT '',
+                voice_id TEXT NOT NULL DEFAULT '',
+                audio_path TEXT NOT NULL DEFAULT '',
+                duration_seconds REAL,
+                alignment_json TEXT NOT NULL DEFAULT '{}',
+                audio_status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY(narration_id) REFERENCES narrations(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_voice_segments_project ON voice_segments(project_id, segment_index);
+            CREATE INDEX IF NOT EXISTS idx_voice_segments_story ON voice_segments(project_id, story_id);
 
             CREATE TABLE IF NOT EXISTS media_candidates (
                 id TEXT PRIMARY KEY,
