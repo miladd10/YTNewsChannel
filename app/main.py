@@ -985,6 +985,31 @@ def latest_media_plan(project_id: str):
 
 
 
+def _chunk_story_durations(
+    ordered_stories: list[tuple[str, float]],
+    target_seconds: float,
+) -> list[list[tuple[str, float]]]:
+    target_seconds = max(15.0, float(target_seconds or 60.0))
+    chunks: list[list[tuple[str, float]]] = []
+    current: list[tuple[str, float]] = []
+    current_seconds = 0.0
+    for story_id, raw_duration in ordered_stories:
+        duration = max(0.0, float(raw_duration or 0.0))
+        if current and current_seconds + duration > target_seconds:
+            chunks.append(current)
+            current = []
+            current_seconds = 0.0
+        current.append((story_id, duration))
+        current_seconds += duration
+        if current_seconds >= target_seconds:
+            chunks.append(current)
+            current = []
+            current_seconds = 0.0
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def _build_media_search_chunks(conn, project_id: str, chunk_minutes: float | None = None) -> dict:
     project = project_or_404(conn, project_id)
     target_minutes = float(chunk_minutes if chunk_minutes is not None else project.get("media_chunk_minutes") or 1.0)
@@ -1012,36 +1037,24 @@ def _build_media_search_chunks(conn, project_id: str, chunk_minutes: float | Non
     ordered_ids.extend(story["id"] for story in stories if story["id"] not in set(ordered_ids))
 
     chunks: list[dict] = []
-    current_ids: list[str] = []
-    current_seconds = 0.0
     timeline_cursor = 0.0
-
-    def flush() -> None:
-        nonlocal current_ids, current_seconds, timeline_cursor
-        if not current_ids:
-            return
+    grouped = _chunk_story_durations(
+        [(story_id, durations.get(story_id, 0.0)) for story_id in ordered_ids],
+        target_seconds,
+    )
+    for group in grouped:
+        story_ids = [story_id for story_id, _ in group]
+        group_seconds = sum(duration for _, duration in group)
         chunks.append({
             "index": len(chunks) + 1,
-            "story_ids": list(current_ids),
-            "story_count": len(current_ids),
-            "duration_seconds": round(current_seconds, 3),
+            "story_ids": story_ids,
+            "story_count": len(story_ids),
+            "duration_seconds": round(group_seconds, 3),
             "timeline_start_seconds": round(timeline_cursor, 3),
-            "timeline_end_seconds": round(timeline_cursor + current_seconds, 3),
-            "titles": [story_by_id[story_id]["canonical_title"] for story_id in current_ids],
+            "timeline_end_seconds": round(timeline_cursor + group_seconds, 3),
+            "titles": [story_by_id[story_id]["canonical_title"] for story_id in story_ids],
         })
-        timeline_cursor += current_seconds
-        current_ids = []
-        current_seconds = 0.0
-
-    for story_id in ordered_ids:
-        duration = max(0.0, durations.get(story_id, 0.0))
-        if current_ids and current_seconds + duration > target_seconds:
-            flush()
-        current_ids.append(story_id)
-        current_seconds += duration
-        if current_seconds >= target_seconds:
-            flush()
-    flush()
+        timeline_cursor += group_seconds
 
     total_story_seconds = round(sum(durations.get(story_id, 0.0) for story_id in ordered_ids), 3)
     return {
@@ -1157,8 +1170,9 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
                 bucket.append(dict(item))
 
     subject_story_counts: dict[str, int] = {}
-    for result in searched:
-        subject_story_counts[result["key"]] = subject_story_counts.get(result["key"], 0) + 1
+    for included_story in all_stories:
+        subject_key = story_media_key(included_story)
+        subject_story_counts[subject_key] = subject_story_counts.get(subject_key, 0) + 1
     with db() as conn:
         voice_duration_rows = conn.execute(
             """SELECT story_id,COALESCE(SUM(duration_seconds),0) AS duration_seconds
