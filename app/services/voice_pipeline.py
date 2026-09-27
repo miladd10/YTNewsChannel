@@ -105,7 +105,7 @@ def extract_narration_segments(content: str, target_chars: int = NARRATION_CONTI
 
 def _spoken_words(text: str) -> list[str]:
     value = re.sub(r"\[[^\]]+\]", " ", text or "")
-    return [x.casefold() for x in re.findall(r"[^\W_]+(?:[’\-][^\W_]+)*", value, flags=re.UNICODE)]
+    return [x.casefold().replace("’", "'") for x in re.findall(r"[^\W_]+(?:['’\-][^\W_]+)*", value, flags=re.UNICODE)]
 
 
 def performance_text_is_safe(source_text: str, performance_text: str) -> bool:
