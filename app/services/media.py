@@ -94,10 +94,7 @@ def _story_text(story: dict) -> str:
         str(story.get("summary") or ""),
     ]
     for article in story.get("articles") or []:
-        parts.extend([
-            str(article.get("title") or ""),
-            str(article.get("snippet") or ""),
-        ])
+        parts.append(str(article.get("title") or ""))
     return " ".join(parts).lower()
 
 
@@ -148,8 +145,15 @@ def _official_broll_strength(item: dict, story: dict) -> tuple[int, str]:
     allow_spoken = story_allows_interview_or_podcast(story)
 
     if allow_spoken and any(term in title for term in SPOKEN_SOURCE_TERMS):
-        # For interview/podcast news, the original interview is the B-roll.
-        if verified or not _is_news_or_commentary_channel(source):
+        # For interview/podcast news, require signs that this is the original
+        # conversation source rather than a re-upload or commentary recap.
+        original_spoken_source = (
+            verified
+            or "official" in source
+            or "podcast" in source
+            or "podcast" in title
+        )
+        if original_spoken_source:
             return 5, "original interview/podcast"
 
     if any(term in title for term in BROLL_TITLE_TERMS):
