@@ -6,7 +6,7 @@ import re
 import subprocess
 from pathlib import Path
 
-PROJECT_SCHEMA_VERSION = 3
+PROJECT_SCHEMA_VERSION = 4
 PROJECT_DIRS = [
     "research/raw",
     "research/stories",
