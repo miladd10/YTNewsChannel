@@ -381,10 +381,21 @@ def _story_visual_subjects(story: dict) -> list[str]:
         str(story.get("summary") or ""),
         str(story.get("_narration_text") or ""),
     ])
-    for quoted in _quoted_subjects(clean_story_query(story.get("canonical_title", ""))):
+    title_text = clean_story_query(story.get("canonical_title", ""))
+    for quoted in _quoted_subjects(title_text):
         if quoted in subjects:
             continue
-        if _subject_matches(quoted, context_without_title):
+        # Quoted taglines/dialogue are common in entertainment headlines. Only
+        # promote a secondary quote when it looks title-like; exclamatory or
+        # sentence-like slogans such as “Feed upon the flesh of mankind!” are
+        # narration text, not a separate visual subject.
+        quote_words = re.findall(r"[A-Za-z0-9]+", quoted)
+        if re.search(r"[!?][”’\"']?$", quoted.strip()) or len(quote_words) > 6:
+            continue
+        quote_pos = title_text.find(quoted)
+        after = title_text[quote_pos + len(quoted):quote_pos + len(quoted) + 36].lower() if quote_pos >= 0 else ""
+        title_context = any(term in after for term in (" trailer", " teaser", " movie", " film", " series", " first look", " clip"))
+        if title_context and _subject_matches(quoted, context_without_title):
             subjects.append(quoted)
 
     return subjects[:4]
@@ -1155,6 +1166,49 @@ def _extract_reference_video_urls(html_text: str, page_url: str) -> list[tuple[s
     return out[:16]
 
 
+PUBLISHER_DOMAIN_ALIASES = {
+    "gold derby": "goldderby.com",
+    "digital spy": "digitalspy.com",
+    "joblo": "joblo.com",
+    "entertainment weekly": "ew.com",
+    "cartoon brew": "cartoonbrew.com",
+    "the independent": "independent.co.uk",
+    "netflix": "netflix.com",
+    "deadline": "deadline.com",
+    "variety": "variety.com",
+    "the hollywood reporter": "hollywoodreporter.com",
+}
+
+
+def _publisher_domain(source: str) -> str:
+    value = re.sub(r"\s+", " ", (source or "").strip().lower())
+    for name, domain in PUBLISHER_DOMAIN_ALIASES.items():
+        if name in value:
+            return domain
+    return ""
+
+
+def _reference_resolution_queries(article: dict) -> list[str]:
+    title = str(article.get("title") or "").strip()
+    source = str(article.get("source") or "").strip()
+    domain = _publisher_domain(source)
+    storyish = clean_story_query(title)
+    # Exact-title search is useful when indexed, but publisher-domain + compact
+    # subject searches are much more reliable for Google News RSS links.
+    quoted = _quoted_subjects(storyish)
+    subject = quoted[-1] if quoted else _compact_subject(storyish)
+    queries = []
+    if domain and subject:
+        queries.append(f'site:{domain} "{subject}"')
+    if domain and storyish:
+        queries.append(f'site:{domain} "{storyish}"')
+    if title:
+        queries.append(f'"{title}" {source}'.strip())
+    if subject:
+        queries.append(f'"{subject}" "{source}"'.strip())
+    return list(dict.fromkeys(q for q in queries if q.strip()))
+
+
 def _source_domain_hint(source: str) -> list[str]:
     words = [
         word for word in re.findall(r"[A-Za-z0-9]+", source or "")
@@ -1186,20 +1240,34 @@ def _resolve_reference_article_url(article: dict, client: httpx.Client) -> tuple
 
         title = str(article.get("title") or "").strip()
         source = str(article.get("source") or "").strip()
-        query = f'"{title}" {source}'.strip()
         hints = [x.lower() for x in _source_domain_hint(source)]
-        results = DDGS().text(query, max_results=8) or []
-        ranked: list[tuple[int, str]] = []
-        for item in results:
-            candidate = str(item.get("href") or item.get("url") or "").strip()
-            host = (urlparse(candidate).hostname or "").lower()
-            if not candidate or not host or "news.google.com" in host:
+        publisher_domain = _publisher_domain(source)
+        ranked_by_url: dict[str, int] = {}
+        for query_index, query in enumerate(_reference_resolution_queries(article)):
+            try:
+                results = DDGS().text(query, max_results=8) or []
+            except Exception:
                 continue
-            score = sum(10 for hint in hints if hint in host)
-            result_title = str(item.get("title") or "")
-            score += sum(2 for word in _distinctive_subject_words(title)[:6] if word in result_title.lower())
-            ranked.append((score, candidate))
-        for _, candidate in sorted(ranked, reverse=True):
+            for item in results:
+                candidate = str(item.get("href") or item.get("url") or "").strip()
+                host = (urlparse(candidate).hostname or "").lower()
+                if not candidate or not host or "news.google.com" in host:
+                    continue
+                score = max(0, 30 - query_index * 4)
+                if publisher_domain and (host == publisher_domain or host.endswith("." + publisher_domain)):
+                    score += 60
+                score += sum(10 for hint in hints if hint in host)
+                result_title = str(item.get("title") or "").lower()
+                score += sum(3 for word in _distinctive_subject_words(title)[:6] if word in result_title)
+                ranked_by_url[candidate] = max(score, ranked_by_url.get(candidate, -1))
+            # A publisher-domain hit from the first query is usually the direct
+            # article; avoid doing more search requests just for completeness.
+            if publisher_domain and any(
+                (urlparse(url).hostname or "").lower().endswith(publisher_domain)
+                for url in ranked_by_url
+            ):
+                break
+        for candidate, _score in sorted(ranked_by_url.items(), key=lambda row: row[1], reverse=True):
             try:
                 _assert_public_http_url(candidate)
                 response = client.get(candidate)
@@ -1400,6 +1468,28 @@ def _web_video_search_queries(story: dict) -> list[str]:
             f'"{subject}" full interview 1080p',
         ])
     return list(dict.fromkeys(q.strip() for q in queries if q.strip()))
+
+
+def _expand_web_video_url(url: str, title: str) -> list[tuple[str, str]]:
+    host = (urlparse(url).hostname or "").lower()
+    if any(term in host for term in REFERENCE_VIDEO_HOSTS):
+        return [(url, title)]
+    if not any(term in host for term in OFFICIAL_WEB_DOMAIN_TERMS):
+        return [(url, title)]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                      "AppleWebKit/537.36 Chrome/124 Safari/537.36 YTNewsStudio/0.3"
+    }
+    try:
+        _assert_public_http_url(url)
+        response = httpx.get(url, timeout=12, follow_redirects=True, headers=headers)
+        response.raise_for_status()
+        embedded = _extract_reference_video_urls(response.text, str(response.url))
+        if embedded:
+            return [(video_url, title) for video_url, _primary in embedded[:6]]
+    except Exception:
+        pass
+    return [(url, title)]
 
 
 def _web_result_might_be_video(url: str, title: str) -> bool:
