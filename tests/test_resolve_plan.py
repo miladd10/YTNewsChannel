@@ -97,6 +97,9 @@ def test_resolve_package_writes_importable_otio_with_source_in(tmp_path):
     assert (tmp_path / "resolve/media_timing.csv").exists()
     assert (tmp_path / "resolve/voice_timing.csv").exists()
     assert files["timeline_path"].endswith("news_timeline.otio")
+    assert files["staged_unique_files"] == 2
+    assert (tmp_path / "resolve/media").is_dir()
+    assert len(list((tmp_path / "resolve/media").iterdir())) == 2
 
     otio = json.loads((tmp_path / "resolve/news_timeline.otio").read_text())
     assert otio["metadata"]["yt_news_studio"]["target_resolution"] == [3840, 2160]
@@ -104,3 +107,11 @@ def test_resolve_package_writes_importable_otio_with_source_in(tmp_path):
     video_clip = next(x for x in video_track["children"] if x["OTIO_SCHEMA"] == "Clip.1")
     assert video_clip["source_range"]["start_time"]["value"] == 150
     assert video_clip["metadata"]["yt_news_studio"]["playback_speed"] == 1.0
+    assert video_clip["media_reference"]["target_url"].startswith(str(tmp_path.resolve()))
+    assert not video_clip["media_reference"]["target_url"].startswith("file://")
+    assert "/resolve/media/" in video_clip["media_reference"]["target_url"]
+
+    audio_track = otio["tracks"]["children"][1]
+    audio_clip = next(x for x in audio_track["children"] if x["OTIO_SCHEMA"] == "Clip.1")
+    assert not audio_clip["media_reference"]["target_url"].startswith("file://")
+    assert "/resolve/media/" in audio_clip["media_reference"]["target_url"]
