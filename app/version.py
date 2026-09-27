@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.5"
+APP_VERSION = "0.3.6"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Reference Video Discovery"
+APP_RELEASE_NAME = "Quality-First Video Discovery"
