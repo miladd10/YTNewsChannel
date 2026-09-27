@@ -1,4 +1,4 @@
-from app.services.media import _youtube_search_queries, story_allows_interview_or_podcast, story_media_key, video_is_usable_broll
+from app.services.media import _youtube_search_queries, story_allows_interview_or_podcast, story_media_key, suggested_clip_range, video_is_usable_broll
 
 
 def normal_story():
@@ -293,3 +293,18 @@ def test_ray_gunn_search_uses_distributor_when_story_mentions_netflix():
     }
     queries = _youtube_search_queries(story)
     assert any("ray gunn netflix official trailer" in q.lower() for q in queries)
+
+
+def test_reused_video_gets_distinct_clip_ranges():
+    first = suggested_clip_range("2:37", 0)
+    second = suggested_clip_range("2:37", 1)
+    third = suggested_clip_range("2:37", 2)
+    assert first == (5, 17)
+    assert second == (22, 34)
+    assert third == (39, 51)
+    assert len({first, second, third}) == 3
+
+
+def test_short_video_clip_range_stays_inside_duration():
+    start, end = suggested_clip_range("0:10", 2)
+    assert 0 <= start < end <= 10
