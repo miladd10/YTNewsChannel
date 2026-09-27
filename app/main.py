@@ -486,11 +486,13 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
     diagnostics = []
     total_added = 0
     stamp = now()
+    youtube_query_cache: dict[str, list[dict]] = {}
     for story in stories:
         candidates, errors = search_story_media(
             story,
             max_images=body.max_images_per_story,
             max_videos=body.max_videos_per_story,
+            query_cache=youtube_query_cache,
         )
         with db() as conn:
             if body.refresh:
