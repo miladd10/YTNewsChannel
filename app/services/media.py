@@ -47,6 +47,13 @@ NEWS_CHANNEL_TERMS = (
     "hollywood reporter", "entertainment tonight", "access hollywood",
 )
 
+AGGREGATOR_CHANNEL_TERMS = (
+    "screen rant", "collider", "ign", "watchmojo", "looper", "movieclips",
+    "rotten tomatoes trailers", "joblo", "emergency awesome", "heavy spoilers",
+    "new rockstars", "john campea", "beyond the trailer", "comicbook.com",
+    "fandom entertainment",
+)
+
 OFFICIAL_CHANNEL_TERMS = (
     "official", "pictures", "studios", "entertainment", "films",
     "netflix", "warner bros", "warnerbrospictures", "paramount pictures",
@@ -106,7 +113,9 @@ def story_allows_interview_or_podcast(story: dict) -> bool:
 
 def _is_news_or_commentary_channel(source: str) -> bool:
     value = (source or "").lower()
-    return any(term in value for term in NEWS_CHANNEL_TERMS)
+    if re.search(r"\bnews\b", value):
+        return True
+    return any(term in value for term in NEWS_CHANNEL_TERMS + AGGREGATOR_CHANNEL_TERMS)
 
 
 def _looks_like_official_channel(source: str) -> bool:
