@@ -1157,7 +1157,14 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
         root.mkdir(parents=True, exist_ok=True)
         (root / f"v{int(draft['version_number']):02d}_r{review_number:02d}.md").write_text(review_text, encoding="utf-8")
         save_manifest(conn, project_id)
-    return {"id": review_id, "review_number": review_number, "content": review_text, **gate}
+    return {
+        "id": review_id,
+        "narration_id": narration_id,
+        "project_id": project_id,
+        "review_number": review_number,
+        "content": review_text,
+        **gate,
+    }
 
 
 @app.post("/api/projects/{project_id}/narrations/{narration_id}/revise")
