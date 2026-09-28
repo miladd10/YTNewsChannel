@@ -9,6 +9,8 @@ from app.services.cinema_format import (
 )
 from app.services.research import (
     _apply_story_quality_gates,
+    _spice_queries,
+    _validated_spice_angles,
     _social_platform_for_url,
     _social_queries,
     cluster_articles,
@@ -77,6 +79,10 @@ Good overall.
 # Freshness Audit
 - Status: PASS
 - Notes: current hook checked
+
+# Context / Spice Audit
+- Status: PASS
+- Notes: supported context only
 
 # Storytelling Audit
 - Status: PASS
@@ -325,3 +331,75 @@ def test_reviewer_checks_familiarity_and_generic_ai_style():
     assert "CASUAL-AUDIENCE FAMILIARITY" in REVIEWER_SYSTEM
     assert "generic AI/news-presenter phrasing" in REVIEWER_SYSTEM
     assert "full style corpus" in REVIEWER_SYSTEM
+
+
+
+def test_story_spice_queries_cover_drama_critics_social_and_context():
+    story = {
+        "search_subject": "Ray Gunn",
+        "canonical_title": "Netflix releases Ray Gunn trailer",
+    }
+    rows = _spice_queries(story, "2026-09-21", "2026-09-28")
+    kinds = {kind for kind, _ in rows}
+    assert kinds == {"rumor_drama", "critics", "social_reddit", "social_public", "cool_context"}
+    assert any("rumor controversy" in query for _, query in rows)
+    assert any("critics review reaction" in query for _, query in rows)
+    assert any("site:reddit.com" in query for _, query in rows)
+
+
+def test_spice_validation_rejects_hallucinated_source_urls_and_weak_claims():
+    sources = [
+        {
+            "url": "https://example.com/report",
+            "source": "Example",
+        }
+    ]
+    angles = _validated_spice_angles([
+        {
+            "type": "rumor",
+            "text": "A reported casting rumor exists.",
+            "evidence_status": "supported",
+            "safe_to_narrate": True,
+            "source_urls": ["https://example.com/report"],
+        },
+        {
+            "type": "controversy",
+            "text": "Invented controversy.",
+            "evidence_status": "strong",
+            "safe_to_narrate": True,
+            "source_urls": ["https://made-up.example/nope"],
+        },
+        {
+            "type": "critic_reaction",
+            "text": "Weak reaction.",
+            "evidence_status": "weak",
+            "safe_to_narrate": True,
+            "source_urls": ["https://example.com/report"],
+        },
+    ], sources)
+    assert len(angles) == 2
+    rumor = next(x for x in angles if x["type"] == "rumor")
+    weak = next(x for x in angles if x["type"] == "critic_reaction")
+    assert rumor["safe_to_narrate"] is True
+    assert weak["safe_to_narrate"] is False
+
+
+def test_social_only_rumor_is_never_marked_safe():
+    angles = _validated_spice_angles([
+        {
+            "type": "rumor",
+            "text": "Fans speculate about a sequel.",
+            "evidence_status": "social_only",
+            "safe_to_narrate": True,
+            "source_urls": ["https://reddit.com/r/movies/example"],
+        }
+    ], [{"url": "https://reddit.com/r/movies/example", "source": "Reddit"}])
+    assert angles[0]["safe_to_narrate"] is False
+
+
+def test_writer_and_reviewer_have_evidence_backed_spice_rules():
+    assert "STORY SPICE RULE" in WRITER_SYSTEM
+    assert "RUMORS:" in WRITER_SYSTEM
+    assert "If there are no strong supported angles, do not pretend there are" in WRITER_SYSTEM
+    assert "Context / Spice Audit" in REVIEWER_SYSTEM
+    assert "safe_to_narrate spice angle" in REVIEWER_SYSTEM
