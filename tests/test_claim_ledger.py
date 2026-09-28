@@ -226,3 +226,15 @@ def test_spoken_count_matches_ledger_text_without_structured_value():
                                   "numeric_value": 11, "ledger_claim_ids": ["C001"], "semantic_match": "equivalent"}, ledger)
     assert ok["status"] == "verified"
     assert bad["status"] == "blocked"
+
+
+def test_high_risk_filter_matches_whole_words_only():
+    from app.services.claim_ledger import HIGH_RISK_RE
+    risky = ["فروش افتتاحیه‌ش بالا بود", "گیشهٔ جهانی رو گرفت", "اکرانش از هفته بعده", "رتبهٔ اول شد",
+             "It grossed a lot", "ranked first", "the release is limited", "۱۲ ایالت", "$4"]
+    safe = ["بازاکران یه فیلم خودش خبر بزرگیه", "فروشگاه‌ها شلوغ بودن", "هزاران طرفدار اومدن",
+            "این فیلم ارزش دیدن داره", "Frank Oz is in it", "a frankly odd choice"]
+    for text in risky:
+        assert HIGH_RISK_RE.search(text), text
+    for text in safe:
+        assert not HIGH_RISK_RE.search(text), text

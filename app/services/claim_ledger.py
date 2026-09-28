@@ -62,13 +62,23 @@ HARD RULES:
 - If no ledger claim supports the exact meaning, use semantic_match=unsupported and no ledger IDs.
 """
 
+# Whole-word matching. Persian terms may carry common attached suffixes
+# (گیشهٔ، فروشش، اکرانِ...) but must not match inside other words:
+# «بازاکران» is not «اکران», «فروشگاه» is not «فروش», «هزاران» is not «هزار».
+_FA_SUFFIX = r"(?:‌?(?:های|ها|اش|شون|تون|مون|ش|ی|ه))?ٔ?"
+_FA_RISK_TERMS = (
+    r"میلیون|میلیارد|هزار|درصد|بودجه|درآمد|فروش|گیشه|رتبه|صدر\s*جدول|"
+    r"اکران|معامله|ارزش\s+(?:معامله|خرید|بازار|قرارداد)|دلار"
+)
+_EN_RISK_TERMS = (
+    r"million|billion|percent|budget|revenue|gross(?:ed|es)?|box\s*office|"
+    r"rank(?:ed|ing|s)?|number\s+one|top(?:ped|s)?\s+the\s+chart|"
+    r"release[sd]?|streaming|theatrical|valuation|enterprise\s+value|equity\s+value"
+)
 HIGH_RISK_RE = re.compile(
-    r"(?:[0-9۰-۹٠-٩]+(?:[.,٬٫][0-9۰-۹٠-٩]+)*|\$|€|£|¥|"
-    r"میلیون|میلیارد|هزار|درصد|million|billion|percent|%|"
-    r"بودجه|budget|revenue|درآمد|فروش|gross|box\s*office|گیشه|"
-    r"رتبه|صدر\s*جدول|#\s*[0-9]|rank|number\s+one|top\s+the\s+chart|"
-    r"اکران|release|released|streaming|theatrical|"
-    r"معامله|ارزش|valuation|enterprise\s+value|equity\s+value)",
+    r"(?:[0-9۰-۹٠-٩]+(?:[.,٬٫][0-9۰-۹٠-٩]+)*|[$€£¥%]|#\s*[0-9۰-۹]|"
+    rf"(?<![\w‌])(?:{_FA_RISK_TERMS}){_FA_SUFFIX}(?!\w)|"
+    rf"\b(?:{_EN_RISK_TERMS})\b)",
     re.IGNORECASE,
 )
 
