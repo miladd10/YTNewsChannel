@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from email.utils import parsedate_to_datetime
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 import xml.etree.ElementTree as ET
 import httpx
@@ -135,13 +135,22 @@ SOCIAL_SECTION_QUERIES = {
 }
 
 
+def _host_matches(host: str, domain: str) -> bool:
+    host = (host or "").casefold().strip(".")
+    domain = (domain or "").casefold().strip(".")
+    return host == domain or host.endswith("." + domain)
+
+
 def _social_platform_for_url(url: str) -> str:
-    value = (url or "").casefold()
-    if "reddit.com/" in value:
+    try:
+        host = (urlparse(url or "").hostname or "").casefold()
+    except Exception:
+        host = ""
+    if _host_matches(host, "reddit.com"):
         return "reddit"
-    if "x.com/" in value or "twitter.com/" in value:
+    if _host_matches(host, "x.com") or _host_matches(host, "twitter.com"):
         return "x"
-    if "tiktok.com/" in value:
+    if _host_matches(host, "tiktok.com"):
         return "tiktok"
     return ""
 
