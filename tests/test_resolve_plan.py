@@ -375,7 +375,7 @@ def test_one_image_is_never_repeated_to_fill_story():
     assert clips[0]["timeline_duration"] == 3.0
 
 
-def test_logo_or_fanfare_video_is_used_only_once():
+def test_low_variety_video_can_fill_with_different_ranges_but_still_is_not_repeated():
     window = {"story_id": "story", "start": 0.0, "end": 20.0, "duration": 20.0}
     media = [
         {
@@ -390,8 +390,13 @@ def test_logo_or_fanfare_video_is_used_only_once():
         },
     ]
     clips = _visual_slices(window, media)
-    assert sum(1 for clip in clips if clip["candidate_id"] == "logo") == 1
+    logo_clips = [clip for clip in clips if clip["candidate_id"] == "logo"]
+    assert len(logo_clips) >= 2
     assert sum(1 for clip in clips if clip["candidate_id"] == "img") == 1
+    ranges = [(clip["source_in"], clip["source_out"]) for clip in logo_clips]
+    for index, current in enumerate(ranges):
+        for other in ranges[index + 1:]:
+            assert min(current[1], other[1]) - max(current[0], other[0]) <= 0.08
 
 
 def test_story_windows_reserve_aligned_outro_tail():
@@ -411,3 +416,22 @@ def test_story_windows_reserve_aligned_outro_tail():
     assert windows[1]["story_id"] == ""
     assert windows[1]["duration"] == 15.0
     assert windows[1]["reserved_kind"] == "outro"
+
+
+
+def test_long_trailer_fills_story_with_distinct_non_overlapping_ranges():
+    window = {"story_id": "story", "start": 0.0, "end": 19.0, "duration": 19.0}
+    media = [{
+        "id": "trailer", "media_type": "video",
+        "title": "RESIDENT EVIL – Official Trailer (4K)",
+        "page_url": "https://example.com/resident-evil",
+        "duration": "2:33", "clip_start_sec": 5,
+        "stored_path": "resident.mp4", "width": 3840, "height": 2160,
+    }]
+    clips = _visual_slices(window, media)
+    assert round(sum(clip["timeline_duration"] for clip in clips), 3) == 19.0
+    assert len(clips) >= 4
+    ranges = [(clip["source_in"], clip["source_out"]) for clip in clips]
+    for index, current in enumerate(ranges):
+        for other in ranges[index + 1:]:
+            assert min(current[1], other[1]) - max(current[0], other[0]) <= 0.08
