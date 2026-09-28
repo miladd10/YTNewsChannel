@@ -93,6 +93,39 @@ function factCheckHtml(draft){
   </section>`;
 }
 
+function claimAuditHtml(draft,workspace){
+  if(!draft)return '';
+  const ledger=(workspace?.claim_ledger||[]).filter(x=>x.narration_id===draft.id);
+  const checks=(workspace?.claim_checks||[]).filter(x=>x.narration_id===draft.id);
+  const status=String(draft.claim_audit_status||'not_run');
+  const pass=status==='pass'&&Number(draft.claim_blocked_count||0)===0;
+  const blocked=checks.filter(x=>x.status==='blocked');
+  const verified=checks.filter(x=>x.status==='verified');
+  const attributed=checks.filter(x=>x.status==='verified_with_attribution');
+  const blockedLedger=ledger.filter(x=>x.verification_status==='blocked');
+  const ledgerVerified=ledger.filter(x=>x.verification_status==='verified');
+  const ledgerAttributed=ledger.filter(x=>x.verification_status==='verified_with_attribution');
+  const tone=pass?'pass':'needs-work';
+  const rows=[...blocked,...attributed,...verified];
+  return `<section class="claim-audit-panel ${tone}">
+    <div class="claim-audit-head">
+      <div><div class="eyebrow">ATOMIC CLAIM LEDGER</div><h3>${pass?'All narration claims verified':status==='not_run'?'Claim audit not run':'Claim audit blocked'}</h3></div>
+      <button id="runClaimAuditBtn" class="btn secondary">${status==='not_run'?'Run Claim Audit':'Re-run Claim Audit'}</button>
+    </div>
+    <p>Every checkable statement is mapped to source-backed atomic claims. Numbers, rankings, budgets, revenue, deal values, dates, release scope and title identity must preserve the ledger's exact meaning.</p>
+    <div class="claim-audit-metrics">
+      <span class="signal ${pass?'high':'low'}">Narration ${Number(draft.claim_count||checks.length)} claims</span>
+      <span class="signal high">${Number(draft.claim_verified_count||verified.length)} verified</span>
+      <span class="signal medium">${Number(draft.claim_attributed_count||attributed.length)} attributed</span>
+      <span class="signal ${Number(draft.claim_blocked_count||blocked.length)?'low':'high'}">${Number(draft.claim_blocked_count||blocked.length)} blocked</span>
+      <span class="signal">Ledger ${ledger.length}: ${ledgerVerified.length} verified · ${ledgerAttributed.length} attributed · ${blockedLedger.length} blocked</span>
+    </div>
+    ${blocked.length?`<div class="claim-blocked-list">${blocked.map(x=>`<div class="claim-check-row blocked"><div><span class="pill">${esc(String(x.claim_type||'claim').replaceAll('_',' '))}</span><strong>${esc(x.sentence||'')}</strong></div><small>${esc(x.issue||'Unsupported or scope-mismatched claim.')}</small></div>`).join('')}</div>`:''}
+    ${rows.length?`<details class="claim-audit-details"><summary>Show narration claim mapping (${rows.length})</summary><div class="claim-check-list">${rows.map(x=>`<div class="claim-check-row ${esc(x.status||'blocked')}"><div><span class="claim-status">${esc(String(x.status||'blocked').replaceAll('_',' '))}</span><span class="pill">${esc(String(x.claim_type||'claim').replaceAll('_',' '))}</span><strong>${esc(x.sentence||'')}</strong></div><small>${(x.ledger_claim_ids||[]).length?`Ledger: ${esc((x.ledger_claim_ids||[]).join(', '))}`:'No ledger mapping'}${x.issue?` · ${esc(x.issue)}`:''}</small></div>`).join('')}</div></details>`:''}
+    ${ledger.length?`<details class="claim-audit-details"><summary>Show verified source ledger (${ledger.length})</summary><div class="claim-ledger-list">${ledger.map(x=>`<div class="claim-ledger-row ${esc(x.verification_status||'blocked')}"><div><span class="claim-id">${esc(x.id||'')}</span><span class="pill">${esc(String(x.claim_type||'claim').replaceAll('_',' '))}</span><strong>${esc(x.canonical_text||'')}</strong></div><small>${[x.metric,x.market,x.chart_type,x.period_type,x.date_start&&x.date_end?`${x.date_start} → ${x.date_end}`:'',x.attribution_required?'attribution required':''].filter(Boolean).map(esc).join(' · ')}</small>${(x.source_urls||[]).length?`<div class="claim-source-links">${(x.source_urls||[]).map((url,i)=>`<a href="${esc(url)}" target="_blank" rel="noreferrer">${esc((x.source_names||[])[i]||'Source')}</a>`).join('')}</div>`:''}</div>`).join('')}</div></details>`:''}
+  </section>`;
+}
+
 function reviewFeedbackHtml(review){
   if(!review){
     return `<section id="reviewFeedbackPanel" class="review-feedback-panel empty"><div><div class="eyebrow">REVIEW FEEDBACK</div><h3>No review yet</h3><p>Run Reviewer to get a visible format, style, factual, freshness, context/spice and storytelling audit for this exact draft.</p></div></section>`;
