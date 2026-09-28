@@ -2860,6 +2860,43 @@ def _latest_narration(conn, project_id: str):
     ).fetchone()
 
 
+def _voice_draft_status(conn, project_id: str, segments: list[dict]) -> dict:
+    """Is the recorded/prepared voice from the currently approved draft?"""
+    approved = conn.execute(
+        "SELECT id, version_number FROM narrations WHERE project_id=? AND approved=1 ORDER BY version_number DESC LIMIT 1",
+        (project_id,),
+    ).fetchone()
+    voice_ids = sorted({str(seg.get("narration_id") or "") for seg in segments if seg.get("narration_id")})
+    voice_versions = [
+        int(row["version_number"]) for row in conn.execute(
+            f"SELECT version_number FROM narrations WHERE id IN ({','.join('?' for _ in voice_ids)})", voice_ids
+        ).fetchall()
+    ] if voice_ids else []
+    status = {
+        "approved_narration_id": approved["id"] if approved else "",
+        "approved_version": int(approved["version_number"]) if approved else None,
+        "voice_narration_ids": voice_ids,
+        "voice_versions": voice_versions,
+        "stale": False,
+        "message": "",
+    }
+    if not segments:
+        return status
+    if not approved:
+        status["stale"] = True
+        status["message"] = (
+            f"The recorded voice is from Draft V{', V'.join(map(str, voice_versions)) or '?'}, "
+            "which is no longer approved. Approve a draft in Step 3, then Prepare v3 Performance again."
+        )
+    elif voice_ids != [approved["id"]]:
+        status["stale"] = True
+        status["message"] = (
+            f"The recorded voice is from Draft V{', V'.join(map(str, voice_versions)) or '?'}, but the approved "
+            f"draft is V{approved['version_number']}. Prepare v3 Performance again to voice the approved text."
+        )
+    return status
+
+
 def _voice_payload(conn, project_id: str) -> dict:
     project = project_or_404(conn, project_id)
     narration = _latest_narration(conn, project_id)
@@ -2890,6 +2927,7 @@ def _voice_payload(conn, project_id: str) -> dict:
     }
     return {
         "project_id": project_id,
+        "voice_status": _voice_draft_status(conn, project_id, segments),
         "narration": dict(narration) if narration else None,
         "settings": dict(settings) if settings else {
             "voice_id": "",
@@ -3983,6 +4021,7 @@ def get_resolve_plan(project_id: str):
         ).fetchall()]
         current_stories = selected_story_packet(conn, project_id)
         historical_stories = _load_historical_voice_stories(conn, project_id, voice_rows)
+        voice_status = _voice_draft_status(conn, project_id, voice_rows)
         resolved_voice_rows, reconciliation = _reconcile_voice_story_rows(
             voice_rows,
             current_stories,
@@ -4006,6 +4045,7 @@ def get_resolve_plan(project_id: str):
 
     if not plan_path.exists():
         return {
+        "voice_status": voice_status,
             "ready": False,
             "stale": False,
             "plan": None,
@@ -4060,6 +4100,7 @@ def get_resolve_plan(project_id: str):
         message = "The Resolve package is incomplete. Regenerate it."
 
     return {
+        "voice_status": voice_status,
         "ready": ready,
         "stale": stale,
         "plan": plan if ready else None,

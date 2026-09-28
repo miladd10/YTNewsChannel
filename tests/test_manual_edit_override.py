@@ -41,3 +41,20 @@ def test_approve_needs_override_and_reason_when_checks_fail(client):
     import app.db as dbmod
     with dbmod.db() as conn:
         assert conn.execute("SELECT approved FROM narrations WHERE id='n1'").fetchone()[0] == 1
+
+
+def test_voice_status_flags_voice_from_unapproved_or_older_draft(client):
+    import app.db as dbmod
+    import app.main as main
+    with dbmod.db() as conn:
+        conn.execute("""INSERT INTO voice_segments(id,project_id,narration_id,segment_index,source_text,created_at,updated_at)
+                        VALUES ('v1','p','n1',1,'x','x','x')""")
+        segs = [dict(r) for r in conn.execute("SELECT * FROM voice_segments")]
+        assert main._voice_draft_status(conn, "p", segs)["stale"]
+        conn.execute("""INSERT INTO narrations(id,project_id,version_number,content,provider,model,created_at,approved)
+                        VALUES ('n2','p',2,'y','manual','editor','x',1)""")
+        status = main._voice_draft_status(conn, "p", segs)
+        assert status["stale"] and "V2" in status["message"]
+        conn.execute("UPDATE voice_segments SET narration_id='n2'")
+        segs = [dict(r) for r in conn.execute("SELECT * FROM voice_segments")]
+        assert not main._voice_draft_status(conn, "p", segs)["stale"]
