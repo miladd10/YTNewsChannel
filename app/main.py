@@ -2345,6 +2345,60 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
     }
 
 
+
+@app.post("/api/projects/{project_id}/narrations/{narration_id}/claim-audit")
+def run_claim_audit(project_id: str, narration_id: str, body: NarrationReviewBody):
+    settings = masked_status()
+    provider = body.provider or settings.get("reviewer_provider", "claude_local")
+    model = body.model or settings.get("reviewer_model", "default")
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        draft = conn.execute(
+            "SELECT * FROM narrations WHERE id=? AND project_id=?",
+            (narration_id, project_id),
+        ).fetchone()
+        if not draft:
+            raise HTTPException(404, "Narration draft not found")
+        stories = selected_story_packet(conn, project_id)
+
+    claim_ledger, fresh_sources, _, _ = _build_verified_claim_ledger(
+        project, stories, provider, model
+    )
+    claim_audit, actual_provider, actual_model = audit_narration_claims(
+        str(draft["content"] or ""),
+        claim_ledger,
+        provider,
+        model,
+    )
+
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        _persist_claim_audit(
+            conn,
+            project,
+            narration_id,
+            int(draft["version_number"]),
+            claim_ledger,
+            claim_audit,
+        )
+        save_manifest(conn, project_id)
+
+    return {
+        "ok": True,
+        "narration_id": narration_id,
+        "claim_audit_status": claim_audit.get("status") or "blocked",
+        "claim_count": int(claim_audit.get("claim_count") or 0),
+        "claim_verified_count": int(claim_audit.get("verified_count") or 0),
+        "claim_attributed_count": int(claim_audit.get("attributed_count") or 0),
+        "claim_blocked_count": int(claim_audit.get("blocked_count") or 0),
+        "uncovered_high_risk_count": int(claim_audit.get("uncovered_high_risk_count") or 0),
+        "system_issues": claim_audit.get("system_issues") or [],
+        "ledger_summary": ledger_summary(claim_ledger),
+        "provider": actual_provider,
+        "model": actual_model,
+    }
+
+
 @app.post("/api/projects/{project_id}/narrations/{narration_id}/review")
 def review_narration(project_id: str, narration_id: str, body: NarrationReviewBody):
     settings = masked_status()
@@ -2359,6 +2413,9 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
         if not draft:
             raise HTTPException(404, "Narration draft not found")
         stories = selected_story_packet(conn, project_id)
+        all_ledger_rows, all_claim_checks = _claim_rows_for_workspace(conn, project_id)
+        draft_ledger = [row for row in all_ledger_rows if row.get("narration_id") == narration_id]
+        draft_claim_checks = [row for row in all_claim_checks if row.get("narration_id") == narration_id]
         styles = _style_transcripts(conn, project.get("channel") or "cinema", project.get("content_type") or "weekly_news")
 
     style_profile = _ensure_style_profile(
@@ -2382,6 +2439,14 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
             "approved_sections": _sectioned_story_packet(stories),
         }, ensure_ascii=False),
         "</current_week_authoritative_packet>",
+        "",
+        "<verified_claim_ledger>",
+        json.dumps(draft_ledger, ensure_ascii=False),
+        "</verified_claim_ledger>",
+        "",
+        "<narration_claim_audit>",
+        json.dumps(draft_claim_checks, ensure_ascii=False),
+        "</narration_claim_audit>",
         "",
         "<style_blueprint>",
         style_profile.get("profile_text") or "",
