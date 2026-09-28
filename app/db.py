@@ -172,6 +172,23 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_style_transcripts_format
                 ON style_transcripts(channel, content_type, enabled);
 
+            CREATE TABLE IF NOT EXISTS style_profiles (
+                id TEXT PRIMARY KEY,
+                channel TEXT NOT NULL DEFAULT 'cinema',
+                content_type TEXT NOT NULL DEFAULT 'weekly_news',
+                corpus_hash TEXT NOT NULL DEFAULT '',
+                profile_text TEXT NOT NULL DEFAULT '',
+                provider TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL DEFAULT '',
+                transcript_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(channel, content_type)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_style_profiles_format
+                ON style_profiles(channel, content_type);
+
             CREATE TABLE IF NOT EXISTS narration_reviews (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL,
