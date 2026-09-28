@@ -117,6 +117,18 @@ def init_db() -> None:
                 source_kinds_json TEXT NOT NULL DEFAULT '[]',
                 reddit_only INTEGER NOT NULL DEFAULT 0,
                 primary_social_count INTEGER NOT NULL DEFAULT 0,
+                news_hook TEXT NOT NULL DEFAULT '',
+                news_hook_date TEXT NOT NULL DEFAULT '',
+                verification_status TEXT NOT NULL DEFAULT 'needs_verification',
+                verification_notes TEXT NOT NULL DEFAULT '',
+                temporal_gate TEXT NOT NULL DEFAULT 'warning',
+                verification_gate TEXT NOT NULL DEFAULT 'fail',
+                in_window_source_count INTEGER NOT NULL DEFAULT 0,
+                background_source_count INTEGER NOT NULL DEFAULT 0,
+                undated_source_count INTEGER NOT NULL DEFAULT 0,
+                independent_source_count INTEGER NOT NULL DEFAULT 0,
+                current_non_reddit_source_count INTEGER NOT NULL DEFAULT 0,
+                current_primary_social_count INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -262,6 +274,30 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_media_candidates_selected ON media_candidates(project_id, selected);
             """
         )
+        if not _column_exists(conn, "stories", "news_hook"):
+            conn.execute("ALTER TABLE stories ADD COLUMN news_hook TEXT NOT NULL DEFAULT ''")
+        if not _column_exists(conn, "stories", "news_hook_date"):
+            conn.execute("ALTER TABLE stories ADD COLUMN news_hook_date TEXT NOT NULL DEFAULT ''")
+        if not _column_exists(conn, "stories", "verification_status"):
+            conn.execute("ALTER TABLE stories ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'needs_verification'")
+        if not _column_exists(conn, "stories", "verification_notes"):
+            conn.execute("ALTER TABLE stories ADD COLUMN verification_notes TEXT NOT NULL DEFAULT ''")
+        if not _column_exists(conn, "stories", "temporal_gate"):
+            conn.execute("ALTER TABLE stories ADD COLUMN temporal_gate TEXT NOT NULL DEFAULT 'warning'")
+        if not _column_exists(conn, "stories", "verification_gate"):
+            conn.execute("ALTER TABLE stories ADD COLUMN verification_gate TEXT NOT NULL DEFAULT 'fail'")
+        if not _column_exists(conn, "stories", "in_window_source_count"):
+            conn.execute("ALTER TABLE stories ADD COLUMN in_window_source_count INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists(conn, "stories", "background_source_count"):
+            conn.execute("ALTER TABLE stories ADD COLUMN background_source_count INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists(conn, "stories", "undated_source_count"):
+            conn.execute("ALTER TABLE stories ADD COLUMN undated_source_count INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists(conn, "stories", "independent_source_count"):
+            conn.execute("ALTER TABLE stories ADD COLUMN independent_source_count INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists(conn, "stories", "current_non_reddit_source_count"):
+            conn.execute("ALTER TABLE stories ADD COLUMN current_non_reddit_source_count INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists(conn, "stories", "current_primary_social_count"):
+            conn.execute("ALTER TABLE stories ADD COLUMN current_primary_social_count INTEGER NOT NULL DEFAULT 0")
         if not _column_exists(conn, "stories", "section_fit"):
             conn.execute("ALTER TABLE stories ADD COLUMN section_fit TEXT NOT NULL DEFAULT 'medium'")
         if not _column_exists(conn, "stories", "source_platforms_json"):
