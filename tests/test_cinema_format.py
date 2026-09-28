@@ -1,7 +1,9 @@
 from app.services.cinema_format import (
+    CONTENT_PLAN_SYSTEM,
     ENRICHMENT_REWRITE_SYSTEM,
     FORMAT_BY_KEY,
     REVIEWER_SYSTEM,
+    STYLE_PROFILE_SYSTEM,
     WRITER_SYSTEM,
     build_style_packet,
     format_packet,
@@ -425,3 +427,43 @@ def test_enrichment_rewrite_requires_platform_specific_social_attribution():
     assert "توی X یکی از بحث‌ها" in ENRICHMENT_REWRITE_SYSTEM
     assert 'Avoid vague "مردم توی شبکه‌های اجتماعی می‌گن"' in ENRICHMENT_REWRITE_SYSTEM
     assert "safe_to_narrate=true" in ENRICHMENT_REWRITE_SYSTEM
+
+
+
+def test_style_packet_contains_long_flow_anchors_and_asr_warning():
+    long_text = ("حالا این خبر یه نکته جالب داره و برای همین میریم سراغ جزئیات. " * 500)
+    packet = build_style_packet([
+        {"id": "a", "name": "Long Filmbaz Reference", "content": long_text, "enabled": 1},
+        {"id": "b", "name": "Second Reference", "content": long_text[::-1], "enabled": 1},
+    ], max_chars=24000)
+    assert "<flow_anchors>" in packet
+    assert "<distributed_samples>" in packet
+    assert "do NOT imitate ASR mistakes" in packet
+
+
+def test_style_profile_targets_spoken_micro_arc_not_written_news():
+    assert "# Story Micro-Arc" in STYLE_PROFILE_SYSTEM
+    assert "colloquial Persian" in STYLE_PROFILE_SYSTEM
+    assert "formal entertainment-news article" in STYLE_PROFILE_SYSTEM
+    assert "ASR/transcription mistakes" in STYLE_PROFILE_SYSTEM
+
+
+def test_content_plan_extracts_supported_story_beats_before_writing():
+    assert '"headline_hook"' in CONTENT_PLAN_SYSTEM
+    assert '"interesting_details"' in CONTENT_PLAN_SYSTEM
+    assert '"why_it_matters"' in CONTENT_PLAN_SYSTEM
+    assert "Do not compress a rich source packet into two facts" in CONTENT_PLAN_SYSTEM
+
+
+def test_writer_rejects_headline_summary_style_and_english_headings():
+    assert "SPOKEN TRANSCRIPT" in WRITER_SYSTEM
+    assert "STORY MICRO-ARC" in WRITER_SYSTEM
+    assert "never output English headings" in WRITER_SYSTEM
+    assert "A cast list by itself is not a payoff" in WRITER_SYSTEM
+
+
+def test_reviewer_must_fail_overcompressed_article_like_drafts():
+    assert "OVER-COMPRESSION" in REVIEWER_SYSTEM
+    assert "FORMAL WRITTEN-PERSIAN DRIFT" in REVIEWER_SYSTEM
+    assert "EMPTY ADJECTIVE PAYOFFS" in REVIEWER_SYSTEM
+    assert "headline-summary draft should be NEEDS_WORK" in REVIEWER_SYSTEM
