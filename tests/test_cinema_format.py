@@ -1,4 +1,5 @@
 from app.services.cinema_format import (
+    ENRICHMENT_REWRITE_SYSTEM,
     FORMAT_BY_KEY,
     REVIEWER_SYSTEM,
     WRITER_SYSTEM,
@@ -416,3 +417,11 @@ def test_writer_and_reviewer_have_evidence_backed_spice_rules():
     assert "If there are no strong supported angles, do not pretend there are" in WRITER_SYSTEM
     assert "Context / Spice Audit" in REVIEWER_SYSTEM
     assert "safe_to_narrate spice angle" in REVIEWER_SYSTEM
+
+
+
+def test_enrichment_rewrite_requires_platform_specific_social_attribution():
+    assert "توی ردیت بعضی از کاربرا" in ENRICHMENT_REWRITE_SYSTEM
+    assert "توی X یکی از بحث‌ها" in ENRICHMENT_REWRITE_SYSTEM
+    assert 'Avoid vague "مردم توی شبکه‌های اجتماعی می‌گن"' in ENRICHMENT_REWRITE_SYSTEM
+    assert "safe_to_narrate=true" in ENRICHMENT_REWRITE_SYSTEM
