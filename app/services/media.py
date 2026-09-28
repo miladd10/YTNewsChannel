@@ -159,14 +159,37 @@ def suggested_clip_range(duration, usage_index: int = 0, clip_seconds: int = 12)
     return int(start), int(min(total, start + length))
 
 
+def _story_reference_sources(story: dict) -> list[dict]:
+    """Core news sources + post-draft enrichment sources, deduped by URL.
+
+    Enrichment sources are reference inputs for media discovery only. Normal
+    media relevance/original-source validation still decides whether a visual is usable.
+    """
+    results: list[dict] = []
+    seen: set[str] = set()
+    for source in [*(story.get("articles") or []), *(story.get("spice_sources") or [])]:
+        url = str(source.get("url") or source.get("page_url") or "").strip()
+        key = url.casefold()
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        results.append(source)
+    return results
+
+
 def _story_context_text(story: dict) -> str:
     parts = [
         str(story.get("canonical_title") or ""),
         str(story.get("summary") or ""),
         str(story.get("_narration_text") or ""),
     ]
-    for article in story.get("articles") or []:
+    for article in _story_reference_sources(story):
         parts.append(str(article.get("title") or ""))
+        parts.append(str(article.get("snippet") or ""))
+    for angle in story.get("spice_angles") or []:
+        if angle.get("safe_to_narrate"):
+            parts.append(str(angle.get("text") or ""))
     return " ".join(parts)
 
 
@@ -1261,7 +1284,7 @@ def _reference_page_images(
     base = clean_story_query(story.get("canonical_title", ""))
     article_by_url = {
         str(article.get("url") or ""): article
-        for article in story.get("articles") or []
+        for article in _story_reference_sources(story)
         if str(article.get("url") or "")
     }
     for article_url, cached in page_cache.items():
@@ -1425,7 +1448,7 @@ def _search_reference_page_videos(
 ) -> tuple[list[dict], list[str]]:
     from yt_dlp import YoutubeDL
 
-    articles = story.get("articles") or []
+    articles = _story_reference_sources(story)
     if not articles:
         return [], []
 
@@ -1438,7 +1461,7 @@ def _search_reference_page_videos(
     }
 
     with httpx.Client(timeout=20, follow_redirects=True, headers=headers) as client:
-        for article in articles[:4]:
+        for article in articles[:10]:
             article_url = str(article.get("url") or "").strip()
             if not article_url:
                 continue
