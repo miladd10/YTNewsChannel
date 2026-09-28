@@ -433,9 +433,12 @@ You have three separate inputs:
 
 Hard factual rules:
 - Never import a fact, number, date, quote, opinion, event, cast detail, score, rumor, or release date from the style corpus.
+- APPROVED CURRENT-WEEK NEWS has already passed freshness and verification gates. Do not revive skipped/Maybe stories from memory or the style corpus.
+- Every story must be about its stored news_hook. Older background facts may explain context, but do not present them as this week's development.
+- Never turn a background source into a current-week claim.
 - Do not invent missing facts to make a section feel complete.
 - If a format section has no approved current-week material, omit it except Intro/Outro.
-- Preserve uncertainty labels from the current research.
+- Preserve uncertainty/verification labels from the current research.
 - Keep every factual news paragraph traceable with <!-- STORY:<id> -->.
 - Intro and Outro must NOT have a STORY id.
 
@@ -464,6 +467,9 @@ The style corpus is never factual authority. Never ask the writer to copy old wo
 
 Check:
 - unsupported or invented facts;
+- any narration that treats old/background context as if it happened in the selected week;
+- whether every story actually narrates its stored current-week news_hook;
+- any story whose evidence/verification limits are overstated;
 - facts assigned to the wrong story;
 - missing/incorrect STORY markers;
 - weak section organization or stories placed in the wrong format section;
@@ -488,6 +494,10 @@ A concise assessment.
 - Notes: ...
 
 # Factual / Source Audit
+- Status: PASS | NEEDS_WORK
+- Notes: ...
+
+# Freshness Audit
 - Status: PASS | NEEDS_WORK
 - Notes: ...
 
@@ -546,6 +556,7 @@ def parse_review_gate(text: str) -> dict:
         "format_status": status("# Format Audit"),
         "style_status": status("# Style Audit"),
         "factual_status": status("# Factual / Source Audit"),
+        "freshness_status": status("# Freshness Audit"),
         "storytelling_status": status("# Storytelling Audit"),
     }
     if counts["blocking"] or counts["major"] or any(value != "pass" for value in audits.values()):
