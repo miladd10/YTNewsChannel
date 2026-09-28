@@ -129,6 +129,8 @@ def init_db() -> None:
                 independent_source_count INTEGER NOT NULL DEFAULT 0,
                 current_non_reddit_source_count INTEGER NOT NULL DEFAULT 0,
                 current_primary_social_count INTEGER NOT NULL DEFAULT 0,
+                familiarity_needed INTEGER NOT NULL DEFAULT 0,
+                familiarity_anchor TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -274,6 +276,10 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_media_candidates_selected ON media_candidates(project_id, selected);
             """
         )
+        if not _column_exists(conn, "stories", "familiarity_needed"):
+            conn.execute("ALTER TABLE stories ADD COLUMN familiarity_needed INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists(conn, "stories", "familiarity_anchor"):
+            conn.execute("ALTER TABLE stories ADD COLUMN familiarity_anchor TEXT NOT NULL DEFAULT ''")
         if not _column_exists(conn, "stories", "news_hook"):
             conn.execute("ALTER TABLE stories ADD COLUMN news_hook TEXT NOT NULL DEFAULT ''")
         if not _column_exists(conn, "stories", "news_hook_date"):
