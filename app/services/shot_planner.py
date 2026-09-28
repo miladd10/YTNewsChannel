@@ -275,6 +275,18 @@ def choose_video_shot(
         if hint_start is not None:
             distance = abs(selected_start - float(hint_start))
             score += max(0.0, 12.0 - min(12.0, distance / 3.0))
+
+        if used_ranges:
+            selected_mid = (selected_start + selected_end) / 2.0
+            nearest_used_mid = min(
+                abs(selected_mid - ((used[0] + used[1]) / 2.0))
+                for used in used_ranges
+            )
+            # Once a trailer has already been used, prefer a scene from a
+            # noticeably different part of the source rather than an adjacent
+            # shot that looks almost like the previous edit.
+            score += min(24.0, nearest_used_mid * 0.65)
+
         score += min(12.0, (selected_end - selected_start) * 2.0)
 
         if score > best_score:
