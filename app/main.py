@@ -74,6 +74,52 @@ app = FastAPI(title="YT News Studio", version=APP_VERSION)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+LOCAL_HOSTNAMES = {"127.0.0.1", "localhost", "::1", "[::1]", "testserver"}
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _hostname(netloc: str) -> str:
+    value = (netloc or "").strip().lower()
+    if value.startswith("["):
+        return value.split("]", 1)[0] + "]"
+    return value.rsplit(":", 1)[0] if value.count(":") == 1 else value
+
+
+def _request_is_allowed(method: str, headers) -> tuple[bool, str]:
+    """Local-only app guard.
+
+    - Host must be a local name (blocks DNS-rebinding pages reading the API).
+    - Browser requests that change state must come from this app's own page:
+      the Origin must equal the Host, or Sec-Fetch-Site must be same-origin.
+      Clients that send neither header (curl, scripts, tests) are allowed.
+    """
+    host = headers.get("host", "")
+    if _hostname(host) not in LOCAL_HOSTNAMES:
+        return False, "Requests must be addressed to localhost."
+    if method.upper() not in UNSAFE_METHODS:
+        return True, ""
+    origin = headers.get("origin")
+    fetch_site = (headers.get("sec-fetch-site") or "").lower()
+    if origin is not None:
+        from urllib.parse import urlparse as _urlparse
+        parsed = _urlparse(origin)
+        if origin == "null" or parsed.netloc.lower() != host.lower():
+            return False, "Cross-site request blocked."
+        return True, ""
+    if fetch_site and fetch_site not in {"same-origin", "none"}:
+        return False, "Cross-site request blocked."
+    return True, ""
+
+
+@app.middleware("http")
+async def local_origin_guard(request, call_next):
+    allowed, reason = _request_is_allowed(request.method, request.headers)
+    if not allowed:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": reason}, status_code=403)
+    return await call_next(request)
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
