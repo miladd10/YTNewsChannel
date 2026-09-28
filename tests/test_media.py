@@ -1,5 +1,5 @@
 import app.services.media as media_module
-from app.services.media import _contextual_fallback_stories, _dedupe_quality_first_results, _extract_reference_image_urls, _extract_reference_video_urls, _reference_resolution_queries, _story_subjects, _youtube_search_queries, search_story_media, story_allows_interview_or_podcast, story_media_key, story_visual_plan, suggested_clip_range, video_is_usable_broll
+from app.services.media import _contextual_fallback_stories, _dedupe_quality_first_results, _extract_reference_image_urls, _extract_reference_video_urls, _image_candidate_score, _matches_actual_story_subject, _reference_resolution_queries, _result_quality_rank, _story_subjects, _youtube_search_queries, search_story_media, story_allows_interview_or_podcast, story_media_key, story_visual_plan, suggested_clip_range, video_is_usable_broll
 
 
 def normal_story():
@@ -694,3 +694,68 @@ def test_reference_article_image_extracts_og_image_before_web_search_fallback():
     images = _extract_reference_image_urls(html, "https://www.netflix.com/tudum/articles/narnia")
     assert images[0] == "https://cdn.example.com/narnia-first-look.jpg"
     assert "https://www.netflix.com/images/narnia-twitter.jpg" in images
+
+
+
+def test_full_official_trailer_ranks_above_4k_title_announcement():
+    story = {
+        "canonical_title": "The Further Mis-Adventures of Cliff Booth trailer released",
+        "summary": "",
+        "category": "upcoming_films",
+        "articles": [],
+    }
+    trailer = {
+        "title": "THE FURTHER MIS-ADVENTURES OF CLIFF BOOTH | Official Trailer | Netflix",
+        "source": "Netflix",
+        "provider": "YouTube · official B-roll",
+        "height": 2026,
+    }
+    announcement = {
+        "title": "THE FURTHER MIS-ADVENTURES OF CLIFF BOOTH | TITLE ANNOUNCEMENT | NETFLIX",
+        "source": "Netflix",
+        "provider": "YouTube · studio/distributor B-roll",
+        "height": 2160,
+    }
+    assert _result_quality_rank(trailer, story) > _result_quality_rank(announcement, story)
+
+
+def test_landscape_4k_still_ranks_above_portrait_poster():
+    story = {
+        "canonical_title": "Narnia: The Magician's Nephew first look",
+        "summary": "",
+        "category": "upcoming_films",
+        "articles": [],
+    }
+    landscape = {
+        "title": "Narnia official first look still",
+        "source": "Netflix",
+        "url": "https://netflix.com/narnia",
+        "image": "https://cdn.example/narnia-landscape.jpg",
+        "width": 3840,
+        "height": 2160,
+    }
+    portrait = {
+        "title": "Narnia official poster",
+        "source": "TMDB",
+        "url": "https://themoviedb.org/narnia",
+        "image": "https://cdn.example/narnia-poster.jpg",
+        "width": 2000,
+        "height": 3000,
+    }
+    assert _image_candidate_score(landscape, story) > _image_candidate_score(portrait, story)
+
+
+def test_movie_story_does_not_treat_series_season_as_current_footage():
+    story = {
+        "canonical_title": "Lord of the Rings takes us back to the Shire in first look at new movie from Andy Serkis",
+        "summary": "",
+        "category": "upcoming_films",
+        "articles": [],
+    }
+    item = {
+        "title": "The Lord of The Rings: The Rings of Power - Season 3 Teaser",
+        "description": "",
+        "channel": "Prime Video",
+        "_search_query": "Lord of the Rings 2026 official trailer",
+    }
+    assert not _matches_actual_story_subject(item, story)
