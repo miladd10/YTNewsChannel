@@ -6,7 +6,7 @@ import math
 import re
 import uuid
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote_plus, urlparse
@@ -26,10 +26,19 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _search_after_date_for_inclusive_start(date_start: str) -> str:
+    if not date_start:
+        return ""
+    try:
+        return (datetime.fromisoformat(date_start).date() - timedelta(days=1)).isoformat()
+    except Exception:
+        return date_start
+
+
 def google_news_rss_url(query: str, date_start: str, date_end: str, locale: str = "CA") -> str:
     dated = query.strip()
     if date_start:
-        dated += f" after:{date_start}"
+        dated += f" after:{_search_after_date_for_inclusive_start(date_start)}"
     if date_end:
         dated += f" before:{date_end}"
     return f"https://news.google.com/rss/search?q={quote_plus(dated)}&hl=en-CA&gl={locale}&ceid={locale}:en"
@@ -363,7 +372,7 @@ def _social_queries(date_start: str, date_end: str) -> list[tuple[str, str, str]
             for term in terms:
                 query = f"({site_part}) {term}"
                 if date_start:
-                    query += f" after:{date_start}"
+                    query += f" after:{_search_after_date_for_inclusive_start(date_start)}"
                 if date_end:
                     query += f" before:{date_end}"
                 queries.append((category, platform, query))
