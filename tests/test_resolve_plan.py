@@ -1,7 +1,7 @@
 import app.services.resolve_plan as resolve_plan_module
 import json
 
-from app.services.resolve_plan import _assign_transitions, _clamp_video_source_in, _visual_slices, build_edit_plan, crop_instruction, story_windows, voice_timeline, write_resolve_package
+from app.services.resolve_plan import _alignment_visual_beat_offsets, _assign_transitions, _clamp_video_source_in, _visual_slices, build_edit_plan, crop_instruction, story_windows, voice_timeline, write_resolve_package
 
 
 def test_crop_instruction_for_portrait_image():
@@ -435,3 +435,47 @@ def test_long_trailer_fills_story_with_distinct_non_overlapping_ranges():
     for index, current in enumerate(ranges):
         for other in ranges[index + 1:]:
             assert min(current[1], other[1]) - max(current[0], other[0]) <= 0.08
+
+
+
+def test_visual_beats_follow_alignment_punctuation_instead_of_fixed_timer():
+    segment = {
+        "duration": 12.0,
+        "alignment": {
+            "words": [
+                {"text": "اول", "start": 0.0, "end": 0.6},
+                {"text": "خبر؛", "start": 2.8, "end": 3.2},
+                {"text": "بعد", "start": 3.4, "end": 4.0},
+                {"text": "جزئیات،", "start": 6.6, "end": 7.0},
+                {"text": "و", "start": 7.2, "end": 7.4},
+                {"text": "پایان.", "start": 10.9, "end": 11.4},
+            ]
+        },
+    }
+    cuts = _alignment_visual_beat_offsets(segment)
+    assert cuts[0] == 3.2
+    assert cuts[1] == 7.0
+    assert all(2.4 <= b - a <= 5.8 for a, b in zip([0.0] + cuts, cuts + [12.0]))
+
+
+def test_visual_slices_use_narration_beat_boundaries():
+    window = {
+        "story_id": "story",
+        "start": 0.0,
+        "end": 12.0,
+        "duration": 12.0,
+        "visual_boundaries": [3.2, 7.0],
+    }
+    media = [{
+        "id": "v", "media_type": "video",
+        "title": "Official Trailer",
+        "page_url": "https://example.com/trailer",
+        "duration": "2:00",
+        "clip_start_sec": 5,
+        "stored_path": "trailer.mp4",
+        "width": 1920, "height": 1080,
+    }]
+    clips = _visual_slices(window, media)
+    assert round(clips[0]["timeline_end"], 1) == 3.2
+    assert round(clips[1]["timeline_end"], 1) == 7.0
+    assert round(sum(x["timeline_duration"] for x in clips), 1) == 12.0
