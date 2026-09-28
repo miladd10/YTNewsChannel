@@ -1,7 +1,7 @@
 import app.services.resolve_plan as resolve_plan_module
 import json
 
-from app.services.resolve_plan import _alignment_visual_beat_offsets, _assign_transitions, _clamp_video_source_in, _visual_slices, build_edit_plan, crop_instruction, story_windows, voice_timeline, write_resolve_package
+from app.services.resolve_plan import _alignment_visual_beat_offsets, _assign_transitions, _clamp_video_source_in, _semantic_composite_candidates, _visual_slices, build_edit_plan, crop_instruction, story_windows, voice_timeline, write_resolve_package
 
 
 def test_crop_instruction_for_portrait_image():
@@ -479,3 +479,46 @@ def test_visual_slices_use_narration_beat_boundaries():
     assert round(clips[0]["timeline_end"], 1) == 3.2
     assert round(clips[1]["timeline_end"], 1) == 7.0
     assert round(sum(x["timeline_duration"] for x in clips), 1) == 12.0
+
+
+
+def test_people_group_images_create_real_uhd_three_up_composite(tmp_path):
+    from PIL import Image
+
+    media_dir = tmp_path / "media" / "selected" / "story"
+    media_dir.mkdir(parents=True)
+    paths = []
+    for index, size in enumerate(((800, 1200), (900, 1200), (1000, 1200)), start=1):
+        path = media_dir / f"person_{index}.jpg"
+        Image.new("RGB", size, (40 * index, 40 * index, 40 * index)).save(path)
+        paths.append(path)
+
+    images = [
+        {
+            "id": f"i{index}",
+            "story_id": "story",
+            "media_type": "image",
+            "title": label,
+            "stored_path": path.relative_to(tmp_path).as_posix(),
+            "coverage_label": label,
+            "coverage_kind": "person",
+            "coverage_group": "visual-context-1",
+            "coverage_cue": "all three appeared together",
+            "layout_hint": "three_up",
+            "_narration_ratio": 0.5,
+        }
+        for index, (label, path) in enumerate(
+            zip(("A", "B", "C"), paths),
+            start=1,
+        )
+    ]
+
+    composites = _semantic_composite_candidates(tmp_path, images)
+    assert len(composites) == 1
+    composite = composites[0]
+    assert composite["coverage_kind"] == "multi_panel"
+    assert composite["layout_hint"] == "three_up"
+    output = tmp_path / composite["stored_path"]
+    assert output.exists()
+    with Image.open(output) as rendered:
+        assert rendered.size == (3840, 2160)
