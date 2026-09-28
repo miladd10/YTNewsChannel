@@ -368,6 +368,78 @@ def _resolve_missing_story_details(
     return details
 
 
+def _spoken_tokens(value: str) -> list[str]:
+    return [
+        token.casefold().replace("’", "'")
+        for token in re.findall(r"[^\W_]+(?:['’\-][^\W_]+)*", value or "", flags=re.UNICODE)
+    ]
+
+
+def _alignment_phrase_start(alignment_value, phrase: str) -> float | None:
+    try:
+        alignment = alignment_value if isinstance(alignment_value, dict) else json.loads(alignment_value or "{}")
+    except Exception:
+        return None
+    flattened: list[tuple[str, float]] = []
+    for item in alignment.get("words") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            start = float(item.get("start"))
+        except (TypeError, ValueError):
+            continue
+        for token in _spoken_tokens(str(item.get("text") or "")):
+            flattened.append((token, start))
+    target = _spoken_tokens(phrase)
+    if not target or len(flattened) < len(target):
+        return None
+    # Search from the end because this repair is specifically for reserved
+    # intro/outro text that leaked into an adjacent story segment.
+    values = [token for token, _ in flattened]
+    for offset in range(len(values) - len(target), -1, -1):
+        if values[offset:offset + len(target)] == target:
+            return flattened[offset][1]
+    return None
+
+
+def _apply_reserved_narration_tails(conn, voice_rows: list[dict]) -> list[dict]:
+    rows = [dict(row) for row in voice_rows]
+    narration_id = next((str(row.get("narration_id") or "") for row in rows if row.get("narration_id")), "")
+    if not narration_id:
+        return rows
+    narration = conn.execute("SELECT content FROM narrations WHERE id=?", (narration_id,)).fetchone()
+    if not narration:
+        return rows
+
+    # The current extractor deliberately returns intro/outro with blank
+    # story_id. This also repairs projects created before that rule existed.
+    reserved_segments = [
+        segment for segment in extract_narration_segments(str(narration["content"] or ""))
+        if not str(segment.get("story_id") or "") and str(segment.get("source_text") or "").strip()
+    ]
+    if not reserved_segments:
+        return rows
+
+    for row in rows:
+        if not str(row.get("story_id") or ""):
+            continue
+        source_text = str(row.get("source_text") or "").strip()
+        if not source_text:
+            continue
+        for reserved in reversed(reserved_segments):
+            reserved_text = str(reserved.get("source_text") or "").strip()
+            if not reserved_text or reserved_text == source_text or not source_text.endswith(reserved_text):
+                continue
+            start = _alignment_phrase_start(row.get("alignment_json"), reserved_text)
+            duration = float(row.get("duration_seconds") or 0)
+            if start is None or start <= 0 or start >= duration:
+                continue
+            row["reserved_tail_seconds"] = round(duration - start, 6)
+            row["reserved_tail_kind"] = "outro"
+            break
+    return rows
+
+
 def _resolve_prerequisites(voice_rows: list[dict], candidates: list[dict]) -> dict:
     pending_voice = [
         row for row in voice_rows
@@ -1833,6 +1905,7 @@ def get_resolve_plan(project_id: str):
             current_stories,
             historical_stories,
         )
+        resolved_voice_rows = _apply_reserved_narration_tails(conn, resolved_voice_rows)
 
     prerequisites = _resolve_prerequisites(resolved_voice_rows, candidates)
     prerequisites["story_id_reconciliation"] = reconciliation
@@ -1936,6 +2009,7 @@ def generate_resolve_plan(project_id: str):
             current_stories,
             historical_stories,
         )
+        resolved_voice_rows = _apply_reserved_narration_tails(conn, resolved_voice_rows)
 
     prerequisites = _resolve_prerequisites(resolved_voice_rows, candidates)
     prerequisites["story_id_reconciliation"] = reconciliation
