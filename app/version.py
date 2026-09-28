@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.26"
+APP_VERSION = "0.3.27"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Unique Stills + Reserved Outro"
+APP_RELEASE_NAME = "Smart Coverage + UHD Landscape Media"
