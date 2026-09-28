@@ -750,6 +750,8 @@ VISUAL_LAYOUT_HINTS = {
     "three_up",
     "person_plus_title",
     "collage",
+    "stacked_two",
+    "stacked_three",
 }
 
 
@@ -1061,7 +1063,7 @@ Return ONLY JSON: an array of objects:
    "narration_cue":"short phrase/idea in the supplied narration this visual should cover",
    "why":"why this visual directly helps the narration",
    "preferred_media":["official BTS","official interview","press photo","poster","official still","official trailer/clip"],
-   "layout_hint":"single|two_up|three_up|person_plus_title|collage",
+   "layout_hint":"single|two_up|three_up|stacked_two|stacked_three|person_plus_title|collage",
    "source_urls":["exact supplied URL"]}
  ]}
 
