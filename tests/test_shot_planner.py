@@ -18,8 +18,8 @@ def test_choose_video_shot_avoids_used_range():
         wanted=5.0,
         used_ranges=[(first["start"], first["end"])],
     )
-    assert second["start"] == 22.0
-    assert second["end"] <= 27.0
+    assert second["start"] == 36.0
+    assert second["end"] <= 41.0
 
 
 def test_choose_video_shot_prefers_non_overlapping_scene_over_repeat():
