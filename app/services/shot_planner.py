@@ -259,13 +259,19 @@ def choose_video_shot(
 
         score = float(shot.get("score") or 0)
         selected = (selected_start, selected_end)
+        overlap_ratio = 0.0
         for used in used_ranges:
             overlap = _overlap_seconds(selected, used)
             if overlap > 0:
-                ratio = overlap / max(0.01, selected_end - selected_start)
-                score -= 90 * ratio
-                if ratio > 0.65:
-                    score -= 80
+                overlap_ratio = max(
+                    overlap_ratio,
+                    overlap / max(0.01, selected_end - selected_start),
+                )
+        # Never deliberately reuse the same source frames while unused trailer
+        # material still exists. Resolve can reuse one trailer many times, but
+        # every use must be a genuinely different shot/range.
+        if overlap_ratio > 0.12:
+            continue
         if hint_start is not None:
             distance = abs(selected_start - float(hint_start))
             score += max(0.0, 12.0 - min(12.0, distance / 3.0))
