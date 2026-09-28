@@ -1502,6 +1502,105 @@ def _write_narration_file(project: dict, version: int, content: str) -> None:
     (folder / f"v{version:02d}.md").write_text(content, encoding="utf-8")
 
 
+def _run_narration_fact_check(
+    project: dict,
+    stories: list[dict],
+    draft_text: str,
+    writer_provider: str,
+    writer_model: str,
+) -> tuple[str, dict, str, str]:
+    settings = masked_status()
+    preferred_provider = settings.get("reviewer_provider") or writer_provider
+    preferred_model = settings.get("reviewer_model") or writer_model
+
+    fresh_sources = fetch_narration_fact_check_sources(
+        stories,
+        str(project.get("date_start") or ""),
+        str(project.get("date_end") or ""),
+        per_query_limit=5,
+    )
+    fact_packet = {
+        "project_window": {
+            "date_start": project.get("date_start"),
+            "date_end_exclusive": project.get("date_end"),
+            "language": project.get("language"),
+        },
+        "approved_sections": _sectioned_story_packet(stories),
+        "fresh_verification_sources": fresh_sources,
+        "draft": draft_text,
+    }
+
+    attempts = [(preferred_provider, preferred_model)]
+    if (preferred_provider, preferred_model) != (writer_provider, writer_model):
+        attempts.append((writer_provider, writer_model))
+
+    last_error = ""
+    for fact_provider, fact_model in attempts:
+        try:
+            raw, actual_provider, actual_model = generate_text(
+                fact_provider,
+                fact_model,
+                FACT_CHECK_SYSTEM,
+                json.dumps(fact_packet, ensure_ascii=False),
+            )
+            report = _parse_json_object_text(raw)
+            status = str(report.get("status") or "needs_human_check").strip().lower()
+            if status not in {"pass", "corrected", "needs_human_check"}:
+                status = "needs_human_check"
+            issues = report.get("issues") if isinstance(report.get("issues"), list) else []
+            issue_count = len(issues)
+            corrected = str(report.get("corrected_narration") or "").strip()
+            if status == "pass" or issue_count == 0:
+                corrected = draft_text
+                status = "pass"
+                issue_count = 0
+                issues = []
+            elif status == "corrected" and corrected:
+                allowed_ids = {str(story.get("id") or "") for story in stories}
+                corrected_ids = set(re.findall(r"<!--\s*STORY:([^>\s]+)\s*-->", corrected))
+                invalid_ids = corrected_ids - allowed_ids
+                if invalid_ids:
+                    status = "needs_human_check"
+                    corrected = draft_text
+                    issues.append({
+                        "story_id": "",
+                        "claim": "STORY marker integrity",
+                        "problem": f"Fact-check rewrite introduced unknown STORY ids: {sorted(invalid_ids)}",
+                        "correction_basis": "Keep only STORY ids from the approved packet.",
+                    })
+                    issue_count = len(issues)
+            else:
+                corrected = draft_text
+
+            report = {
+                **report,
+                "status": status,
+                "issue_count": issue_count,
+                "issues": issues,
+                "fresh_verification_sources": fresh_sources,
+                "provider": actual_provider,
+                "model": actual_model,
+            }
+            return corrected, report, actual_provider, actual_model
+        except Exception as exc:
+            last_error = str(exc)
+
+    return draft_text, {
+        "status": "needs_human_check",
+        "issue_count": 1,
+        "issues": [{
+            "story_id": "",
+            "claim": "Automatic fact-check pass",
+            "problem": f"Automatic fact check could not complete: {last_error}",
+            "correction_basis": "Run the narration reviewer before approval.",
+        }],
+        "fresh_verification_sources": fresh_sources,
+        "provider": preferred_provider,
+        "model": preferred_model,
+        "error": last_error,
+    }, preferred_provider, preferred_model
+
+
 @app.post("/api/projects/{project_id}/narration")
 def generate_narration(project_id: str, body: GenerateBody):
     settings = masked_status()
