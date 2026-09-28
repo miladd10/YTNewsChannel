@@ -59,3 +59,38 @@ def test_endgame_new_movie_wording_is_flagged_when_evidence_says_rerelease():
     }
     flags = _deterministic_fact_red_flags(draft, fresh)
     assert any(flag["rule"] == "new_movie_vs_rerelease" for flag in flags)
+
+
+
+def test_unqualified_number_one_claim_is_blocked():
+    draft = """
+<!-- STORY:endgame -->
+«Avengers: Endgame Encore» این هفته مستقیم رفت صدر جدول.
+"""
+    fresh = {
+        "endgame": [
+            {
+                "title": "Domestic 2026 Weekend 39",
+                "snippet": "Avengers Endgame: Encore ranked number one for the Sep. 25-27 domestic weekend.",
+            }
+        ]
+    }
+    flags = _deterministic_fact_red_flags(draft, fresh)
+    assert any(flag["rule"] == "unqualified_box_office_rank" for flag in flags)
+
+
+def test_explicit_domestic_weekend_number_one_claim_is_allowed():
+    draft = """
+<!-- STORY:endgame -->
+«Avengers: Endgame Encore» در جدول آخرهفتهٔ آمریکای شمالی رتبهٔ اول را گرفت.
+"""
+    fresh = {
+        "endgame": [
+            {
+                "title": "Domestic 2026 Weekend 39",
+                "snippet": "Avengers Endgame: Encore ranked number one for the Sep. 25-27 domestic weekend.",
+            }
+        ]
+    }
+    flags = _deterministic_fact_red_flags(draft, fresh)
+    assert not any(flag["rule"] == "unqualified_box_office_rank" for flag in flags)
