@@ -2166,6 +2166,14 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    revised_text, fact_check, _, _ = _run_narration_fact_check(
+        project,
+        stories,
+        revised_text,
+        actual_provider,
+        actual_model,
+    )
+
     new_id = str(uuid.uuid4())
     stamp = now()
     with db() as conn:
@@ -2182,6 +2190,23 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
             ),
         )
         _write_narration_file(project, version, revised_text)
+        conn.execute(
+            """UPDATE narrations
+               SET fact_check_status=?,fact_check_issue_count=?,fact_check_json=?
+               WHERE id=?""",
+            (
+                str(fact_check.get("status") or "needs_human_check"),
+                int(fact_check.get("issue_count") or 0),
+                json.dumps(fact_check, ensure_ascii=False),
+                new_id,
+            ),
+        )
+        fact_folder = Path(project["root_path"]) / "narration" / "fact-checks"
+        fact_folder.mkdir(parents=True, exist_ok=True)
+        (fact_folder / f"v{version:02d}_fact_check.json").write_text(
+            json.dumps(fact_check, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
         conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (stamp, project_id))
         save_manifest(conn, project_id)
     return {
@@ -2192,6 +2217,9 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         "model": actual_model,
         "parent_narration_id": narration_id,
         "revision_review_id": review["id"],
+        "fact_check_status": fact_check.get("status") or "needs_human_check",
+        "fact_check_issue_count": int(fact_check.get("issue_count") or 0),
+        "fact_check_issues": fact_check.get("issues") or [],
     }
 
 
@@ -2213,6 +2241,12 @@ def approve_narration(project_id: str, narration_id: str):
             raise HTTPException(400, "Run Reviewer before approving this narration.")
         if review["gate_status"] == "revision_required":
             raise HTTPException(400, "Reviewer still requires revision. Revise this draft and review the new version first.")
+        fact_status = str(draft["fact_check_status"] or "not_run")
+        if fact_status in {"not_run", "needs_human_check"}:
+            raise HTTPException(
+                400,
+                "Automatic fact check has not passed. Generate/revise this draft again or resolve the fact-check warning before approval.",
+            )
         conn.execute("UPDATE narrations SET approved=0 WHERE project_id=?", (project_id,))
         conn.execute("UPDATE narrations SET approved=1 WHERE id=?", (narration_id,))
         conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
