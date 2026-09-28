@@ -6,7 +6,7 @@ import re
 import subprocess
 from pathlib import Path
 
-PROJECT_SCHEMA_VERSION = 12
+PROJECT_SCHEMA_VERSION = 13
 PROJECT_DIRS = [
     "research/raw",
     "research/stories",
@@ -14,6 +14,7 @@ PROJECT_DIRS = [
     "narration/plans",
     "narration/reviews",
     "narration/fact-checks",
+    "narration/claims",
     "audio/narration",
     "timing",
     "media-plan",
@@ -105,6 +106,12 @@ def save_manifest(conn, project_id: str) -> Path:
     narration_reviews = [dict(row) for row in conn.execute(
         "SELECT * FROM narration_reviews WHERE project_id=? ORDER BY created_at", (project_id,)
     ).fetchall()]
+    claim_ledger = [dict(row) for row in conn.execute(
+        "SELECT * FROM claim_ledger WHERE project_id=? ORDER BY narration_id,created_at,id", (project_id,)
+    ).fetchall()]
+    narration_claim_checks = [dict(row) for row in conn.execute(
+        "SELECT * FROM narration_claim_checks WHERE project_id=? ORDER BY narration_id,created_at,id", (project_id,)
+    ).fetchall()]
     voice_settings = conn.execute(
         "SELECT * FROM voice_settings WHERE project_id=?", (project_id,)
     ).fetchone()
@@ -124,6 +131,8 @@ def save_manifest(conn, project_id: str) -> Path:
         "stories": stories,
         "narrations": narrations,
         "narration_reviews": narration_reviews,
+        "claim_ledger": claim_ledger,
+        "narration_claim_checks": narration_claim_checks,
         "voice_settings": dict(voice_settings) if voice_settings else None,
         "voice_segments": voice_segments,
         "media_plans": media_plans,
