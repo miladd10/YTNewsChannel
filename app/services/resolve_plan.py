@@ -16,6 +16,9 @@ RESOLVE_HEIGHT = 2160
 DEFAULT_FPS = 30
 DEFAULT_VIDEO_CUT = 5.5
 DEFAULT_IMAGE_HOLD = 3.0
+MIN_NARRATION_BEAT = 2.4
+TARGET_NARRATION_BEAT = 4.2
+MAX_NARRATION_BEAT = 5.8
 DEFAULT_DISSOLVE_FRAMES = 6
 IMAGE_DISSOLVE_FRAMES = 8
 
@@ -203,12 +206,132 @@ def _loads_alignment(value) -> dict:
         return {}
 
 
+def _alignment_visual_beat_offsets(segment: dict, usable_duration: float | None = None) -> list[float]:
+    """Choose visual cut points from the actual spoken rhythm.
+
+    Strong punctuation is preferred, then commas/pauses, then the nearest
+    aligned word end. This keeps visual changes tied to narration phrases
+    instead of a fixed timer.
+    """
+    duration = max(
+        0.0,
+        min(
+            float(segment.get("duration") or 0),
+            float(usable_duration) if usable_duration is not None else float(segment.get("duration") or 0),
+        ),
+    )
+    if duration <= 0:
+        return []
+
+    alignment = segment.get("alignment") or {}
+    raw_words = alignment.get("words") or []
+    words: list[tuple[str, float, float]] = []
+    for item in raw_words:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "")
+        if not text.strip():
+            continue
+        try:
+            start = max(0.0, float(item.get("start") or 0))
+            end = max(start, float(item.get("end") or start))
+        except (TypeError, ValueError):
+            continue
+        if start >= duration + 0.05:
+            continue
+        words.append((text.strip(), min(end, duration), start))
+
+    if not words:
+        points: list[float] = []
+        cursor = TARGET_NARRATION_BEAT
+        while cursor < duration - 1.0:
+            points.append(round(cursor, 6))
+            cursor += TARGET_NARRATION_BEAT
+        return points
+
+    candidates: list[tuple[float, int]] = []
+    all_word_ends: list[float] = []
+    previous_end: float | None = None
+    for text, end, start in words:
+        if end <= 0.05 or end >= duration - 0.12:
+            previous_end = end
+            continue
+        all_word_ends.append(end)
+        strength = 0
+        if re.search(r"[.!?؟؛;:]$", text):
+            strength = 4
+        elif re.search(r"[,،]$", text):
+            strength = 3
+        if previous_end is not None and start - previous_end >= 0.34:
+            strength = max(strength, 2)
+        if strength:
+            candidates.append((end, strength))
+        previous_end = end
+
+    cuts: list[float] = []
+    cursor = 0.0
+    while duration - cursor > MAX_NARRATION_BEAT + 0.35:
+        low = cursor + MIN_NARRATION_BEAT
+        high = min(duration - 0.8, cursor + MAX_NARRATION_BEAT)
+        target = min(high, cursor + TARGET_NARRATION_BEAT)
+
+        eligible = [(t, strength) for t, strength in candidates if low <= t <= high]
+        if eligible:
+            chosen = max(
+                eligible,
+                key=lambda row: (
+                    row[1],
+                    -abs(row[0] - target),
+                ),
+            )[0]
+        else:
+            fallback = [t for t in all_word_ends if low <= t <= high]
+            if fallback:
+                chosen = min(fallback, key=lambda t: abs(t - target))
+            else:
+                chosen = target
+
+        if chosen - cursor < MIN_NARRATION_BEAT - 0.1:
+            break
+        cuts.append(round(chosen, 6))
+        cursor = chosen
+
+    # Avoid an awkward sub-second final beat by folding it into the previous
+    # visual rather than forcing a flash cut.
+    if cuts and duration - cuts[-1] < 1.25:
+        cuts.pop()
+    return cuts
+
+
+def _next_visual_beat_duration(window: dict, cursor: float, end: float) -> float:
+    boundaries = [
+        float(value)
+        for value in (window.get("visual_boundaries") or [])
+        if cursor + 0.08 < float(value) < end - 0.02
+    ]
+    if boundaries:
+        return max(0.5, min(end - cursor, boundaries[0] - cursor))
+    return min(end - cursor, DEFAULT_VIDEO_CUT)
+
+
 def story_windows(voice: list[dict]) -> list[dict]:
     windows: list[dict] = []
 
-    def add_window(story_id: str, start: float, end: float, segment_id, kind: str = "") -> None:
+    def add_window(
+        story_id: str,
+        start: float,
+        end: float,
+        segment_id,
+        kind: str = "",
+        visual_boundaries: list[float] | None = None,
+    ) -> None:
         if end <= start:
             return
+        visual_boundaries = [
+            round(float(value), 6)
+            for value in (visual_boundaries or [])
+            if start + 0.05 < float(value) < end - 0.05
+        ]
         if (
             windows
             and windows[-1]["story_id"] == story_id
@@ -218,6 +341,9 @@ def story_windows(voice: list[dict]) -> list[dict]:
             windows[-1]["end"] = round(end, 6)
             windows[-1]["duration"] = round(float(end) - float(windows[-1]["start"]), 6)
             windows[-1]["segment_ids"].append(segment_id)
+            windows[-1]["visual_boundaries"] = sorted(set(
+                (windows[-1].get("visual_boundaries") or []) + visual_boundaries
+            ))
             return
         windows.append({
             "story_id": story_id,
@@ -226,6 +352,7 @@ def story_windows(voice: list[dict]) -> list[dict]:
             "duration": round(end - start, 6),
             "segment_ids": [segment_id],
             "reserved_kind": kind,
+            "visual_boundaries": visual_boundaries,
         })
 
     for segment in voice:
@@ -237,12 +364,17 @@ def story_windows(voice: list[dict]) -> list[dict]:
             max(0.0, end - start),
         )
         if story_id and reserved_tail > 0.05:
+            story_duration = max(0.0, (end - start) - reserved_tail)
+            offsets = _alignment_visual_beat_offsets(segment, story_duration)
+            boundaries = [start + offset for offset in offsets]
             story_end = end - reserved_tail
-            add_window(story_id, start, story_end, segment["id"])
+            add_window(story_id, start, story_end, segment["id"], visual_boundaries=boundaries)
             add_window("", story_end, end, segment["id"], segment.get("reserved_tail_kind") or "outro")
         else:
             kind = segment.get("reserved_tail_kind") if not story_id else ""
-            add_window(story_id, start, end, segment["id"], kind or "")
+            offsets = _alignment_visual_beat_offsets(segment) if story_id else []
+            boundaries = [start + offset for offset in offsets]
+            add_window(story_id, start, end, segment["id"], kind or "", boundaries)
     return windows
 
 
@@ -336,7 +468,7 @@ def _smart_video_choice(
                 analysis,
                 wanted=wanted,
                 used_ranges=used_ranges,
-                hint_start=float(candidate.get("clip_start_sec") or 0),
+                hint_start=(float(candidate.get("clip_start_sec") or 0) if not used_ranges else None),
             )
             if chosen:
                 chosen["source_media_duration"] = analysis.get("duration")
@@ -438,7 +570,7 @@ def _visual_slices(
             for video in videos:
                 key = str(video.get("page_url") or video.get("id") or "")
                 use_index = uses.get(key, 0)
-                wanted = min(DEFAULT_VIDEO_CUT, remaining)
+                wanted = min(_next_visual_beat_duration(window, cursor, end), remaining)
                 proposal = _smart_video_choice(
                     video,
                     root=root,
@@ -482,7 +614,7 @@ def _visual_slices(
 
         media_type = item.get("media_type") or ""
         if media_type == "image":
-            hold = min(DEFAULT_IMAGE_HOLD, remaining)
+            hold = min(DEFAULT_IMAGE_HOLD, _next_visual_beat_duration(window, cursor, end), remaining)
             source_in = 0.0
             source_out = None
             available = None
@@ -697,10 +829,10 @@ def build_edit_plan(project: dict, voice_segments: list[dict], candidates: list[
             "video_scaling": "Scale full frame with crop",
             "video_source_audio": "muted",
             "voice_master_timing": True,
-            "shot_selection": "scene-aware",
+            "shot_selection": "scene-aware + narration-beat aligned",
             "image_hold_seconds": DEFAULT_IMAGE_HOLD,
             "image_reuse": "never",
-            "transition_policy": "hard cuts on trailer scene boundaries; short dissolves for still/media/story changes",
+            "transition_policy": "prefer narration phrase boundaries + trailer scene boundaries; short dissolves for still/media/story changes",
         },
         "voice_segments": voice,
         "story_windows": windows,
