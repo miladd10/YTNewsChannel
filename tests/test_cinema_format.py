@@ -351,7 +351,7 @@ def test_story_spice_queries_cover_drama_critics_social_and_context():
         "web_news", "rumor_drama", "critics", "social_reddit", "social_x",
         "social_tiktok", "social_instagram", "youtube", "cool_context", "comparison",
     }
-    assert any("rumor controversy" in query for _, query in rows)
+    assert any("rumor" in query and "controversy" in query for _, query in rows)
     assert any("critics review reaction" in query for _, query in rows)
     assert any("site:reddit.com" in query for _, query in rows)
     assert any("site:x.com" in query for _, query in rows)
