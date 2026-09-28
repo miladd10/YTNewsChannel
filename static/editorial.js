@@ -317,6 +317,19 @@ async function rewriteWithEnrichment(){
   }
 }
 
+async function runClaimAudit(){
+  const id=state.narrationDraftId;if(!id)return;
+  const b=$('#runClaimAuditBtn');if(b){b.disabled=true;b.textContent='Auditing...'}
+  const s=state.settings?.ai||{};
+  startRunStatus({title:'Auditing every narration claim',meta:'Source-locked Claim Ledger',steps:['Refreshing volatile evidence','Building atomic claim ledger','Extracting all factual sentences','Checking numbers + scope + attribution','Blocking unsupported claims','Saving claim audit']});
+  try{
+    const r=await api(`/api/projects/${state.project.id}/narrations/${id}/claim-audit`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:s.reviewer_provider,model:s.reviewer_model})});
+    await renderStage();
+    finishRunStatus(true,'',`Claim audit: ${r.claim_audit_status}`);
+    toast(`Claim audit: ${r.claim_verified_count} verified · ${r.claim_attributed_count} attributed · ${r.claim_blocked_count} blocked`,r.claim_audit_status!=='pass');
+  }catch(e){finishRunStatus(false,e.message);toast(e.message,true);if(b){b.disabled=false;b.textContent='Run Claim Audit'}}
+}
+
 async function reviewNarration(){
   const id=state.narrationDraftId;if(!id)return;const s=state.settings?.ai||{};const b=$('#reviewNarrationBtn');
   if(b){b.disabled=true;b.textContent='Reviewing...'}
@@ -351,6 +364,7 @@ async function deleteStyleTranscript(id){if(!confirm('Delete this style transcri
 const baseWireStageEditorial=wireStage;
 wireStage=function(){
   baseWireStageEditorial();
+  const ca=$('#runClaimAuditBtn');if(ca)ca.onclick=runClaimAudit;
   const nr=$('#reviewNarrationBtn');if(nr)nr.onclick=reviewNarration;
   const sp=$('#rebuildStyleProfileBtn');if(sp)sp.onclick=rebuildStyleProfile;
   const fv=$('#buildFunFactsVisualsBtn');if(fv)fv.onclick=buildFunFactsVisualContext;
