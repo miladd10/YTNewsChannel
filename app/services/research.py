@@ -828,6 +828,112 @@ def _story_context_subject(story: dict) -> str:
     return title[:140]
 
 
+
+def _fact_check_queries(story: dict, date_start: str, date_end: str) -> list[str]:
+    """Queries aimed at claims that can become stale inside a weekly script."""
+    subject = _story_context_subject(story)
+    if not subject:
+        return []
+    quoted = f'"{subject}"'
+    category = str(story.get("category") or "")
+    date_bits = ""
+    if date_start:
+        date_bits += f" after:{_search_after_date_for_inclusive_start(date_start)}"
+    if date_end:
+        date_bits += f" before:{date_end}"
+
+    queries = [f"{quoted} latest update{date_bits}"]
+    story_text = " ".join([
+        str(story.get("canonical_title") or ""),
+        str(story.get("summary") or ""),
+        str(story.get("news_hook") or ""),
+    ]).casefold()
+
+    if category in {"box_office", "trend"} or any(
+        token in story_text for token in ("box office", "gross", "opening", "million", "billion", "گیشه")
+    ):
+        queries = [
+            f"{quoted} latest box office worldwide total domestic international weekend{date_bits}",
+            f"{quoted} box office second weekend cumulative total{date_bits}",
+        ]
+    elif category == "industry":
+        queries = [
+            f"{quoted} latest deal settlement acquisition value terms{date_bits}",
+            f"{quoted} official settlement agreement value latest{date_bits}",
+        ]
+    elif category == "upcoming_films":
+        queries = [
+            f"{quoted} official trailer release date theatrical limited wide latest{date_bits}",
+            f"{quoted} studio release date official latest{date_bits}",
+        ]
+    elif category == "tv_series":
+        queries = [
+            f"{quoted} Netflix official title cast premiere latest{date_bits}",
+            f"{quoted} official series announcement latest{date_bits}",
+        ]
+    return list(dict.fromkeys(query.strip() for query in queries if query.strip()))
+
+
+def fetch_narration_fact_check_sources(
+    stories: list[dict],
+    date_start: str,
+    date_end: str,
+    *,
+    per_query_limit: int = 5,
+) -> dict[str, list[dict]]:
+    """Collect a small fresh verification supplement for narration fact-checking.
+
+    This does not change story inclusion. It exists to catch volatile values
+    (box-office totals/rankings, release scopes/dates, deal values) that can be
+    correctly mentioned by an older article but become stale before narration.
+    """
+    by_story: dict[str, list[dict]] = defaultdict(list)
+    for story in stories:
+        story_id = str(story.get("id") or "")
+        if not story_id:
+            continue
+        seen: set[str] = set()
+        for query in _fact_check_queries(story, date_start, date_end):
+            try:
+                results = list(DDGS().text(query, max_results=per_query_limit) or [])
+            except Exception:
+                continue
+            for result in results:
+                url = str(result.get("href") or result.get("url") or "").strip()
+                if not url or url.casefold() in seen:
+                    continue
+                title = _plain(str(result.get("title") or ""))
+                snippet = _plain(str(result.get("body") or result.get("snippet") or ""))
+                if not title and not snippet:
+                    continue
+                seen.add(url.casefold())
+                raw_date = str(result.get("date") or result.get("published") or "")
+                annotated = annotate_source_window({
+                    "title": title,
+                    "url": url,
+                    "source": _plain(str(result.get("source") or "")) or (urlparse(url).hostname or "Web"),
+                    "published_at": raw_date,
+                    "snippet": snippet[:1200],
+                    "query": query,
+                    "raw": {
+                        "source_kind": "fact_check",
+                        "context_story_id": story_id,
+                    },
+                }, date_start, date_end)
+                by_story[story_id].append({
+                    "title": annotated.get("title") or "",
+                    "url": annotated.get("url") or "",
+                    "source": annotated.get("source") or "",
+                    "published_at": annotated.get("published_at") or "",
+                    "temporal_role": str((annotated.get("raw") or {}).get("temporal_role") or ""),
+                    "snippet": annotated.get("snippet") or "",
+                    "query": query,
+                })
+                if len(by_story[story_id]) >= per_query_limit * 2:
+                    break
+    return by_story
+
+
 def _spice_queries(story: dict, date_start: str, date_end: str) -> list[tuple[str, str]]:
     subject = _story_context_subject(story)
     if not subject:
