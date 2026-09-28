@@ -116,11 +116,18 @@ The local SQLite index lives in `data/ytnews.db` and is intentionally ignored by
 - Step 7 analyzes each selected downloaded trailer/clip with cached keyframe-first scene analysis instead of taking arbitrary 7-second ranges. Full pixel scene detection is used only when a file exposes too few useful keyframes.
 - The planner avoids typical trailer intro/outro regions when possible, prefers roughly 2.5–6 second scene-aware shots, and penalizes overlap so repeated use of the same source moves to a different part of the trailer.
 - Hard cuts are kept between detected scenes from the same trailer. Short SMPTE dissolves are used only for still/media changes and story boundaries, with real staged transition handles so Resolve has source frames on both sides.
-- Image-only coverage changes at roughly 5-second cadence and rotates distinct selected images when available. Step 7 warns when a long image-only story does not have enough distinct stills.
+- Each selected still is used once only and for at most 3 seconds. If unique media runs out, the remaining narration is intentionally left open instead of looping the same image. Step 7 warns when a long image-only story does not have enough distinct stills.
 - Scene analysis is cached under media/analysis so regenerating the Resolve package does not need to re-analyze unchanged video files.
 
 
 ### v0.3.25 Fast smart-shot analysis
 - Smart shot discovery now reads encoded keyframe/scene-cut timestamps first, which is far faster on 4K trailers than decoding every frame for scene scoring.
 - Full FFmpeg scene detection remains a fallback for sources with too few useful keyframes.
-- Image-only Resolve warnings now state the exact number of distinct stills recommended for the story duration at the ~5-second image cadence.
+- Image-only Resolve warnings state the exact number of distinct stills recommended for the story duration at the 3-second maximum cadence.
+
+
+### v0.3.26 Unique stills + reserved intro/outro
+- Still images are never repeated within a story and are capped at 3 seconds each. If unique visual media is exhausted, Resolve leaves the remaining narration visually open rather than looping a still.
+- Logo/fanfare/ident/title-announcement videos are limited to one use per story so short corporate/logo footage does not repeat across the same narration.
+- Intro and outro headings are editorially reserved: they receive no automatic news B-roll. Future voice preparation creates separate blank-story intro/outro segments.
+- Existing projects created before this rule are repaired without re-generating ElevenLabs audio: forced-alignment timestamps are used to detect where an outro leaked into the final story take, and Resolve ends that story's B-roll at the aligned outro boundary.
