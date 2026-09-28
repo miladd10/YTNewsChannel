@@ -127,6 +127,10 @@ Clean.
 - Status: PASS
 - Notes: current hook checked
 
+# Context / Spice Audit
+- Status: PASS
+- Notes: supported context only
+
 # Storytelling Audit
 - Status: PASS
 - Notes: fine
