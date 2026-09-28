@@ -267,3 +267,14 @@
 .pronunciation-card{padding:16px 18px;margin:14px 0}.pronunciation-card textarea{width:100%;margin-top:10px;font:15px/1.8 Vazirmatn,Tahoma,"Segoe UI",sans-serif}.pronunciation-card code{background:#0f141c;padding:1px 5px;border-radius:5px}
 .warn-text{color:var(--amber);font-weight:650}
 .draft-head-row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}textarea.narration-editor{resize:vertical;min-height:460px}
+
+/* Right-to-left script text. unicode-bidi:plaintext gives every paragraph the
+   direction of its own first strong character, so Persian lines read RTL,
+   English lines LTR, and «English titles» inside Persian sit correctly. */
+.review-feedback-text,.style-profile-text,
+.fact-check-issue,.claim-check-list,.claim-blocked-list,.claim-ledger-list,.story-summary,.story-title,
+#pronunciationText,.style-transcript-row strong{unicode-bidi:plaintext;text-align:start}
+.narration-editor,.review-feedback-text,.style-profile-text,.voice-performance-editor,.voice-source-text,#pronunciationText{
+  font-family:Vazirmatn,Tahoma,"Segoe UI","Noto Sans Arabic",sans-serif;font-size:15px;line-height:1.95}
+.narration-view{white-space:normal}.narration-view p{margin:0 0 14px;text-align:start}.nv-heading{margin:18px 0 8px;color:#bdb6ff;text-align:start}.nv-tags{direction:ltr;text-align:left;margin-bottom:3px}.nv-story{display:inline-block;font:10px/1.4 ui-monospace,Menlo,monospace;color:#8591a1;background:#151c26;border:1px solid #283140;border-radius:6px;padding:1px 6px;margin-right:5px}
+[dir=rtl].narration-editor,[dir=rtl].voice-performance-editor,[dir=rtl].voice-source-text,#pronunciationText[dir=rtl]{text-align:right}
