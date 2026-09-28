@@ -10,7 +10,7 @@ from .secrets import masked_status
 
 NARRATION_CONTINUITY_TARGET_CHARS = 1800
 STORY_MARKER_RE = re.compile(r"<!--\s*STORY:([^>]+?)\s*-->", re.IGNORECASE)
-HEADING_RE = re.compile(r"^#{1,6}\\s+(.+?)\\s*$")
+HEADING_RE = re.compile(r"^#{1,6}\s+(.+?)\s*$")
 RESERVED_INTRO_HEADINGS = {"intro", "introduction", "opening", "مقدمه"}
 RESERVED_OUTRO_HEADINGS = {"outro", "ending", "closing", "conclusion", "پایان", "خاتمه"}
 
