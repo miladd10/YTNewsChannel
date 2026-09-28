@@ -572,6 +572,10 @@ Return ONLY valid JSON:
 
 Rules:
 - Extract as many genuinely useful supported beats as the packet provides. Do not compress a rich source packet into two facts.
+- The supplied verified_claim_ledger is the mandatory source for all externally checkable facts. The story/article packet provides context, but do not plan a factual beat that has no verified/verified_with_attribution ledger entry.
+- Never plan from a ledger entry with verification_status=blocked.
+- When a ledger entry has attribution_required=true, preserve that requirement in the planned wording.
+- For numbers, rankings, budgets, revenue, deal values, dates, release scope and title identity, copy the exact semantic scope from the ledger; do not infer or simplify it.
 - Do not invent filler to hit length.
 - Mark a story quick when evidence is thin.
 - For an unfamiliar creator/person/company, include one supported recognition cue when available.
@@ -612,6 +616,9 @@ Return ONLY valid JSON:
 
 STRICT RULES:
 - Use ONLY the supplied evidence. Do not use memory or outside facts.
+- The supplied verified_claim_ledger is the structured factual boundary. A correction must remain semantically equivalent to a verified ledger claim. If fresh evidence reveals a correction that is not represented in the ledger, do not improvise it: mark needs_human_check so the ledger can be rebuilt.
+- A blocked ledger claim cannot be narrated.
+- For verified_with_attribution ledger claims, preserve explicit attribution/estimate/conflict framing.
 - Preserve wording/style/structure unless a factual correction is needed.
 - Every number must keep its scope: domestic vs international vs worldwide; weekend-only vs cumulative total; opening weekend vs current total; estimate/projection vs final/actual.
 - A source published this week may mention an OLDER event or subtotal. Publication date does not make every number inside it a current-week value.
@@ -642,6 +649,11 @@ You have five separate inputs:
 5. STYLE CORPUS: old reference transcripts used ONLY to learn voice/flow, never facts.
 
 Hard factual rules:
+- VERIFIED CLAIM LEDGER IS THE HARD FACTUAL BOUNDARY. Every externally checkable factual statement in the narration must be semantically supported by one or more verified/verified_with_attribution ledger entries for that STORY id.
+- The approved article packet gives context and source material, but you are NOT allowed to create a factual statement directly from an article if that fact is absent from the verified claim ledger.
+- Never use a ledger claim marked blocked. If a useful fact is missing from the ledger, omit it rather than filling the gap from memory or inference.
+- Keep the exact ledger scope for numbers, rankings, dates, budgets, revenue/gross, deal values, release type and title identity. Do not simplify away market, period, metric, valuation definition, estimate status or date range.
+- If attribution_required=true, the spoken wording must explicitly preserve attribution/estimate/conflict framing.
 - Never import a fact, number, date, quote, opinion, event, cast detail, score, rumor, or release date from the style corpus.
 - APPROVED CURRENT-WEEK NEWS has already passed freshness and verification gates. Do not revive skipped/Maybe stories from memory or the style corpus.
 - Every story must be about its stored news_hook. Older background facts may explain context, but do not present them as this week's development.
@@ -708,6 +720,12 @@ Review the draft against:
 4. the style corpus for direct comparison of flow/rhythm only.
 
 The style corpus is never factual authority. Never ask the writer to copy old wording or import old facts.
+The VERIFIED CLAIM LEDGER and NARRATION CLAIM AUDIT are also supplied. Treat them as a hard factual gate:
+- any blocked narration claim is a blocking review issue;
+- any factual sentence missing from the ledger is blocking;
+- any number/metric/scope that differs from its mapped ledger entry is blocking;
+- verified_with_attribution claims must keep attribution;
+- never recommend adding a factual detail that is not represented by a verified ledger claim.
 
 Check:
 - unsupported or invented facts;
@@ -805,6 +823,9 @@ You receive the existing first draft plus the same approved current-week stories
 Do not restart the episode from scratch. Preserve the useful structure, facts, section order, STORY markers, and lines that already work. Enrich only the stories where the newly collected evidence genuinely improves the narration.
 
 Rules:
+- VERIFIED CLAIM LEDGER IS THE HARD FACTUAL BOUNDARY. Any factual sentence you keep or add must map to a verified/verified_with_attribution ledger claim for that STORY id.
+- Never preserve or add a factual detail that is absent from the ledger, even if it appeared in the previous draft.
+- Keep exact numeric/temporal/market/financial/release/title-identity scope from the ledger and preserve attribution_required framing.
 - Use only spice_angles with safe_to_narrate=true.
 - It is correct for a searched story to receive no extra line if nothing strong was found.
 - Keep each verified news_hook as the core. Related context enriches it; it never replaces it.
@@ -835,6 +856,9 @@ Apply the supplied reviewer feedback to the existing narration.
 
 Rules:
 - The review is the change list.
+- VERIFIED CLAIM LEDGER IS THE HARD FACTUAL BOUNDARY. Every factual sentence in the revised output must remain supported by a verified/verified_with_attribution ledger claim for that STORY id.
+- Never introduce a replacement number/date/rank/budget/revenue/deal/release/title fact that is absent from the ledger. If the reviewer asks for such a correction but no verified ledger claim exists, remove/qualify the unsupported statement rather than guessing.
+- Preserve attribution_required framing from the ledger.
 - Make only changes needed to resolve the review, BUT if the Style/Storytelling audit says an affected story is fundamentally over-compressed or article-like, rewrite that whole story's spoken passage rather than patching one sentence.
 - Preserve everything already correct.
 - Preserve current-week factual fidelity and STORY markers.
