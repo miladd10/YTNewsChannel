@@ -63,12 +63,12 @@ HARD RULES:
 """
 
 HIGH_RISK_RE = re.compile(
-    r"(?:[0-9۰-۹٠-٩]+(?:[.,٬٫][0-9۰-۹٠-٩]+)*|\\$|€|£|¥|"
+    r"(?:[0-9۰-۹٠-٩]+(?:[.,٬٫][0-9۰-۹٠-٩]+)*|\$|€|£|¥|"
     r"میلیون|میلیارد|هزار|درصد|million|billion|percent|%|"
-    r"بودجه|budget|revenue|درآمد|فروش|gross|box\\s*office|گیشه|"
-    r"رتبه|صدر\\s*جدول|#\\s*[0-9]|rank|number\\s+one|top\\s+the\\s+chart|"
+    r"بودجه|budget|revenue|درآمد|فروش|gross|box\s*office|گیشه|"
+    r"رتبه|صدر\s*جدول|#\s*[0-9]|rank|number\s+one|top\s+the\s+chart|"
     r"اکران|release|released|streaming|theatrical|"
-    r"معامله|ارزش|valuation|enterprise\\s+value|equity\\s+value)",
+    r"معامله|ارزش|valuation|enterprise\s+value|equity\s+value)",
     re.IGNORECASE,
 )
 
@@ -79,7 +79,7 @@ def _json_object(value: str) -> dict:
     raw = str(value or "").strip()
     fence = chr(96) * 3
     if raw.startswith(fence):
-        raw = raw.split("\\n", 1)[1] if "\\n" in raw else raw
+        raw = raw.split("\n", 1)[1] if "\n" in raw else raw
         raw = raw.rsplit(fence, 1)[0]
     first, last = raw.find("{"), raw.rfind("}")
     if first < 0 or last < first:
@@ -91,7 +91,7 @@ def _json_object(value: str) -> dict:
 
 
 def _clean(value) -> str:
-    return re.sub(r"\\s+", " ", str(value or "")).strip()
+    return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
 def _float(value):
@@ -299,7 +299,7 @@ def _attribution_present(sentence: str, claim: dict, extractor_value: bool) -> b
     if not extractor_value:
         return False
     return bool(re.search(
-        r"(طبق|بر\\s+اساس|گزارش|به\\s+گفته|اعلام|according|reported|reports?|says?|"
+        r"(طبق|بر\s+اساس|گزارش|به\s+گفته|اعلام|according|reported|reports?|says?|"
         r"estimat(?:e|ed)|حدود|تقریباً|برآورد)",
         _clean(sentence).casefold(), flags=re.IGNORECASE,
     ))
@@ -376,23 +376,23 @@ def _validate_spoken_claim(raw: dict, ledger_by_id: dict[str, dict]) -> dict:
 
 def _plain_sentence(value: str) -> str:
     value = _clean(value).translate(PERSIAN_DIGITS)
-    value = re.sub(r"[\\s\\u200c]+", " ", value)
-    return re.sub(r"[^\\w\\u0600-\\u06FF$€£¥%#.,:/ -]+", "", value).casefold().strip()
+    value = re.sub(r"[\s\u200c]+", " ", value)
+    return re.sub(r"[^\w\u0600-\u06FF$€£¥%#.,:/ -]+", "", value).casefold().strip()
 
 
 def _story_sentences(draft_text: str) -> list[dict]:
     current_story = ""
     output = []
-    chunks = re.split(r"(<!--\\s*STORY:[^>]+-->)", draft_text or "")
+    chunks = re.split(r"(<!--\s*STORY:[^>]+-->)", draft_text or "")
     for chunk in chunks:
-        marker = re.match(r"<!--\\s*STORY:([^>\\s]+)\\s*-->", chunk.strip())
+        marker = re.match(r"<!--\s*STORY:([^>\s]+)\s*-->", chunk.strip())
         if marker:
             current_story = marker.group(1).strip()
             continue
         if not current_story:
             continue
-        cleaned = re.sub(r"^\\s*#+\\s+.*$", " ", chunk, flags=re.MULTILINE)
-        for sentence in re.split(r"(?<=[.!?؟])\\s+|\\n+", cleaned):
+        cleaned = re.sub(r"^\s*#+\s+.*$", " ", chunk, flags=re.MULTILINE)
+        for sentence in re.split(r"(?<=[.!?؟])\s+|\n+", cleaned):
             sentence = _clean(sentence)
             if sentence:
                 output.append({"story_id": current_story, "sentence": sentence})
