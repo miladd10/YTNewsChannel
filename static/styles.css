@@ -141,3 +141,9 @@
 .review-counts{display:flex;gap:6px;margin:7px 0}
 .review-counts span{font-size:8px;padding:4px 7px;border-radius:999px;border:1px solid #303a45;color:#b8c4d0}
 @media(max-width:980px){.writer-grid,.writer-review-grid{grid-template-columns:1fr}.writer-section-row{grid-template-columns:1fr auto}.writer-section-row small{grid-column:1/-1}.narration-toolbar{align-items:stretch;flex-direction:column}.narration-toolbar select{max-width:none;width:100%}}
+
+.source-kind-badge{display:inline-flex;align-items:center;padding:2px 5px;border:1px solid #34404c;border-radius:999px;font-size:7px;line-height:1.2;margin-right:4px;text-transform:uppercase;letter-spacing:.04em}
+.source-kind-badge.x,.signal.social-source.x{border-color:#4e6175}
+.source-kind-badge.tiktok,.signal.social-source.tiktok{border-color:#6f4863}
+.source-kind-badge.reddit,.signal.social-source.reddit{border-color:#7a563b}
+.signal.social-source{font-weight:600}
