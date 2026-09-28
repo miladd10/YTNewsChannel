@@ -298,3 +298,30 @@ def test_search_queries_widen_front_edge_but_gate_keeps_true_window():
         "2026-09-21",
         "2026-09-28",
     ) == "background"
+
+
+
+def test_all_enabled_style_transcripts_contribute_to_large_reference_library():
+    transcripts = [
+        {
+            "name": f"Filmbaz {index:02d}",
+            "content": ("intro\ntrend\nindustry\nupcoming\ncelebrity\nbox office\noutro\n" * 120),
+            "enabled": 1,
+        }
+        for index in range(40)
+    ]
+    packet = build_style_packet(transcripts, max_chars=20000)
+    for index in range(40):
+        assert f"Filmbaz {index:02d}" in packet
+
+
+def test_writer_prompt_requires_short_familiarity_context_without_biography():
+    assert "CASUAL-AUDIENCE FAMILIARITY RULE" in WRITER_SYSTEM
+    assert "Do not turn it into a biography" in WRITER_SYSTEM
+    assert "never invent an anchor" in WRITER_SYSTEM.lower()
+
+
+def test_reviewer_checks_familiarity_and_generic_ai_style():
+    assert "CASUAL-AUDIENCE FAMILIARITY" in REVIEWER_SYSTEM
+    assert "generic AI/news-presenter phrasing" in REVIEWER_SYSTEM
+    assert "full style corpus" in REVIEWER_SYSTEM
