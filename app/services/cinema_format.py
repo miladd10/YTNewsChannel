@@ -382,41 +382,56 @@ def format_packet() -> list[dict]:
     ]
 
 
-def build_style_packet(transcripts: Iterable[dict], max_chars: int = 80000) -> str:
+def _distributed_style_excerpt(text: str, allowance: int) -> str:
+    """Sample the full transcript evenly so every reference contributes structure.
+
+    We deliberately avoid taking only the opening/middle/end. Filmbaz-style
+    section rhythm often changes across Trends, quick-news runs, box office,
+    viral/celebrity items, and the closer, so evenly spaced windows preserve
+    more of the episode's craft within a bounded prompt budget.
+    """
+    text = str(text or "").strip()
+    if not text or allowance <= 0:
+        return ""
+    if len(text) <= allowance:
+        return text
+
+    windows = 6 if allowance >= 2400 else 4
+    chunk_size = max(160, allowance // windows)
+    usable = max(1, len(text) - chunk_size)
+    parts: list[str] = []
+    for index in range(windows):
+        ratio = index / max(1, windows - 1)
+        start = int(usable * ratio)
+        excerpt = text[start:start + chunk_size].strip()
+        if excerpt:
+            parts.append(excerpt)
+    joined = "\n... [distributed style sample] ...\n".join(parts)
+    return joined[:allowance]
+
+
+def build_style_packet(transcripts: Iterable[dict], max_chars: int = 120000) -> str:
     enabled = [dict(item) for item in transcripts if int(item.get("enabled", 1) or 0)]
+    enabled = [item for item in enabled if str(item.get("content") or "").strip()]
     if not enabled:
         return "<style_corpus>No style transcripts have been imported yet.</style_corpus>"
 
-    per_item = max(2500, max_chars // max(1, len(enabled)))
+    # Every enabled transcript contributes. Do not let the first files consume
+    # the entire budget and silently exclude later references.
+    per_item = max(350, max_chars // max(1, len(enabled)))
     chunks = [
         "<style_corpus>",
-        "These transcripts are STYLE REFERENCES ONLY. Learn tone, pacing, section rhythm, transitions, density, and how the host tells news as a story.",
+        "These transcripts are STYLE REFERENCES ONLY. Learn the recurring craft across the whole corpus: tone, pacing, section rhythm, transitions, setup length, punchline placement, familiarity context, density, and how the host turns facts into an interesting spoken story.",
+        "Every enabled transcript contributes a distributed sample from across its full episode, not just its opening.",
         "Never treat facts, dates, names, numbers, claims, or opinions inside these old transcripts as facts for the current episode.",
-        "Do not imitate distinctive sentences verbatim. Reproduce the general craft, not copied wording.",
+        "Do not imitate distinctive sentences verbatim. Reproduce recurring craft and conversational behavior, not copied wording.",
+        "Prefer patterns that recur across multiple transcripts over quirks from a single episode.",
     ]
-    used = 0
     for item in enabled:
-        if used >= max_chars:
-            break
         text = str(item.get("content") or "").strip()
-        if not text:
-            continue
-        allowance = min(per_item, max_chars - used)
-        if len(text) <= allowance:
-            excerpt = text
-        else:
-            # Sample beginning/middle/end so recurring section rhythm is visible,
-            # rather than sending only the opening of every old episode.
-            part = max(700, allowance // 3)
-            mid = max(0, (len(text) // 2) - (part // 2))
-            excerpt = "\n... [middle sample] ...\n".join([
-                text[:part],
-                text[mid:mid + part],
-                text[-part:],
-            ])[:allowance]
-        used += len(excerpt)
+        excerpt = _distributed_style_excerpt(text, per_item)
         chunks.extend([
-            f'<style_transcript name={json.dumps(item.get("name") or "Transcript")}>' ,
+            f'<style_transcript name={json.dumps(item.get("name") or "Transcript")} chars={len(text)}>',
             excerpt,
             "</style_transcript>",
         ])
@@ -445,12 +460,16 @@ Hard factual rules:
 Writing rules:
 - Write in the project's requested language.
 - Sound like one conversational host telling the week to a friend, not like a list of article summaries.
-- Use the style corpus to learn how much context the host gives before the new fact, how numbers/comparisons are delivered, how transitions work, and how lighter items are paced.
+- Treat the full style corpus as a behavioral reference. Notice recurring Filmbaz patterns across many episodes: how quickly the host reaches the actual news, how background is slipped in without stopping the story, how sections accelerate/decelerate, where a funny aside fits, and how transitions avoid sounding scripted.
+- Make the narration interesting because the FACTS are interesting: lead with the strongest concrete hook, useful comparison, odd detail, consequence, or contrast that is actually supported. Do not manufacture drama, fake excitement, rhetorical questions, or empty hype.
+- Avoid generic AI/news-presenter filler such as long "this may seem small but..." setups, repeated "the interesting thing is...", repeated "this means...", ceremonial section intros, or commentary that adds no information.
+- Prefer specific spoken phrasing over abstract corporate language. Explain a business/industry item in plain language only as much as a casual viewer needs to understand why it matters.
+- CASUAL-AUDIENCE FAMILIARITY RULE: on the first important mention of a director, actor, creator, or company that a general movie viewer may not immediately place, use the story's familiarity_anchor once when available: a very short natural reminder of the best-known relevant work/identity ("Brad Bird, the director many people know from The Incredibles"). Do not turn it into a biography. Skip the reminder for globally obvious household names/entities, and never invent an anchor that is absent from the approved story packet.
+- Usually one familiarity anchor is enough for the entire story. Do not stack multiple credits/titles.
 - Trends can breathe and go deeper; Upcoming/TV/Celebrities/AI/Viral/HD/Toxic should generally move faster.
-- Explain why a business/industry item matters rather than repeating legal/corporate wording.
 - Prefer concrete numbers and comparisons when those numbers exist in the approved research.
-- Avoid repetitive section intros and generic AI prose.
-- Keep transitions natural and short.
+- Vary sentence length and transitions naturally. Short sentences are welcome when they give the narration rhythm.
+- Keep section headings for organization, but the spoken prose underneath should flow rather than announcing the template.
 - Do not mention sources aloud unless the source itself is part of the story.
 - Return only the complete narration in Markdown.
 """
@@ -474,7 +493,12 @@ Check:
 - missing/incorrect STORY markers;
 - weak section organization or stories placed in the wrong format section;
 - flat article-summary writing instead of conversational storytelling;
-- overlong setup, repetitive transitions, list-like cadence, or generic AI phrasing;
+- overlong setup, repetitive transitions, list-like cadence, fake enthusiasm, empty hype, or generic AI/news-presenter phrasing;
+- lines that sound polished but say little (for example a long "this may look like a small story..." preamble before finally stating the news);
+- whether each story reaches its strongest supported hook early enough;
+- CASUAL-AUDIENCE FAMILIARITY: when an approved story has familiarity_needed=true and a supported familiarity_anchor, check that the draft naturally gives that short recognition cue on first important mention. Also flag biographies, multiple-credit dumps, or unnecessary explanations for household names;
+- whether the narration uses concrete details/contrasts from the approved packet to create interest instead of invented drama;
+- whether the draft reflects recurring patterns across the full style corpus rather than generic YouTube-news prose or quirks copied from one reference;
 - whether Trends receives appropriate depth while quick sections remain quick;
 - whether Intro hooks the actual episode and Outro closes briefly;
 - whether the draft resembles the style corpus in broad craft without copying phrases;
@@ -491,7 +515,7 @@ A concise assessment.
 
 # Style Audit
 - Status: PASS | NEEDS_WORK
-- Notes: ...
+- Notes: Assess reference-corpus fidelity, naturalness, catchiness, familiarity context, filler, pacing, and whether the voice feels genuinely conversational rather than AI-generic.
 
 # Factual / Source Audit
 - Status: PASS | NEEDS_WORK
@@ -532,6 +556,9 @@ Rules:
 - Preserve everything already correct.
 - Preserve current-week factual fidelity and STORY markers.
 - Do not import facts from the style transcript corpus.
+- When fixing style, use the corpus for recurring behavior (rhythm, compact context, transitions, natural humor), never for copied phrases.
+- If the review requests a familiarity cue, use only the approved story's familiarity_anchor; keep it to one short clause.
+- Remove fake/empty hype rather than replacing it with different hype.
 - Do not broadly restart or re-outline the episode unless a blocking review issue explicitly requires it.
 - Return the complete revised narration only in Markdown.
 """
