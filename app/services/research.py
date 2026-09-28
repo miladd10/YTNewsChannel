@@ -556,6 +556,8 @@ def cluster_articles(
             "source_evidence": source_evidence,
             "news_hook": "",
             "news_hook_date": "",
+            "familiarity_needed": False,
+            "familiarity_anchor": "",
             "temporal_gate": "pass" if evidence["freshness"] == "current" else ("fail" if evidence["freshness"] == "stale" else "warning"),
             "verification_gate": "pass" if evidence["verification_status"] in {"verified", "reported"} else "fail",
             **evidence,
@@ -618,7 +620,7 @@ def ai_rank_stories(stories: list[dict], project: dict, provider: str, model: st
 You receive strict SECTION CONTRACTS and discovered stories. Classify each story by MEANING, not by the query that happened to find it.
 
 Return ONLY valid JSON: one object per supplied story using exactly these keys:
-id, category, section_fit, attention, importance, freshness, news_hook, news_hook_date, verification_status, verification_notes, confidence, visual_potential, uniqueness, score, decision, rationale.
+id, category, section_fit, attention, importance, freshness, news_hook, news_hook_date, verification_status, verification_notes, familiarity_needed, familiarity_anchor, confidence, visual_potential, uniqueness, score, decision, rationale.
 
 Rules:
 - category must be one of the supplied researchable section keys.
@@ -631,6 +633,9 @@ Rules:
 - news_hook_date should be YYYY-MM-DD only when the supplied evidence supports that date; otherwise return an empty string.
 - verification_status is verified|reported|needs_verification|rejected.
 - verification_notes briefly explain which evidence verifies the hook and any remaining limitation.
+- familiarity_needed is true|false. Set true only when a central director/actor/creator/company is important to the story but a casual movie audience may not immediately recognize the name.
+- familiarity_anchor is ONE very short recognition cue supported by supplied current/background evidence, ideally a single famous work or clear identity (for example: "director of The Incredibles"). Leave it empty for household names, obvious companies/platforms, or when the supplied evidence does not support a safe anchor.
+- Never invent a filmography credit or company association to fill familiarity_anchor.
 - A newly published recap of an old event is STALE unless it contains a genuinely new development inside the selected window.
 - Older/background sources may explain context but do NOT make the story current.
 - At least one source with temporal_role=current is required for current/followup eligibility.
@@ -679,10 +684,15 @@ Rules:
             value = item.get(key)
             if isinstance(value, str) and value.strip():
                 story[key] = value.strip().lower()
-        for key in ("rationale", "news_hook", "news_hook_date", "verification_notes"):
+        for key in ("rationale", "news_hook", "news_hook_date", "verification_notes", "familiarity_anchor"):
             value = item.get(key)
             if isinstance(value, str):
                 story[key] = value.strip()
+        familiarity_needed = item.get("familiarity_needed")
+        if isinstance(familiarity_needed, bool):
+            story["familiarity_needed"] = familiarity_needed
+        elif isinstance(familiarity_needed, str):
+            story["familiarity_needed"] = familiarity_needed.strip().lower() in {"true", "yes", "1"}
         verification_status = str(item.get("verification_status") or "").strip().lower()
         if verification_status in {"verified", "reported", "needs_verification", "rejected"}:
             story["verification_status"] = verification_status
