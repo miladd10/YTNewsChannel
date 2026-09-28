@@ -1057,6 +1057,205 @@ def search_story_context(project_id: str, story_id: str, body: StoryContextSearc
     }
 
 
+
+@app.post("/api/projects/{project_id}/narrations/{narration_id}/fun-facts-visual-context")
+def build_fun_facts_visual_context(project_id: str, narration_id: str, body: StoryContextSearchBody):
+    """One-click post-draft enrichment for every Included story.
+
+    This is intentionally after Draft V1: the AI sees the actual spoken
+    narration and searches for evidence-backed fun facts plus visual context
+    that Media Sources can use later.
+    """
+    settings = masked_status()
+    provider = body.provider or settings.get("research_provider", "codex_local")
+    model = body.model or settings.get("research_model", "default")
+
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        draft = conn.execute(
+            "SELECT * FROM narrations WHERE id=? AND project_id=?",
+            (narration_id, project_id),
+        ).fetchone()
+        if not draft:
+            raise HTTPException(404, "Narration draft not found.")
+        run_id = latest_run_id(conn, project_id)
+        if not run_id:
+            raise HTTPException(400, "Run Format Research first.")
+        stories = selected_story_packet(conn, project_id)
+        if not stories:
+            raise HTTPException(400, "No Included stories are available for enrichment.")
+
+        draft_segments = extract_narration_segments(str(draft["content"] or ""))
+        narration_by_story: dict[str, list[str]] = {}
+        for segment in draft_segments:
+            story_id = str(segment.get("story_id") or "")
+            if story_id:
+                narration_by_story.setdefault(story_id, []).append(str(segment.get("source_text") or ""))
+        for story in stories:
+            story["_narration_text"] = " ".join(narration_by_story.get(str(story["id"]), [])).strip()
+
+        previous_by_story: dict[str, list[dict]] = {}
+        rows_by_story: dict[str, dict] = {}
+        for story in stories:
+            row = conn.execute(
+                "SELECT * FROM stories WHERE id=? AND project_id=? AND run_id=?",
+                (story["id"], project_id, run_id),
+            ).fetchone()
+            if not row:
+                continue
+            rows_by_story[str(story["id"])] = dict(row)
+            previous_ids = json.loads(row["spice_source_ids_json"] or "[]")
+            previous_sources: list[dict] = []
+            if previous_ids:
+                placeholders = ",".join("?" for _ in previous_ids)
+                source_rows = conn.execute(
+                    f"""SELECT id,title,url,source,published_at,category,snippet,query_key,raw_json
+                        FROM research_articles WHERE id IN ({placeholders})""",
+                    previous_ids,
+                ).fetchall()
+                for source_row in source_rows:
+                    source = dict(source_row)
+                    try:
+                        source["raw"] = json.loads(source.pop("raw_json") or "{}")
+                    except Exception:
+                        source["raw"] = {}
+                    previous_sources.append(source)
+            previous_by_story[str(story["id"])] = previous_sources
+
+    stamp = now()
+    try:
+        new_sources, fresh_by_story, diagnostics = fetch_story_spice_sources(
+            stories,
+            project["date_start"],
+            project["date_end"],
+            max_stories=max(1, len(stories)),
+            per_query_limit=5,
+        )
+    except Exception as exc:
+        raise HTTPException(400, f"Could not search fun facts / visual context: {exc}") from exc
+
+    combined_by_story: dict[str, list[dict]] = {}
+    for story in stories:
+        story_id = str(story["id"])
+        by_url: dict[str, dict] = {}
+        for source in [*(previous_by_story.get(story_id) or []), *(fresh_by_story.get(story_id) or [])]:
+            url = str(source.get("url") or "").strip()
+            if url:
+                by_url[url.casefold()] = source
+        combined_by_story[story_id] = list(by_url.values())
+
+    try:
+        enriched_stories, actual_provider, actual_model = ai_enrich_story_spice(
+            stories,
+            combined_by_story,
+            project,
+            provider,
+            model,
+        )
+    except Exception as exc:
+        raise HTTPException(400, f"Could not analyze fun facts / visual context: {exc}") from exc
+
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        url_to_id = {
+            str(row["url"] or "").strip().casefold(): str(row["id"])
+            for row in conn.execute(
+                "SELECT id,url FROM research_articles WHERE project_id=?",
+                (project_id,),
+            ).fetchall()
+            if str(row["url"] or "").strip()
+        }
+
+        for source in new_sources:
+            url = str(source.get("url") or "").strip()
+            key = url.casefold()
+            if not url or key in url_to_id:
+                continue
+            source_id = str(source.get("id") or uuid.uuid4())
+            conn.execute(
+                """INSERT INTO research_articles(
+                    id,project_id,run_id,title,url,source,published_at,category,snippet,query_key,raw_json
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    source_id, project_id, run_id,
+                    source.get("title") or "", url, source.get("source") or "",
+                    source.get("published_at") or "", source.get("category") or "",
+                    source.get("snippet") or "", source.get("query_key") or "",
+                    json.dumps(source.get("raw") or {}, ensure_ascii=False),
+                ),
+            )
+            url_to_id[key] = source_id
+
+        story_summaries = []
+        for story in enriched_stories:
+            story_id = str(story["id"])
+            previous_row = rows_by_story.get(story_id) or {}
+            source_ids = []
+            for source in combined_by_story.get(story_id) or []:
+                key = str(source.get("url") or "").strip().casefold()
+                source_id = url_to_id.get(key)
+                if source_id and source_id not in source_ids:
+                    source_ids.append(source_id)
+
+            count = int(previous_row.get("context_search_count") or 0) + 1
+            conn.execute(
+                """UPDATE stories
+                   SET spice_json=?,spice_source_ids_json=?,visual_context_json=?,
+                       context_searched_at=?,context_search_count=?,context_search_error='',
+                       updated_at=?
+                   WHERE id=? AND project_id=?""",
+                (
+                    json.dumps(story.get("spice_angles") or [], ensure_ascii=False),
+                    json.dumps(source_ids),
+                    json.dumps(story.get("visual_context") or [], ensure_ascii=False),
+                    stamp, count, stamp, story_id, project_id,
+                ),
+            )
+            story_summaries.append({
+                "story_id": story_id,
+                "safe_angle_count": sum(
+                    1 for angle in story.get("spice_angles") or []
+                    if angle.get("safe_to_narrate")
+                ),
+                "fun_fact_count": sum(
+                    1 for angle in story.get("spice_angles") or []
+                    if angle.get("safe_to_narrate") and angle.get("type") == "cool_fact"
+                ),
+                "visual_context_count": len(story.get("visual_context") or []),
+                "source_count": len(source_ids),
+            })
+
+        root = Path(project["root_path"]) / "research" / "stories"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / f"bulk_fun_facts_visual_context_{draft['version_number']:02d}.json").write_text(
+            json.dumps({
+                "narration_id": narration_id,
+                "narration_version": int(draft["version_number"]),
+                "searched_at": stamp,
+                "provider": actual_provider,
+                "model": actual_model,
+                "stories": story_summaries,
+                "diagnostics": diagnostics,
+            }, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (stamp, project_id))
+        save_manifest(conn, project_id)
+
+    return {
+        "ok": True,
+        "narration_id": narration_id,
+        "story_count": len(story_summaries),
+        "safe_angle_count": sum(row["safe_angle_count"] for row in story_summaries),
+        "fun_fact_count": sum(row["fun_fact_count"] for row in story_summaries),
+        "visual_context_count": sum(row["visual_context_count"] for row in story_summaries),
+        "source_count": sum(row["source_count"] for row in story_summaries),
+        "stories": story_summaries,
+        "provider": actual_provider,
+        "model": actual_model,
+    }
+
+
 class GenerateBody(BaseModel):
     provider: str | None = None
     model: str | None = None
