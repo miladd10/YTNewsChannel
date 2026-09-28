@@ -865,12 +865,24 @@ def _validated_spice_angles(raw_angles: object, sources: list[dict]) -> list[dic
         evidence_status = str(angle.get("evidence_status") or "weak").strip().lower()
         if evidence_status not in {"strong", "supported", "weak", "social_only"}:
             evidence_status = "weak"
-        safe = bool(angle.get("safe_to_narrate"))
-        if evidence_status in {"weak"}:
+        safe_raw = angle.get("safe_to_narrate")
+        safe = (
+            safe_raw is True
+            or (isinstance(safe_raw, str) and safe_raw.strip().lower() in {"true", "yes", "1"})
+        )
+        source_rows = [source_by_url[url] for url in urls]
+        social_rows = [
+            source for source in source_rows
+            if str((source.get("raw") or {}).get("platform") or "")
+        ]
+        non_social_rows = [source for source in source_rows if source not in social_rows]
+        if evidence_status == "weak":
             safe = False
-        if kind == "rumor" and evidence_status == "social_only":
-            # Reddit/X chatter alone is not promoted into a factual "rumor says..."
-            # line. It may remain visible as social_buzz instead.
+        if kind == "rumor" and (evidence_status == "social_only" or not non_social_rows):
+            # Social chatter alone never becomes a narratable "there is a rumor".
+            safe = False
+        if kind == "social_buzz" and not non_social_rows and len(social_rows) < 2:
+            # One isolated social result is not a pattern or buzz.
             safe = False
         cleaned.append({
             "type": kind,
