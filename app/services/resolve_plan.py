@@ -262,9 +262,54 @@ def _video_source_start(candidate: dict, use_index: int, wanted: float) -> float
     latest = max(0.0, available - max(1.0, wanted))
     if start <= latest:
         return start
-    if latest <= 0:
-        return 0.0
-    return (base + use_index * stride) % max(1.0, latest)
+    return max(0.0, latest)
+
+
+def _range_overlap(a: tuple[float, float], b: tuple[float, float]) -> float:
+    return max(0.0, min(a[1], b[1]) - max(a[0], b[0]))
+
+
+def _next_unused_source_window(
+    available: float | None,
+    wanted: float,
+    used_ranges: list[tuple[float, float]],
+    *,
+    preferred_start: float = 0.0,
+) -> tuple[float, float] | None:
+    if available is None or available <= 0:
+        start = max(0.0, preferred_start)
+        return start, start + max(0.5, wanted)
+
+    wanted = max(0.5, min(float(wanted or 0.5), available))
+    # Avoid the common trailer logo/title-card edges when the source is long
+    # enough, but relax those guards if necessary to cover narration.
+    guards = [(3.0, 2.0), (1.0, 0.5), (0.0, 0.0)]
+    for head_guard, tail_guard in guards:
+        usable_start = min(max(0.0, head_guard), max(0.0, available - 0.5))
+        usable_end = max(usable_start, available - tail_guard)
+        cursor = max(usable_start, min(preferred_start, usable_end))
+        ordered_starts = [cursor, usable_start]
+        step = max(1.5, min(4.0, wanted * 0.65))
+        probe = usable_start
+        while probe < usable_end - 0.4:
+            ordered_starts.append(probe)
+            probe += step
+
+        seen: set[float] = set()
+        for raw_start in ordered_starts:
+            start = round(max(usable_start, raw_start), 6)
+            if start in seen:
+                continue
+            seen.add(start)
+            end = min(usable_end, start + wanted)
+            if end - start < 0.5:
+                continue
+            selected = (start, end)
+            overlap = sum(_range_overlap(selected, used) for used in used_ranges)
+            if overlap <= 0.08:
+                return selected
+
+    return None
 
 
 def _candidate_source_path(root: Path | None, candidate: dict) -> Path | None:
@@ -281,8 +326,9 @@ def _smart_video_choice(
     wanted: float,
     used_ranges: list[tuple[float, float]],
     use_index: int,
-) -> dict:
+) -> dict | None:
     source = _candidate_source_path(root, candidate)
+    analysis = None
     if source is not None:
         try:
             analysis = analyze_video_shots(source, cache_dir=cache_dir)
@@ -296,25 +342,43 @@ def _smart_video_choice(
                 chosen["source_media_duration"] = analysis.get("duration")
                 return chosen
         except Exception:
-            pass
+            analysis = None
 
-    start = _video_source_start(candidate, use_index, wanted)
-    available = _candidate_available_seconds(candidate)
-    hold = wanted
-    if available is not None:
-        hold = min(hold, max(0.05, available - start))
+    available = (
+        float(analysis.get("duration"))
+        if isinstance(analysis, dict) and analysis.get("duration")
+        else _candidate_available_seconds(candidate)
+    )
+    preferred = _video_source_start(candidate, use_index, wanted)
+    unused = _next_unused_source_window(
+        available,
+        wanted,
+        used_ranges,
+        preferred_start=preferred,
+    )
+    if not unused:
+        return None
+    start, end = unused
     return {
         "start": round(start, 6),
-        "end": round(start + hold, 6),
-        "duration": round(hold, 6),
+        "end": round(end, 6),
+        "duration": round(end - start, 6),
         "shot_index": None,
         "scene_start": None,
         "scene_end": None,
-        "score": 0.0,
-        "analysis_mode": "legacy_fallback",
-        "reason": "timing-safe fallback source range",
+        "score": -5.0,
+        "analysis_mode": "unused_range_fallback",
+        "reason": "unused non-overlapping source range",
         "source_media_duration": available,
     }
+
+
+def _low_variety_video(candidate: dict) -> bool:
+    title = str(candidate.get("title") or "").casefold()
+    return any(term in title for term in (
+        "logo", "fanfare", "ident", "title announcement", "studio intro",
+    ))
+
 
 
 def _image_candidate(images: list[dict], used_image_ids: set[str], cursor: int) -> dict | None:
@@ -325,15 +389,6 @@ def _image_candidate(images: list[dict], used_image_ids: set[str], cursor: int) 
         candidate_id = str(item.get("id") or "")
         if candidate_id and candidate_id not in used_image_ids:
             return item
-    return None
-
-
-def _max_video_uses(candidate: dict) -> int | None:
-    title = str(candidate.get("title") or "").casefold()
-    # Logo/fanfare/title-card material is useful as a quick establishing beat,
-    # but repeating it makes the edit feel obviously recycled.
-    if any(term in title for term in ("logo", "fanfare", "ident", "title announcement", "studio intro")):
-        return 1
     return None
 
 
@@ -383,9 +438,6 @@ def _visual_slices(
             for video in videos:
                 key = str(video.get("page_url") or video.get("id") or "")
                 use_index = uses.get(key, 0)
-                max_uses = _max_video_uses(video)
-                if max_uses is not None and use_index >= max_uses:
-                    continue
                 wanted = min(DEFAULT_VIDEO_CUT, remaining)
                 proposal = _smart_video_choice(
                     video,
@@ -395,11 +447,19 @@ def _visual_slices(
                     used_ranges=used_ranges.get(key, []),
                     use_index=use_index,
                 )
+                if proposal is None:
+                    continue
                 score = float(proposal.get("score") or 0)
                 if str(video.get("id") or "") == str(last_candidate_id or ""):
-                    score -= 30
+                    score -= 18
                 if use_index >= 1:
-                    score -= use_index * 12
+                    score -= use_index * 4
+                # Logo/fanfare/title-announcement footage is poor repeat
+                # material, but a different unused range is still better than
+                # leaving a narrated news section black when it is the only
+                # selected moving source.
+                if _low_variety_video(video) and use_index >= 1:
+                    score -= 55
                 if score > best_score:
                     best_score = score
                     best = (video, proposal, key, use_index)
