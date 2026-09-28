@@ -37,7 +37,7 @@ pickerHtml=function(){
     const inc=items.filter(s=>s.decision==='include').length;
     return `<section class="section-selection"><div class="section-selection-head"><div><div class="eyebrow">FORMAT SECTION · ${esc(sectionTargets[key]||'')}</div><h3>${esc(label)}</h3><p class="section-guide">${esc(sectionGuides[key]||'')}</p></div><span class="pill">${inc} included - ${items.length} found</span></div>${items.length?storyCards(items):`<div class="card placeholder compact-placeholder">No suitable ${esc(label)} story found in this research run.</div>`}</section>`;
   }).join('');
-  return `<div class="section-head"><div><div class="eyebrow">STEP 02</div><h2>Select news inside each section</h2><p>Only <strong>Include</strong> stories are factual inputs to the narration writer, and their section assignment is preserved.</p></div></div>${metrics()}<div class="toolbar"><span class="pill">Include ${include.length}</span><span class="pill">Maybe ${maybe.length}</span><span class="pill">Skip ${skip.length}</span></div>${state.stories.length?groups:'<div class="card placeholder">Run Format Research first.</div>'}`;
+  return `<div class="section-head"><div><div class="eyebrow">STEP 02 - NEWS WINDOW ${esc(state.project.date_start)} -> ${esc(state.project.date_end)} (end exclusive)</div><h2>Select verified current news inside each section</h2><p>Include is enabled only when the story has a specific current-window news hook and source verification. Older sources may appear as background, but cannot qualify an old story as this week&#39;s news.</p></div></div>${metrics()}<div class="toolbar"><span class="pill">Include ${include.length}</span><span class="pill">Maybe ${maybe.length}</span><span class="pill">Skip ${skip.length}</span></div>${state.stories.length?groups:'<div class="card placeholder">Run Format Research first.</div>'}`;
 };
 
 storyCards=function(stories){
@@ -46,7 +46,7 @@ storyCards=function(stories){
 
 runResearch=async function(){
   const b=$('#runResearchBtn');b.disabled=true;b.textContent='Researching...';
-  startRunStatus({title:'Researching cinema format sections',meta:`${state.project.date_start} to ${state.project.date_end}`,steps:['Searching section queries','Clustering duplicate coverage','Ranking within format','Results saved']});
+  startRunStatus({title:'Researching cinema format sections',meta:`${state.project.date_start} inclusive -> ${state.project.date_end} exclusive`,steps:['Searching news + public social sources','Checking publication dates','Clustering duplicate coverage','Classifying section fit','Verifying current-week news hooks','Cross-checking source evidence','Results saved']});
   try{
     const s=state.settings?.ai||{};
     const r=await api(`/api/projects/${state.project.id}/research`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:s.research_provider,model:s.research_model,ai_rank:true})});
@@ -54,7 +54,7 @@ runResearch=async function(){
     state.stories=await api(`/api/projects/${state.project.id}/stories`);
     await renderStage();
     finishRunStatus(true,'','Format research complete');
-    toast(r.ai_rank_error?`Research complete; heuristic ranking used: ${r.ai_rank_error}`:`Research complete: ${r.article_count} articles to ${r.story_count} stories`,!!r.ai_rank_error);
+    toast(r.ai_rank_error?`Research complete but semantic verification failed; stories remain gated: ${r.ai_rank_error}`:`Research complete: ${r.current_story_count} current/follow-up - ${r.verified_story_count} source-verified - ${r.stale_story_count} stale rejected`,!!r.ai_rank_error);
   }catch(e){finishRunStatus(false,e.message);toast(e.message,true);b.disabled=false;b.textContent='Run Format Research'}
 };
 
