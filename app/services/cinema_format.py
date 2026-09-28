@@ -456,7 +456,7 @@ def build_style_packet(transcripts: Iterable[dict], max_chars: int = 120000) -> 
 
     chunks = [
         "<style_corpus>",
-        "STYLE REFERENCES ONLY. Facts in these transcripts are NEVER factual authority for the current episode.",
+        "STYLE REFERENCES ONLY. Never treat facts, dates, names, numbers, claims, or opinions in these transcripts as factual authority for the current episode.",
         "Learn recurring spoken behavior: oral register, story expansion, sentence rhythm, causal connectors, mini-explanations, familiarity context, playful asides, transitions, section pacing, and how concrete facts are turned into a small story.",
         "The packet contains both distributed corpus samples and longer uninterrupted FLOW ANCHORS. Flow anchors are present specifically so you can see how the host moves through several minutes without sounding like article summaries.",
         "Do not copy distinctive sentences verbatim. Reproduce recurring craft and conversational behavior.",
