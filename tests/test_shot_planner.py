@@ -36,3 +36,22 @@ def test_choose_video_shot_prefers_non_overlapping_scene_over_repeat():
         used_ranges=[(5.0, 11.0)],
     )
     assert chosen["start"] >= 30.0
+
+
+
+def test_reused_trailer_prefers_farther_scene_when_scores_are_similar():
+    analysis = {
+        "mode": "scene_detection",
+        "shots": [
+            {"index": 0, "start": 10.0, "end": 15.0, "score": 50},
+            {"index": 1, "start": 16.0, "end": 21.0, "score": 49},
+            {"index": 2, "start": 70.0, "end": 75.0, "score": 48},
+        ],
+    }
+    chosen = choose_video_shot(
+        analysis,
+        wanted=5.0,
+        used_ranges=[(10.0, 15.0)],
+        hint_start=None,
+    )
+    assert chosen["start"] == 70.0
