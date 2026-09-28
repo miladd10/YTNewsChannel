@@ -829,6 +829,26 @@ def _story_context_subject(story: dict) -> str:
 
 
 
+FACT_CHECK_PREFERRED_DOMAINS = (
+    "apnews.com", "reuters.com", "variety.com", "deadline.com",
+    "hollywoodreporter.com", "thewrap.com", "boxofficemojo.com",
+    "the-numbers.com", "netflix.com", "tudum.com", "sonypictures.com",
+    "sonypictures.ca", "nbcuniversal.com", "warnerbros.com",
+    "paramount.com", "disney.com", "marvel.com", "filmlinc.org",
+    "ft.com", "wsj.com", "washingtonpost.com", "nytimes.com",
+)
+
+
+def _fact_check_trust_tier(url: str) -> str:
+    try:
+        host = (urlparse(url or "").hostname or "").casefold().replace("www.", "")
+    except Exception:
+        host = ""
+    if any(host == domain or host.endswith("." + domain) for domain in FACT_CHECK_PREFERRED_DOMAINS):
+        return "preferred"
+    return "supplemental"
+
+
 def _fact_check_queries(story: dict, date_start: str, date_end: str) -> list[str]:
     """Queries aimed at claims that can become stale inside a weekly script."""
     subject = _story_context_subject(story)
@@ -928,9 +948,15 @@ def fetch_narration_fact_check_sources(
                     "temporal_role": str((annotated.get("raw") or {}).get("temporal_role") or ""),
                     "snippet": annotated.get("snippet") or "",
                     "query": query,
+                    "trust_tier": _fact_check_trust_tier(url),
                 })
                 if len(by_story[story_id]) >= per_query_limit * 2:
                     break
+        by_story[story_id].sort(key=lambda item: (
+            0 if item.get("trust_tier") == "preferred" else 1,
+            0 if item.get("temporal_role") == "current" else 1,
+            str(item.get("published_at") or ""),
+        ))
     return by_story
 
 
