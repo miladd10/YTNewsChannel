@@ -92,17 +92,21 @@ function storyEnrichmentHtml(stories,draft){
   const searched=stories.filter(s=>s.context_searched_at);
   const pending=stories.filter(s=>(Date.parse(s.context_searched_at||'')||0)>draftTime);
   const safeCount=stories.reduce((n,s)=>n+(s.spice_angles||[]).filter(a=>a.safe_to_narrate).length,0);
+  const funFactCount=stories.reduce((n,s)=>n+(s.spice_angles||[]).filter(a=>a.safe_to_narrate&&a.type==='cool_fact').length,0);
+  const visualContextCount=stories.reduce((n,s)=>n+(s.visual_context||[]).length,0);
   return `<section class="card enrichment-workbench">
     <div class="enrichment-head">
       <div>
-        <div class="eyebrow">POST-DRAFT STORY ENRICHMENT</div>
-        <h3>Find cool stuff one story at a time</h3>
-        <p>Search the wider public web plus Reddit, X/Twitter, TikTok, Instagram and YouTube for supported rumors, controversy, critic reaction, platform-specific discussion, cool facts and comparisons. Nothing is added to the draft until you choose Rewrite with Enrichment.</p>
+        <div class="eyebrow">POST-DRAFT FUN FACTS + VISUAL CONTEXT</div>
+        <h3>Enrich the narration and build professional B-roll targets</h3>
+        <p>One click searches every Included story for sourced cool facts and visual context, then rewrites the draft. It also maps people, related movies/shows, interviews, BTS, event photos and comparisons so Media Sources is driven by what the narration actually says.</p>
       </div>
       <div class="top-actions">
         <span class="pill">${searched.length}/${stories.length} searched</span>
-        <span class="pill">${safeCount} usable angle${safeCount===1?'':'s'}</span>
-        <button id="rewriteEnrichedBtn" class="btn primary" ${pending.length?'':'disabled'}>Rewrite with Enrichment${pending.length?` (${pending.length} updated)`:''}</button>
+        <span class="pill">${funFactCount} fun fact${funFactCount===1?'':'s'}</span>
+        <span class="pill">${visualContextCount} visual beat${visualContextCount===1?'':'s'}</span>
+        <button id="buildFunFactsVisualsBtn" class="btn primary">Add Fun Facts + Visual Context</button>
+        <button id="rewriteEnrichedBtn" class="btn secondary" ${pending.length?'':'disabled'}>Rewrite Existing Enrichment${pending.length?` (${pending.length} updated)`:''}</button>
       </div>
     </div>
     ${pending.length?`<div class="run-note warn">New story research was added after Draft V${draft.version_number}. Rewrite with Enrichment before running Reviewer so the review evaluates the enriched draft.</div>`:''}
@@ -110,6 +114,7 @@ function storyEnrichmentHtml(stories,draft){
       const angles=s.spice_angles||[];
       const sources=s.spice_sources||[];
       const safe=angles.filter(a=>a.safe_to_narrate);
+      const visuals=s.visual_context||[];
       const searchedAt=s.context_searched_at||'';
       return `<article class="enrichment-story">
         <div class="enrichment-story-head">
@@ -119,12 +124,14 @@ function storyEnrichmentHtml(stories,draft){
               <span class="pill">${esc(sectionLabel(s.category))}</span>
               ${searchedAt?`<span class="signal high">searched ${Number(s.context_search_count||1)}x</span>`:'<span class="signal">not searched yet</span>'}
               <span class="signal">${safe.length} usable angle${safe.length===1?'':'s'}</span>
+              <span class="signal">${visuals.length} visual target${visuals.length===1?'':'s'}</span>
               <span class="signal">${sources.length} collected source${sources.length===1?'':'s'}</span>
             </div>
           </div>
           <button class="btn secondary" data-search-story-context="${s.id}">${searchedAt?'Search Again':'Find Cool Stuff'}</button>
         </div>
         ${angles.length?`<div class="enrichment-angle-list">${angles.map(a=>`<div class="spice-angle ${a.safe_to_narrate?'safe':'unsafe'}"><div class="spice-angle-head"><span class="spice-type ${esc(a.type||'')}">${esc(String(a.type||'').replaceAll('_',' '))}</span><span class="spice-evidence">${esc(a.evidence_status||'weak')}${a.safe_to_narrate?' - usable':' - reference only'}</span></div><div class="spice-text">${esc(a.text||'')}</div>${a.usage_note?`<small>${esc(a.usage_note)}</small>`:''}</div>`).join('')}</div>`:''}
+        ${visuals.length?`<div class="visual-context-list"><div class="eyebrow">NARRATION-AWARE VISUAL TARGETS</div>${visuals.map(v=>`<div class="visual-context-item"><div><span class="pill">${esc(String(v.kind||'visual').replaceAll('_',' '))}</span><strong>${esc(v.label||(v.subjects||[]).join(' + '))}</strong><span class="signal">${esc(v.layout_hint||'single')}</span></div>${v.narration_cue?`<small>When narration says: ${esc(v.narration_cue)}</small>`:''}${v.why?`<p>${esc(v.why)}</p>`:''}</div>`).join('')}</div>`:''}
         ${sources.length?`<details class="enrichment-sources"><summary>Collected sources (${sources.length}) - also passed to Media Sources</summary>${sources.map(src=>`<a href="${esc(src.url)}" target="_blank" rel="noreferrer"><span class="source-kind-badge ${esc(src.platform||src.source_kind||'web')}">${esc(src.platform==='x'?'X/Twitter':src.platform==='reddit'?'Reddit':src.platform==='tiktok'?'TikTok':src.platform==='instagram'?'Instagram':src.platform==='youtube'?'YouTube':'Web')}</span> ${esc(src.source||'Source')} - ${esc(src.title||src.url)}</a>`).join('')}</details>`:''}
         ${s.context_search_error?`<div class="run-note warn">${esc(s.context_search_error)}</div>`:''}
       </article>`;
@@ -207,6 +214,34 @@ async function searchStoryContext(storyId){
     if(b){b.disabled=false;b.textContent='Find Cool Stuff'}
   }
 }
+async function buildFunFactsVisualContext(){
+  const id=state.narrationDraftId;if(!id)return;
+  const b=$('#buildFunFactsVisualsBtn');if(b){b.disabled=true;b.textContent='Researching + rewriting...'}
+  const s=state.settings?.ai||{};
+  startRunStatus({title:'Adding fun facts + narration-aware visual context',meta:'All Included stories · one post-draft action',steps:['Reading the actual draft','Searching sourced cool facts + production context','Mapping people / related titles / interviews / BTS','Building Media visual targets','Rewriting the draft with clean fun-fact beats','Saving enriched draft']});
+  try{
+    const research=await api(`/api/projects/${state.project.id}/narrations/${id}/fun-facts-visual-context`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({provider:s.research_provider,model:s.research_model})
+    });
+    const rewritten=await api(`/api/projects/${state.project.id}/narrations/${id}/enrich-rewrite`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({provider:s.writer_provider,model:s.writer_model})
+    });
+    state.narrationDraftId=rewritten.id;
+    state.lastNarrationReview=null;
+    state.project=await api(`/api/projects/${state.project.id}`);
+    await renderStage();
+    finishRunStatus(true,'',`Draft V${rewritten.version_number} enriched · ${research.fun_fact_count} fun fact(s) · ${research.visual_context_count} visual target(s)`);
+    toast(`Added ${research.fun_fact_count} sourced fun fact(s) and ${research.visual_context_count} narration-aware visual target(s). Draft V${rewritten.version_number} is ready for review.`);
+  }catch(e){
+    finishRunStatus(false,e.message);toast(e.message,true);
+    if(b){b.disabled=false;b.textContent='Add Fun Facts + Visual Context'}
+  }
+}
+
 async function rewriteWithEnrichment(){
   const id=state.narrationDraftId;if(!id)return;
   const b=$('#rewriteEnrichedBtn');if(b){b.disabled=true;b.textContent='Rewriting...'}
@@ -266,6 +301,7 @@ wireStage=function(){
   baseWireStageEditorial();
   const nr=$('#reviewNarrationBtn');if(nr)nr.onclick=reviewNarration;
   const sp=$('#rebuildStyleProfileBtn');if(sp)sp.onclick=rebuildStyleProfile;
+  const fv=$('#buildFunFactsVisualsBtn');if(fv)fv.onclick=buildFunFactsVisualContext;
   const re=$('#rewriteEnrichedBtn');if(re)re.onclick=rewriteWithEnrichment;
   document.querySelectorAll('[data-search-story-context]').forEach(b=>b.onclick=()=>searchStoryContext(b.dataset.searchStoryContext));
   const nv=$('#reviseNarrationBtn');if(nv)nv.onclick=reviseNarration;
