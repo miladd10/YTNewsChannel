@@ -147,3 +147,6 @@
 .source-kind-badge.tiktok,.signal.social-source.tiktok{border-color:#6f4863}
 .source-kind-badge.reddit,.signal.social-source.reddit{border-color:#7a563b}
 .signal.social-source{font-weight:600}
+
+.section-guide{margin:5px 0 0;max-width:760px;color:var(--muted);font-size:9px;line-height:1.45}
+.compact-placeholder{padding:12px;margin:0}
