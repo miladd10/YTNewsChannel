@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.19"
+APP_VERSION = "0.3.20"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Resolve Story-ID Reconciliation"
+APP_RELEASE_NAME = "Resolve Final Story Mapping"
