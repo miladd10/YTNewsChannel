@@ -1,7 +1,7 @@
 import app.services.resolve_plan as resolve_plan_module
 import json
 
-from app.services.resolve_plan import build_edit_plan, crop_instruction, story_windows, voice_timeline, write_resolve_package
+from app.services.resolve_plan import _clamp_video_source_in, build_edit_plan, crop_instruction, story_windows, voice_timeline, write_resolve_package
 
 
 def test_crop_instruction_for_portrait_image():
@@ -73,9 +73,17 @@ def test_resolve_package_writes_importable_otio_with_source_in(tmp_path, monkeyp
     (tmp_path / "audio/narration/1.mp3").write_bytes(b"fake-audio")
     (tmp_path / "media/selected/story/video.mp4").write_bytes(b"fake-video")
 
-    def fake_stage_video(source, target, *, source_in, duration, fps):
+    def fake_stage_video(source, target, *, source_in, duration, fps, source_duration=None):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b"resolve-safe-video")
+        return {
+            "source_duration": source_duration,
+            "requested_source_in": source_in,
+            "adjusted_source_in": source_in,
+            "frame_count": int(round(duration * fps)),
+            "staged_duration": duration,
+            "measured_duration": duration,
+        }
 
     def fake_stage_image(source, target):
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -142,9 +150,17 @@ def test_resolve_package_normalizes_stills_to_png(tmp_path, monkeypatch):
     (tmp_path / "audio/narration/1.mp3").write_bytes(b"fake-audio")
     (tmp_path / "media/selected/story/poster.webp").write_bytes(b"fake-webp")
 
-    def fake_stage_video(source, target, *, source_in, duration, fps):
+    def fake_stage_video(source, target, *, source_in, duration, fps, source_duration=None):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b"resolve-safe-video")
+        return {
+            "source_duration": source_duration,
+            "requested_source_in": source_in,
+            "adjusted_source_in": source_in,
+            "frame_count": int(round(duration * fps)),
+            "staged_duration": duration,
+            "measured_duration": duration,
+        }
 
     def fake_stage_image(source, target):
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -174,3 +190,71 @@ def test_resolve_package_normalizes_stills_to_png(tmp_path, monkeypatch):
     assert staged_path.endswith(".png")
     assert (tmp_path / staged_path).exists()
     assert saved_plan["visual_clips"][0]["resolve_media_format"] == "PNG still"
+
+
+
+def test_resolve_source_in_is_clamped_to_real_download_duration():
+    assert _clamp_video_source_in(90.0, 7.0, 30.0) == 23.0
+    assert _clamp_video_source_in(5.0, 7.0, 30.0) == 5.0
+    assert _clamp_video_source_in(15.0, 40.0, 30.0) == 0.0
+
+
+def test_resolve_stage_uses_actual_download_duration_not_candidate_metadata(tmp_path, monkeypatch):
+    (tmp_path / "audio/narration").mkdir(parents=True)
+    (tmp_path / "media/selected/story").mkdir(parents=True)
+    (tmp_path / "audio/narration/1.mp3").write_bytes(b"fake-audio")
+    source = tmp_path / "media/selected/story/video.mp4"
+    source.write_bytes(b"fake-video")
+
+    captured = {}
+
+    def fake_probe(path):
+        if path == source:
+            return 12.0
+        return 7.0
+
+    def fake_stage_video(source_path, target, *, source_in, duration, fps, source_duration=None):
+        captured["source_in"] = source_in
+        captured["source_duration"] = source_duration
+        captured["duration"] = duration
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"resolve-safe-video")
+        return {
+            "source_duration": source_duration,
+            "requested_source_in": source_in,
+            "adjusted_source_in": source_in,
+            "frame_count": int(round(duration * fps)),
+            "staged_duration": duration,
+            "measured_duration": duration,
+        }
+
+    monkeypatch.setattr(resolve_plan_module, "_probe_media_duration", fake_probe)
+    monkeypatch.setattr(resolve_plan_module, "_stage_resolve_video_cut", fake_stage_video)
+
+    project = {"id": "p", "name": "Clamp Test"}
+    voice_rows = [{
+        "id": "v1", "segment_index": 1, "story_id": "story",
+        "duration_seconds": 7.0, "audio_path": "audio/narration/1.mp3",
+        "alignment_json": "{}",
+    }]
+    media = [{
+        "id": "m1", "story_id": "story", "selected": 1,
+        "download_status": "downloaded", "stored_path": "media/selected/story/video.mp4",
+        "media_type": "video", "title": "Official Trailer", "source": "Studio",
+        "page_url": "https://example.com/video", "duration": "2:00",
+        "clip_start_sec": 90, "width": 1920, "height": 1080,
+        "shared_source": 0,
+    }]
+
+    plan = build_edit_plan(project, voice_rows, media, fps=30)
+    write_resolve_package(tmp_path, plan)
+    saved = json.loads((tmp_path / "timing/resolve_plan.json").read_text())
+    clip = saved["visual_clips"][0]
+
+    # Discovery metadata says 2:00, but the actual downloaded file is only 12s.
+    # A 7s cut must therefore start no later than 5s.
+    assert captured["source_duration"] == 12.0
+    assert captured["source_in"] == 5.0
+    assert clip["adjusted_source_in"] == 5.0
+    assert clip["source_in"] == 0.0
+    assert clip["resolve_frame_count"] == 210
