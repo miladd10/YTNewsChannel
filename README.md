@@ -142,3 +142,11 @@ The local SQLite index lives in `data/ytnews.db` and is intentionally ignored by
 - Current-title validation is stricter for movie-vs-series/franchise mismatches so footage such as Rings of Power is not mislabeled as current footage for a different Lord of the Rings movie.
 - Step 7 warns when selected media is below HD, portrait/square, or contextual archive footage so weak UHD inputs are visible before Resolve export.
 - Corporate searches now try more official studio-tour/backlot/centennial sources rather than relying on one logo clip.
+
+
+### v0.3.28 Narration-aware smart shot selection
+- Resolve visual cuts now use ElevenLabs forced-alignment word timing and punctuation to prefer natural narration phrase/sentence boundaries instead of a fixed 5.5-second rhythm.
+- Trailer reuse now favors scenes from noticeably different parts of the source, not merely any non-overlapping adjacent scene.
+- Final narration beats are kept intact so the planner does not create tiny cleanup/flash cuts at the end of a sentence.
+- Step 7 now warns when the selected downloaded moving footage is shorter than the narration window, making cases such as an 11-second title announcement for an 18-second story explicit before export.
+- Scene selection still uses cached keyframe/scene analysis and never deliberately repeats the same source frames.
