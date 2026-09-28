@@ -875,21 +875,27 @@ Rules:
 """
 
 
+def _strip_markdown_emphasis(text: str) -> str:
+    # Reviewers often bold labels/values ("- **Status:** **PASS**"). Remove
+    # emphasis markers but keep single underscores inside NEEDS_WORK etc.
+    return re.sub(r"\*\*|__|\*|`", "", text or "")
+
+
 def parse_review_gate(text: str) -> dict:
-    raw = text or ""
-    severity_values = re.findall(r"(?im)^\s*-\s*Severity:\s*\*\*?(blocking|major|minor)\*\*?\s*$|^\s*-\s*Severity:\s*(blocking|major|minor)\s*$", raw)
+    raw = _strip_markdown_emphasis(text)
+    severity_values = re.findall(r"(?im)^\s*[-*]?\s*Severity\s*:\s*(blocking|major|minor)\b", raw)
     counts = {"blocking": 0, "major": 0, "minor": 0}
-    for pair in severity_values:
-        value = next((x for x in pair if x), "")
-        if value:
-            counts[value.lower()] += 1
+    for value in severity_values:
+        counts[value.lower()] += 1
 
     def status(label: str) -> str:
-        match = re.search(rf"(?im)^\s*-\s*Status:\s*(PASS|NEEDS_WORK)\s*$", _section_text(raw, label))
-        return (match.group(1).lower() if match else "")
+        match = re.search(r"(?im)^\s*[-*]?\s*Status\s*:\s*(PASS|NEEDS[_ ]WORK)\b", _section_text(raw, label))
+        return (match.group(1).lower().replace(" ", "_") if match else "")
 
-    gate_match = re.search(r"(?im)^\s*-\s*Recommendation:\s*(PASS|REVISION_REQUIRED|POLISH_OPTIONAL)\s*$", raw)
-    recommendation = gate_match.group(1).lower() if gate_match else ""
+    gate_match = re.search(
+        r"(?im)^\s*[-*]?\s*Recommendation\s*:\s*(PASS|REVISION[_ ]REQUIRED|POLISH[_ ]OPTIONAL)\b", raw
+    )
+    recommendation = gate_match.group(1).lower().replace(" ", "_") if gate_match else ""
     audits = {
         "format_status": status("# Format Audit"),
         "style_status": status("# Style Audit"),

@@ -475,3 +475,31 @@ def test_persian_spoken_section_labels_are_available_to_writer():
     assert by_key["industry"]["spoken_label_fa"] == "صنعت سینما"
     assert by_key["upcoming_films"]["spoken_label_fa"] == "فیلم‌های جدید"
     assert by_key["box_office"]["spoken_label_fa"] == "گیشه"
+
+
+def _review(status_fmt: str, rec_fmt: str, issues: str = "None.") -> str:
+    parts = []
+    for heading in ("# Format Audit", "# Style Audit", "# Factual / Source Audit", "# Freshness Audit",
+                    "# Context / Spice Audit", "# Storytelling Audit"):
+        parts.append(f"{heading}\n{status_fmt}\n- Notes: fine")
+    parts.append(f"# Issues\n{issues}")
+    parts.append(f"# Review Gate\n- Blocking Issues: 0\n{rec_fmt}")
+    return "\n\n".join(parts)
+
+
+def test_review_gate_accepts_bold_and_trailing_notes():
+    from app.services.cinema_format import parse_review_gate
+    for status_fmt, rec_fmt in (
+        ("- Status: PASS", "- Recommendation: PASS"),
+        ("- **Status:** **PASS**", "- **Recommendation:** **PASS**"),
+        ("- Status: `PASS` (minor nits only)", "- Recommendation: POLISH OPTIONAL"),
+    ):
+        assert parse_review_gate(_review(status_fmt, rec_fmt))["gate_status"] in {"pass", "polish_optional"}, status_fmt
+
+
+def test_review_gate_still_blocks_needs_work_and_bold_major_issue():
+    from app.services.cinema_format import parse_review_gate
+    assert parse_review_gate(_review("- **Status:** NEEDS WORK", "- Recommendation: PASS"))["gate_status"] == "revision_required"
+    issue = "## ISSUE 1 — x\n- **Severity:** major (fix first)\n- Problem: y"
+    gate = parse_review_gate(_review("- Status: PASS", "- Recommendation: PASS", issue))
+    assert gate["major_count"] == 1 and gate["gate_status"] == "revision_required"
