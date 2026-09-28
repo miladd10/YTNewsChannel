@@ -618,6 +618,7 @@ STRICT RULES:
 - BOX OFFICE IS VOLATILE. If a film opened last weekend and the draft is being written after its second weekend, an opening-weekend worldwide number must be called an opening-weekend number, never phrased as the film's current worldwide total.
 - Prefer the latest reliable in-window evidence for cumulative totals/rankings. If later supplied evidence says a milestone has already been crossed, reject wording such as "approaching" or "close to".
 - In fresh_verification_sources, prefer trust_tier=preferred over supplemental search results when they conflict. Supplemental results can corroborate/discover, but should not override a preferred official/data/trade/major-news source.
+- deterministic_red_flags are backend-detected high-confidence contradictions. You MUST address every listed red flag explicitly in issues and correct the narration when the supplied fresh evidence supports the correction. Never return pass while a deterministic_red_flag remains unresolved.
 - Distinguish weekend rank from daily rank and domestic rank from worldwide rank.
 - RELEASE SCOPE matters. "Limited 70mm theatrical run" is not the same as a general/wide theatrical release.
 - DEAL VALUES can use different valuation conventions. If supplied reputable sources conflict (for example equity value vs enterprise/transaction value), keep attribution and do not flatten them into one unqualified number.
