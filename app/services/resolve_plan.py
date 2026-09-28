@@ -48,6 +48,18 @@ def _gap(duration: int, fps: int, name: str = "Gap") -> dict:
     }
 
 
+def _transition(in_frames: int, out_frames: int, fps: int, name: str = "Dissolve") -> dict:
+    return {
+        "OTIO_SCHEMA": "Transition.1",
+        "metadata": {"yt_news_studio": {"type": "smart_dissolve"}},
+        "name": name,
+        "transition_type": "SMPTE_Dissolve",
+        "parameters": {},
+        "in_offset": _rt(max(0, in_frames), fps),
+        "out_offset": _rt(max(0, out_frames), fps),
+    }
+
+
 def _clip(
     name: str,
     path: Path,
@@ -554,7 +566,9 @@ def _video_track(root: Path, plan: dict) -> dict:
     total_frames = int(plan["timeline"]["total_frames"])
     children = []
     cursor = 0
-    for item in plan.get("visual_clips") or []:
+    clips = plan.get("visual_clips") or []
+
+    for index, item in enumerate(clips):
         start = int(round(float(item["timeline_start"]) * fps))
         duration = max(1, int(round(float(item["timeline_duration"]) * fps)))
         start = max(cursor, start)
@@ -576,7 +590,7 @@ def _video_track(root: Path, plan: dict) -> dict:
             duration,
             fps,
             media_kind=item.get("media_type") or "video",
-            source_start_frames=source_start if item.get("media_type") == "video" else 0,
+            source_start_frames=source_start,
             available_frames=available_frames,
             metadata={
                 "story_id": item.get("story_id"),
@@ -586,12 +600,28 @@ def _video_track(root: Path, plan: dict) -> dict:
                 "playback_speed": 1.0,
                 "source_audio": "muted",
                 "crop": item.get("crop"),
+                "selection_reason": item.get("selection_reason"),
+                "shot_index": item.get("shot_index"),
+                "shot_analysis_mode": item.get("shot_analysis_mode"),
+                "transition_type": item.get("transition_type") or "cut",
             },
         ))
         cursor = start + duration
+
+        if index < len(clips) - 1:
+            next_item = clips[index + 1]
+            contiguous = abs(
+                float(item.get("timeline_end") or 0) - float(next_item.get("timeline_start") or 0)
+            ) <= 0.02
+            out_frames = int(item.get("transition_out_frames") or 0)
+            in_frames = int(next_item.get("transition_in_frames") or 0)
+            if contiguous and out_frames > 0 and in_frames > 0:
+                children.append(_transition(out_frames, in_frames, fps))
+
     if cursor < total_frames:
         children.append(_gap(total_frames - cursor, fps, "Visual tail gap"))
     return _track("V1 - News B-roll / Stills", "Video", children)
+
 
 
 def _audio_track(root: Path, plan: dict) -> dict:
@@ -930,24 +960,39 @@ def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
         original_source_out = item.get("source_out")
         duration = max(0.05, float(item.get("timeline_duration") or 0.05))
 
+        in_handle_frames = max(0, int(item.get("transition_in_frames") or 0))
+        out_handle_frames = max(0, int(item.get("transition_out_frames") or 0))
+        in_handle = in_handle_frames / fps
+        out_handle = out_handle_frames / fps
+
         if media_type == "video":
-            # Use the duration of the file that was actually downloaded, not
-            # discovery metadata. Some providers report trailer durations that
-            # differ from the downloaded asset; unbounded source-in values can
-            # otherwise create header-only MP4s that Resolve shows as Offline.
             source_key = str(source)
             if source_key not in source_duration_cache:
                 source_duration_cache[source_key] = _probe_media_duration(source)
             actual_source_duration = source_duration_cache[source_key]
-            adjusted_source_in = _clamp_video_source_in(
+
+            # Clamp the chosen content range first, then stage transition handles
+            # around it. This preserves the scene-aware shot while ensuring OTIO
+            # dissolves have real frames on both sides.
+            content_source_in = _clamp_video_source_in(
                 original_source_in,
                 duration,
                 actual_source_duration,
             )
-            frame_count = max(1, int(round(duration * fps)))
+            stage_source_in = max(0.0, content_source_in - in_handle)
+            actual_pre_handle = content_source_in - stage_source_in
+            staged_requested_duration = actual_pre_handle + duration + out_handle
+            stage_source_in = _clamp_video_source_in(
+                stage_source_in,
+                staged_requested_duration,
+                actual_source_duration,
+            )
+            actual_pre_handle = max(0.0, content_source_in - stage_source_in)
+
+            frame_count = max(1, int(round(staged_requested_duration * fps)))
             planned_stage_duration = frame_count / fps
             key = (
-                f"video-cut|{source}|{adjusted_source_in:.6f}|"
+                f"video-cut|{source}|{stage_source_in:.6f}|"
                 f"{frame_count}|{fps}"
             )
             relative = cache.get(key)
@@ -958,7 +1003,7 @@ def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
                 stage_meta = _stage_resolve_video_cut(
                     source,
                     target,
-                    source_in=adjusted_source_in,
+                    source_in=stage_source_in,
                     duration=planned_stage_duration,
                     fps=fps,
                     source_duration=actual_source_duration,
@@ -966,27 +1011,29 @@ def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
                 relative = target.relative_to(root).as_posix()
                 cache[key] = relative
                 video_stage_meta[key] = stage_meta
+
+            actual_stage_start = float((stage_meta or {}).get("adjusted_source_in", stage_source_in))
+            source_range_start = max(0.0, content_source_in - actual_stage_start)
             item["source_stored_path"] = original_stored_path
             item["original_source_in"] = original_source_in
             item["original_source_out"] = original_source_out
             item["actual_source_duration"] = actual_source_duration
-            item["adjusted_source_in"] = (stage_meta or {}).get("adjusted_source_in", adjusted_source_in)
+            item["adjusted_source_in"] = content_source_in
+            item["staged_source_in"] = actual_stage_start
             item["stored_path"] = relative
-            item["source_in"] = 0.0
-            item["source_out"] = planned_stage_duration
+            item["source_in"] = round(source_range_start, 6)
+            item["source_out"] = round(source_range_start + duration, 6)
             item["source_media_duration"] = planned_stage_duration
-            item["timeline_duration"] = planned_stage_duration
-            item["resolve_frame_count"] = frame_count
+            item["timeline_duration"] = duration
+            item["resolve_frame_count"] = max(1, int(round(duration * fps)))
+            item["resolve_staged_frame_count"] = frame_count
             item["resolve_measured_duration"] = (stage_meta or {}).get("measured_duration")
-            item["resolve_media_format"] = "H.264 MP4 · yuv420p · CFR · validated frames"
+            item["resolve_media_format"] = "H.264 MP4 · yuv420p · CFR · validated frames + transition handles"
         else:
-            # Do not hand a multi-second PNG source_range to Resolve's OTIO
-            # importer. It can treat the still as one source frame and show the
-            # remainder of the timeline clip as Media Offline. Render each
-            # distinct hold duration to a short CFR H.264 MP4 instead.
-            frame_count = max(1, int(round(duration * fps)))
-            planned_stage_duration = frame_count / fps
-            key = f"image-hold|{source}|{frame_count}|{fps}"
+            content_frames = max(1, int(round(duration * fps)))
+            staged_frames = in_handle_frames + content_frames + out_handle_frames
+            planned_stage_duration = staged_frames / fps
+            key = f"image-hold|{source}|{staged_frames}|{fps}"
             relative = cache.get(key)
             stage_meta = image_stage_meta.get(key)
             if not relative:
@@ -1003,13 +1050,15 @@ def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
                 image_stage_meta[key] = stage_meta
             item["source_stored_path"] = original_stored_path
             item["stored_path"] = relative
-            item["source_in"] = 0.0
-            item["source_out"] = planned_stage_duration
+            item["source_in"] = round(in_handle, 6)
+            item["source_out"] = round(in_handle + duration, 6)
             item["source_media_duration"] = planned_stage_duration
-            item["timeline_duration"] = planned_stage_duration
-            item["resolve_frame_count"] = frame_count
+            item["timeline_duration"] = duration
+            item["resolve_frame_count"] = content_frames
+            item["resolve_staged_frame_count"] = staged_frames
             item["resolve_measured_duration"] = (stage_meta or {}).get("measured_duration")
-            item["resolve_media_format"] = "H.264 MP4 still hold · yuv420p · CFR · validated frames"
+            item["resolve_media_format"] = "H.264 MP4 still hold · yuv420p · CFR · validated frames + transition handles"
+
 
     return staged, {
         "media_folder": str(resolve_media),
@@ -1051,7 +1100,9 @@ def write_resolve_package(root: Path, plan: dict) -> dict:
         writer.writerow([
             "story_id", "candidate_id", "media_type", "timeline_start", "timeline_end",
             "duration", "source_in", "source_out", "playback_speed", "source_audio",
-            "crop_mode", "crop_axis", "crop_fraction", "stored_path",
+            "crop_mode", "crop_axis", "crop_fraction", "selection_reason", "shot_index",
+            "shot_analysis_mode", "transition_type", "transition_in_frames", "transition_out_frames",
+            "stored_path",
         ])
         for item in staged_plan.get("visual_clips") or []:
             crop = item.get("crop") or {}
@@ -1060,7 +1111,10 @@ def write_resolve_package(root: Path, plan: dict) -> dict:
                 item.get("timeline_start"), item.get("timeline_end"), item.get("timeline_duration"),
                 item.get("source_in"), item.get("source_out"), item.get("playback_speed"),
                 item.get("source_audio"), crop.get("mode"), crop.get("crop_axis"),
-                crop.get("crop_fraction"), item.get("stored_path"),
+                crop.get("crop_fraction"), item.get("selection_reason"), item.get("shot_index"),
+                item.get("shot_analysis_mode"), item.get("transition_type"),
+                item.get("transition_in_frames"), item.get("transition_out_frames"),
+                item.get("stored_path"),
             ])
 
     manifest = {
@@ -1082,6 +1136,9 @@ def write_resolve_package(root: Path, plan: dict) -> dict:
         "resolve_safe_media": True,
         "video_stage_format": "H.264 MP4 · yuv420p · CFR exact frames · avc1 · no source audio",
         "image_stage_format": "H.264 MP4 still hold · yuv420p · CFR exact frames",
+        "shot_selection": "cached FFmpeg scene-boundary analysis",
+        "image_cadence_seconds": DEFAULT_IMAGE_HOLD,
+        "transitions": "hard cuts inside trailers; short SMPTE dissolves for still/media/story changes",
         "warnings": staged_plan.get("warnings") or [],
     }
     manifest_path = resolve_dir / "package_manifest.json"
@@ -1115,9 +1172,12 @@ For source media that is not already 16:9, **media_timing.csv** contains the cal
 crop axis/fraction with a center focal point. Resolve should use the project/input scaling
 equivalent of **Scale full frame with crop**.
 
-The current planner chooses timing-safe source ranges from the curated official B-roll.
-It does not yet perform semantic frame analysis inside a trailer; refine source in/out or
-focal position in Resolve when a more specific visual moment is desired.
+The planner now performs cached FFmpeg scene-boundary analysis on downloaded trailers/clips,
+avoids the typical trailer intro/outro area when possible, prefers non-overlapping 2.5–6 second
+shots, and uses hard cuts when moving between detected scenes from the same trailer. Selected
+stills change at roughly five-second cadence. Short SMPTE dissolves are inserted only when
+switching between still/media types or story boundaries; staged files include transition handles.
+This is shot-aware visual editing, not full semantic vision matching to every spoken sentence.
 """
     (resolve_dir / "README.md").write_text(readme, encoding="utf-8")
 
