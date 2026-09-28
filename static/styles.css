@@ -102,3 +102,9 @@
 .story-coverage-plan strong{font-size:9px}
 .story-coverage-plan span{color:var(--muted);font-size:8px}
 .coverage-chip{display:inline-flex;align-items:center;padding:3px 6px;border:1px solid #3b4b60;border-radius:999px;background:#172231;color:#c9d8ea;font-size:8px;font-weight:700}
+
+.resolve-missing-list{display:grid;gap:8px;margin-top:10px}
+.resolve-missing-item{border-color:#6f5630;background:#1d1810}
+.resolve-missing-item strong{display:block;margin-bottom:4px}
+.resolve-missing-item small{display:block;color:#d8b46b}
+.resolve-missing-item p{margin:7px 0 0;color:var(--muted);font-size:10px;line-height:1.5}
