@@ -87,6 +87,11 @@ def _resolve_input_signature(voice_rows: list[dict], candidates: list[dict]) -> 
             "stored_path": row.get("stored_path"),
             "download_status": row.get("download_status") or "",
             "selected": int(row.get("selected") or 0),
+            "coverage_label": row.get("coverage_label") or "",
+            "coverage_kind": row.get("coverage_kind") or "",
+            "coverage_group": row.get("coverage_group") or "",
+            "coverage_cue": row.get("coverage_cue") or "",
+            "layout_hint": row.get("layout_hint") or "single",
         }
         for row in sorted(candidates, key=lambda x: (str(x.get("story_id") or ""), str(x.get("id") or "")))
     ]
