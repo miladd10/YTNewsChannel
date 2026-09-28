@@ -78,6 +78,21 @@ function reviewAuditBadges(review){
   ];
   return rows.map(([label,status])=>`<span class="review-audit-badge ${status==='pass'?'pass':'needs-work'}">${esc(label)}: ${esc((status||'unknown').replaceAll('_',' '))}</span>`).join('');
 }
+function factCheckHtml(draft){
+  if(!draft)return '';
+  const status=String(draft.fact_check_status||'not_run');
+  let report={};
+  try{report=JSON.parse(draft.fact_check_json||'{}')}catch{}
+  const issues=Array.isArray(report.issues)?report.issues:[];
+  const tone=status==='pass'?'pass':status==='corrected'?'corrected':'needs-work';
+  const label=status==='pass'?'Passed':status==='corrected'?'Corrected automatically':'Needs human check';
+  return `<section class="fact-check-panel ${tone}">
+    <div class="fact-check-head"><div><div class="eyebrow">AUTOMATIC FACT CHECK</div><h3>${esc(label)}</h3></div><span class="pill">${Number(draft.fact_check_issue_count||issues.length||0)} issue${Number(draft.fact_check_issue_count||issues.length||0)===1?'':'s'}</span></div>
+    <p>Checks volatile facts against fresh verification results: box-office totals/ranks, opening vs cumulative figures, release scope/dates and other time-sensitive claims.</p>
+    ${issues.length?`<div class="fact-check-issues">${issues.map((x,i)=>`<div class="fact-check-issue"><strong>${i+1}. ${esc(x.claim||'Claim check')}</strong><span>${esc(x.problem||'')}</span>${x.correction_basis?`<small>Basis: ${esc(x.correction_basis)}</small>`:''}</div>`).join('')}</div>`:''}
+  </section>`;
+}
+
 function reviewFeedbackHtml(review){
   if(!review){
     return `<section id="reviewFeedbackPanel" class="review-feedback-panel empty"><div><div class="eyebrow">REVIEW FEEDBACK</div><h3>No review yet</h3><p>Run Reviewer to get a visible format, style, factual, freshness, context/spice and storytelling audit for this exact draft.</p></div></section>`;
@@ -157,19 +172,21 @@ narrationHtml=async function(){
   const selectedStories=(w.sections||[]).flatMap(x=>x.stories||[]);
   const draftTime=draft?(Date.parse(draft.created_at||'')||0):0;
   const pendingEnrichment=draft?selectedStories.some(s=>(Date.parse(s.context_searched_at||'')||0)>draftTime):false;
-  return `<div class="section-head"><div><div class="eyebrow">STEP 03</div><h2>Narration Writer - Review Loop</h2><p>Selected current-week news is factual authority. The full Filmbaz library teaches recurring tone, pacing, compact context and storytelling behavior. Non-obvious people/companies can use one short verified familiarity cue.</p></div><button id="generateNarrationBtn" class="btn primary">Generate Baseline Draft</button></div>${metrics()}<div class="writer-grid"><section class="card writer-panel"><div class="writer-panel-head"><div><div class="eyebrow">APPROVED NEWS INPUT</div><h3>Section plan</h3><p>${familiarityCount} selected story/stories include a casual-audience familiarity anchor.</p></div></div>${sectionSummary||'<div class="muted">No Included stories yet.</div>'}</section><section class="card writer-panel"><div class="writer-panel-head"><div><div class="eyebrow">STYLE CORPUS</div><h3>Filmbaz transcript library</h3><p>${enabledStyles.length} enabled transcript${enabledStyles.length===1?'':'s'} - the app now distills them into a reusable Style Blueprint and also preserves long flow anchors from complete episodes.</p></div><button id="importStyleTranscriptsBtn" class="btn secondary">Import transcripts</button><input id="styleTranscriptFiles" type="file" accept=".txt,.md,text/plain,text/markdown" multiple class="hidden" /></div>${styleProfileHtml}${styles||'<div class="muted">Import Filmbaz transcript files. They are reusable across cinema weekly projects.</div>'}</section></div>${storyEnrichmentHtml(selectedStories,draft)}${draft?`<section class="card narration-workbench"><div class="narration-toolbar"><select id="narrationDraftSelect">${draftOptions}</select><div class="top-actions">${narrationGateBadge(review)}<button id="reviewNarrationBtn" class="btn secondary" ${pendingEnrichment?'disabled title="Rewrite with Enrichment first"':''}>Run Reviewer</button>${review?`<button id="reviseNarrationBtn" class="btn secondary" ${review.gate_status==='pass'?'disabled':''}>Revise from Review</button>`:''}<button id="approveNarrationBtn" class="btn primary" ${Number(draft.approved)||!review||review.gate_status==='revision_required'?'disabled':''}>${Number(draft.approved)?'Approved':'Approve Draft'}</button></div></div>${reviewFeedbackHtml(review)}<div class="draft-feedback-panel"><div class="eyebrow">DRAFT V${draft.version_number}</div><pre class="editor narration-editor">${esc(draft.content)}</pre></div></section>`:'<div class="card placeholder">Select news in Step 2, import style transcripts if available, then generate Draft V1.</div>'}`;
+  const factStatus=String(draft?.fact_check_status||'not_run');
+  const factReady=['pass','corrected'].includes(factStatus);
+  return `<div class="section-head"><div><div class="eyebrow">STEP 03</div><h2>Narration Writer - Review Loop</h2><p>Selected current-week news is factual authority. The full Filmbaz library teaches recurring tone, pacing, compact context and storytelling behavior. Non-obvious people/companies can use one short verified familiarity cue.</p></div><button id="generateNarrationBtn" class="btn primary">Generate Baseline Draft</button></div>${metrics()}<div class="writer-grid"><section class="card writer-panel"><div class="writer-panel-head"><div><div class="eyebrow">APPROVED NEWS INPUT</div><h3>Section plan</h3><p>${familiarityCount} selected story/stories include a casual-audience familiarity anchor.</p></div></div>${sectionSummary||'<div class="muted">No Included stories yet.</div>'}</section><section class="card writer-panel"><div class="writer-panel-head"><div><div class="eyebrow">STYLE CORPUS</div><h3>Filmbaz transcript library</h3><p>${enabledStyles.length} enabled transcript${enabledStyles.length===1?'':'s'} - the app now distills them into a reusable Style Blueprint and also preserves long flow anchors from complete episodes.</p></div><button id="importStyleTranscriptsBtn" class="btn secondary">Import transcripts</button><input id="styleTranscriptFiles" type="file" accept=".txt,.md,text/plain,text/markdown" multiple class="hidden" /></div>${styleProfileHtml}${styles||'<div class="muted">Import Filmbaz transcript files. They are reusable across cinema weekly projects.</div>'}</section></div>${storyEnrichmentHtml(selectedStories,draft)}${draft?`<section class="card narration-workbench"><div class="narration-toolbar"><select id="narrationDraftSelect">${draftOptions}</select><div class="top-actions">${narrationGateBadge(review)}<button id="reviewNarrationBtn" class="btn secondary" ${pendingEnrichment?'disabled title="Rewrite with Enrichment first"':''}>Run Reviewer</button>${review?`<button id="reviseNarrationBtn" class="btn secondary" ${review.gate_status==='pass'?'disabled':''}>Revise from Review</button>`:''}<button id="approveNarrationBtn" class="btn primary" ${Number(draft.approved)||!review||review.gate_status==='revision_required'||!factReady?'disabled':''} ${!factReady?'title="Automatic fact check must pass before approval"':''}>${Number(draft.approved)?'Approved':'Approve Draft'}</button></div></div>${factCheckHtml(draft)}${reviewFeedbackHtml(review)}<div class="draft-feedback-panel"><div class="eyebrow">DRAFT V${draft.version_number}</div><pre class="editor narration-editor">${esc(draft.content)}</pre></div></section>`:'<div class="card placeholder">Select news in Step 2, import style transcripts if available, then generate Draft V1.</div>'}`;
 };
 
 
 generateNarration=async function(){
   const b=$('#generateNarrationBtn');if(b){b.disabled=true;b.textContent='Writing...'}
   const s=state.settings?.ai||{};
-  startRunStatus({title:'Writing baseline narration draft',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading selected sections','Checking / building Style Blueprint','Extracting fact-locked story beats','Writing spoken draft from story micro-arcs','Draft saved']});
+  startRunStatus({title:'Writing + fact-checking baseline narration',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading selected sections','Checking / building Style Blueprint','Extracting fact-locked story beats','Writing spoken draft from story micro-arcs','Fresh-search fact check','Draft saved']});
   try{
     const r=await api(`/api/projects/${state.project.id}/narration`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:s.writer_provider,model:s.writer_model})});
     state.narrationDraftId=r.id;state.lastNarrationReview=null;state.project=await api(`/api/projects/${state.project.id}`);await renderStage();
     finishRunStatus(true,'',`Draft V${r.version_number} generated`);
-    toast(r.content_plan_error?`Draft V${r.version_number} generated, but the fact-plan pass fell back: ${r.content_plan_error}`:`Draft V${r.version_number} generated - Style Blueprint built from ${r.style_profile_transcript_count||r.style_transcript_count} reference transcript(s)`,!!r.content_plan_error);
+    toast(r.content_plan_error?`Draft V${r.version_number} generated, but the fact-plan pass fell back: ${r.content_plan_error}`:`Draft V${r.version_number} generated · fact check ${String(r.fact_check_status||'unknown').replaceAll('_',' ')}${Number(r.fact_check_issue_count||0)?` · ${r.fact_check_issue_count} issue(s)`:''}`,!!r.content_plan_error||r.fact_check_status==='needs_human_check');
   }catch(e){finishRunStatus(false,e.message);toast(e.message,true);if(b){b.disabled=false;b.textContent='Generate Fresh Draft'}}
 };
 async function rebuildStyleProfile(){
@@ -246,7 +263,7 @@ async function rewriteWithEnrichment(){
   const id=state.narrationDraftId;if(!id)return;
   const b=$('#rewriteEnrichedBtn');if(b){b.disabled=true;b.textContent='Rewriting...'}
   const s=state.settings?.ai||{};
-  startRunStatus({title:'Rewriting draft with researched context',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading per-story searches','Using only safe evidence-backed angles','Preserving good draft structure','Using Reddit/X/TikTok attribution specifically','Saving enriched draft']});
+  startRunStatus({title:'Rewriting + fact-checking enriched draft',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading per-story searches','Using only safe evidence-backed angles','Preserving good draft structure','Fresh-search fact check','Saving enriched draft']});
   try{
     const r=await api(`/api/projects/${state.project.id}/narrations/${id}/enrich-rewrite`,{
       method:'POST',
@@ -284,7 +301,7 @@ async function reviewNarration(){
 }
 async function reviseNarration(){
   const id=state.narrationDraftId;if(!id)return;const review=latestReviewForDraft(state.narrationWorkspace,id);if(!review)return toast('Run Reviewer first',true);const s=state.settings?.ai||{};
-  startRunStatus({title:'Applying reviewer feedback',meta:'Targeted revision',steps:['Loading review change list','Applying required fixes','Preserving correct material','New draft saved']});
+  startRunStatus({title:'Applying review + rechecking facts',meta:'Targeted revision',steps:['Loading review change list','Applying required fixes','Preserving correct material','Fresh-search fact check','New draft saved']});
   try{const r=await api(`/api/projects/${state.project.id}/narrations/${id}/revise`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({review_id:review.id,provider:s.writer_provider,model:s.writer_model})});state.narrationDraftId=r.id;state.lastNarrationReview=null;state.project=await api(`/api/projects/${state.project.id}`);await renderStage();finishRunStatus(true,'',`Draft V${r.version_number} revised`);toast(`Draft V${r.version_number} created from review feedback`)}catch(e){finishRunStatus(false,e.message);toast(e.message,true)}
 }
 async function approveNarration(){const id=state.narrationDraftId;if(!id)return;try{await api(`/api/projects/${state.project.id}/narrations/${id}/approve`,{method:'POST'});state.project=await api(`/api/projects/${state.project.id}`);await renderStage();toast('Narration approved for Voice')}catch(e){toast(e.message,true)}}
