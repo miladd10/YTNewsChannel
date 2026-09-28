@@ -363,9 +363,74 @@ def ledger_for_writer(claims: list[dict]) -> list[dict]:
             if claim.get("verification_status") in {"verified", "verified_with_attribution"}]
 
 
-def _field_equal(spoken, ledger) -> bool:
+_SCOPE_CANON = {
+    # field -> ordered (canonical, pattern) pairs; first match wins.
+    "market": (
+        ("worldwide", r"worldwide|global|world|جهانی"),
+        ("international", r"international|overseas|foreign|outside\s+(?:the\s+)?(?:us|u\.s\.|north\s+america)|بین\s*[‌ ]?المللی|خارج"),
+        ("domestic", r"domestic|north\s+america|us\s*(?:/|&|and)\s*canada|\bu\.?s\.?\b|united\s+states|داخلی|آمریکای\s+شمالی|آمریکا"),
+    ),
+    "period_type": (
+        ("cumulative", r"cumulative|running\s+total|to[\s-]date|lifetime|تجمعی"),
+        ("weekend", r"weekend|fri(?:day)?\s*[-–]\s*sun(?:day)?|آخر\s*[‌ ]?هفته"),
+        ("weekly", r"weekly|\bweek\b|7[\s-]day|هفتگی"),
+        ("daily", r"daily|\bday\b|روزانه"),
+    ),
+    "chart_type": (
+        ("weekend", r"weekend|آخر\s*[‌ ]?هفته"),
+        ("weekly", r"weekly|\bweek\b|هفتگی"),
+        ("daily", r"daily|\bday\b|روزانه"),
+    ),
+    "release_scope": (
+        ("re_release", r"re-?release|re-?issue|بازاکران|اکران\s+مجدد"),
+        ("limited_theatrical", r"limited|select|special|event|festival|imax|محدود|انتخابی|ویژه"),
+        ("wide_theatrical", r"wide|nationwide|general|سراسری|عمومی"),
+        ("streaming", r"stream|svod|platform|استریم"),
+        ("vod", r"pvod|vod|digital|rental|premium|دیجیتال"),
+        ("theatrical", r"theat(?:er|re|rical)|cinema|سینما|اکران"),
+    ),
+    "metric": (
+        ("marketing_spend", r"marketing|p&a|promotion|advertis|تبلیغ"),
+        ("enterprise_value", r"enterprise"),
+        ("equity_value", r"equity"),
+        ("net_income", r"net\s+income|profit|سود"),
+        ("operating_income", r"operating|ebitda"),
+        ("production_budget", r"production\s+budget|budget|بودجه"),
+        ("transaction_value", r"transaction|deal|purchase|acquisition|takeover|merger|خرید|معامله|ادغام"),
+        ("box_office_gross", r"gross|box\s*office|ticket|گیشه|فروش\s+(?:بلیت|سینمایی)"),
+        ("revenue", r"revenue|sales|درآمد"),
+    ),
+    "title_identity": (
+        ("re_release", r"re-?release|re-?issue|remaster|anniversary|بازاکران|اکران\s+مجدد"),
+        ("extended_cut", r"extended|director'?s\s+cut|new\s+cut|نسخه\s+کامل"),
+        ("sequel", r"sequel|دنباله"),
+        ("prequel", r"prequel|پیش\s*[‌ ]?درآمد"),
+        ("remake", r"remake|بازسازی"),
+        ("reboot", r"reboot|ریبوت"),
+        ("new_film", r"new\s+(?:film|movie)|original|فیلم\s+(?:جدید|تازه)"),
+    ),
+}
+
+
+def _canonical_scope(field: str, value) -> str:
+    text = _clean(value).casefold()
+    if not text:
+        return ""
+    for canonical, pattern in _SCOPE_CANON.get(field, ()):
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            return canonical
+    return text
+
+
+def _field_equal(spoken, ledger, field: str = "") -> bool:
     a, b = _clean(spoken), _clean(ledger)
-    return True if not a else bool(b and a.casefold() == b.casefold())
+    if not a:
+        return True
+    if not b:
+        return False
+    if field in _SCOPE_CANON:
+        return _canonical_scope(field, a) == _canonical_scope(field, b)
+    return a.casefold() == b.casefold()
 
 
 def _attribution_present(sentence: str, claim: dict, extractor_value: bool) -> bool:
@@ -400,28 +465,28 @@ def _validate_spoken_claim(raw: dict, ledger_by_id: dict[str, dict]) -> dict:
     if matched and claim_type == "ranking":
         compatible = [claim for claim in matched if claim.get("claim_type") == "ranking"
                       and (_int(raw.get("rank")) is None or _int(raw.get("rank")) == claim.get("rank"))
-                      and _field_equal(raw.get("chart_type"), claim.get("chart_type"))
-                      and _field_equal(raw.get("market"), claim.get("market"))
+                      and _field_equal(raw.get("chart_type"), claim.get("chart_type"), "chart_type")
+                      and _field_equal(raw.get("market"), claim.get("market"), "market")
                       and _field_equal(raw.get("date_start"), claim.get("date_start"))
                       and _field_equal(raw.get("date_end"), claim.get("date_end"))]
         if not compatible:
             reasons.append("Ranking scope/date does not match the ledger.")
     if matched and claim_type == "box_office":
         if not any(claim.get("claim_type") in {"box_office", "ranking"}
-                   and _field_equal(raw.get("market"), claim.get("market"))
-                   and _field_equal(raw.get("period_type"), claim.get("period_type")) for claim in matched):
+                   and _field_equal(raw.get("market"), claim.get("market"), "market")
+                   and _field_equal(raw.get("period_type"), claim.get("period_type"), "period_type") for claim in matched):
             reasons.append("Box-office market/period scope does not match the ledger.")
     if matched and claim_type in {"budget", "revenue", "deal_value"}:
         if not any(claim.get("claim_type") == claim_type
-                   and _field_equal(raw.get("metric"), claim.get("metric")) for claim in matched):
+                   and _field_equal(raw.get("metric"), claim.get("metric"), "metric") for claim in matched):
             reasons.append("Financial metric/valuation definition does not match the ledger.")
     if matched and claim_type == "release":
         if not any(claim.get("claim_type") == "release"
-                   and _field_equal(raw.get("release_scope"), claim.get("release_scope")) for claim in matched):
+                   and _field_equal(raw.get("release_scope"), claim.get("release_scope"), "release_scope") for claim in matched):
             reasons.append("Release scope does not match the ledger.")
     if matched and claim_type == "title_identity":
         if not any(claim.get("claim_type") == "title_identity"
-                   and _field_equal(raw.get("title_identity"), claim.get("title_identity")) for claim in matched):
+                   and _field_equal(raw.get("title_identity"), claim.get("title_identity"), "title_identity") for claim in matched):
             reasons.append("Title identity does not match the ledger.")
     attribution_needed = any(claim.get("attribution_required") for claim in matched)
     if attribution_needed and not any(

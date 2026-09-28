@@ -250,3 +250,24 @@ def test_spoken_numbers_may_be_rounded_to_spoken_precision():
     assert _same_number({"numeric_value": 1.2, "unit": "billion"}, {"numeric_value": 1234, "unit": "million"})
     assert _same_number({"numeric_value": 1.3, "unit": "billion"}, {"numeric_value": 1260, "unit": "million"})
     assert not _same_number({"numeric_value": 2, "unit": "billion"}, {"numeric_value": 1234, "unit": "million"})
+
+
+def test_scope_synonyms_match_but_real_scope_differences_do_not():
+    from app.services.claim_ledger import _field_equal
+    assert _field_equal("North America", "domestic", "market")
+    assert _field_equal("US/Canada", "domestic", "market")
+    assert _field_equal("global", "worldwide", "market")
+    assert not _field_equal("domestic", "worldwide", "market")
+    assert not _field_equal("international", "worldwide", "market")
+    assert _field_equal("opening weekend", "weekend", "period_type")
+    assert not _field_equal("opening weekend", "cumulative", "period_type")
+    assert not _field_equal("opening weekend total", "cumulative", "period_type")
+    assert not _field_equal("weekend", "weekly", "period_type")
+    assert _field_equal("weekend box office", "weekend chart", "chart_type")
+    assert _field_equal("select theatrical", "limited large-format theatrical", "release_scope")
+    assert not _field_equal("wide theatrical", "limited theatrical", "release_scope")
+    assert _field_equal("reissue", "re-release", "title_identity")
+    assert not _field_equal("sequel", "re-release", "title_identity")
+    assert _field_equal("production budget", "budget", "metric")
+    assert not _field_equal("marketing spend", "production budget", "metric")
+    assert not _field_equal("enterprise value", "equity value", "metric")
