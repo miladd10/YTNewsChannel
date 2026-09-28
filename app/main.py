@@ -1502,6 +1502,83 @@ def _write_narration_file(project: dict, version: int, content: str) -> None:
     (folder / f"v{version:02d}.md").write_text(content, encoding="utf-8")
 
 
+
+def _deterministic_fact_red_flags(
+    draft_text: str,
+    fresh_sources: dict[str, list[dict]],
+) -> list[dict]:
+    """Catch obvious fresh-evidence contradictions before the AI audit.
+
+    These are intentionally narrow/high-confidence rules. They do not try to
+    fact-check arbitrary prose; they make stale milestone wording and obvious
+    title-identity drift impossible to silently pass.
+    """
+    segments = extract_narration_segments(draft_text or "")
+    narration_by_story: dict[str, str] = {}
+    for segment in segments:
+        story_id = str(segment.get("story_id") or "")
+        if story_id:
+            narration_by_story[story_id] = (
+                narration_by_story.get(story_id, "") + " " + str(segment.get("source_text") or "")
+            ).strip()
+
+    flags: list[dict] = []
+    for story_id, narration in narration_by_story.items():
+        evidence = " ".join(
+            f"{item.get('title') or ''} {item.get('snippet') or ''}"
+            for item in fresh_sources.get(story_id, [])
+        ).casefold()
+        spoken = narration.casefold()
+
+        approaching = bool(re.search(
+            r"(نزدیک|در\\s+آستانه|به\\s+مرز|هنوز.{0,20}(?:رد|عبور).{0,12}ن|"
+            r"approach(?:ing|es|ed)?|near(?:s|ing)?|close\\s+to)",
+            spoken,
+            flags=re.IGNORECASE,
+        ))
+        crossed = bool(re.search(
+            r"\\b(cross(?:ed|es)|pass(?:ed|es)|surpass(?:ed|es)|exceed(?:ed|s)|"
+            r"tops?|topped|over)\\b.{0,45}\\b(?:million|billion|m|b)\\b",
+            evidence,
+            flags=re.IGNORECASE,
+        ))
+        if approaching and crossed:
+            flags.append({
+                "story_id": story_id,
+                "claim": "Milestone status appears stale",
+                "problem": (
+                    "The narration says the title is approaching/not yet past a milestone, "
+                    "while fresh verification snippets say the milestone was already crossed."
+                ),
+                "correction_basis": "Use the newer crossed/passed milestone evidence or qualify the claim.",
+                "rule": "milestone_crossed_vs_approaching",
+            })
+
+        says_new_title = bool(re.search(
+            r"(فیلم\\s+(?:جدید|تازه)|قسمت\\s+(?:جدید|تازه)|brand[- ]new\\s+(?:movie|film)|new\\s+movie)",
+            spoken,
+            flags=re.IGNORECASE,
+        ))
+        evidence_rerelease = bool(re.search(
+            r"(re-?release|returns?\\s+to\\s+theat(?:er|re)s|back\\s+in\\s+theat(?:er|re)s|"
+            r"same\\s+(?:2019\\s+)?movie|new\\s+version\\s+of\\s+the\\s+2019|extended\\s+cut)",
+            evidence,
+            flags=re.IGNORECASE,
+        ))
+        if says_new_title and evidence_rerelease:
+            flags.append({
+                "story_id": story_id,
+                "claim": "Title identity/type mismatch",
+                "problem": (
+                    "The narration describes the title as a new movie, while fresh/official "
+                    "evidence identifies it as a re-release/new cut of an existing film."
+                ),
+                "correction_basis": "Preserve the official title identity (re-release/new cut) and separately describe new footage.",
+                "rule": "new_movie_vs_rerelease",
+            })
+    return flags
+
+
 def _run_narration_fact_check(
     project: dict,
     stories: list[dict],
@@ -1519,6 +1596,7 @@ def _run_narration_fact_check(
         str(project.get("date_end") or ""),
         per_query_limit=5,
     )
+    deterministic_red_flags = _deterministic_fact_red_flags(draft_text, fresh_sources)
     fact_packet = {
         "project_window": {
             "date_start": project.get("date_start"),
@@ -1527,6 +1605,7 @@ def _run_narration_fact_check(
         },
         "approved_sections": _sectioned_story_packet(stories),
         "fresh_verification_sources": fresh_sources,
+        "deterministic_red_flags": deterministic_red_flags,
         "draft": draft_text,
     }
 
@@ -1548,8 +1627,23 @@ def _run_narration_fact_check(
             if status not in {"pass", "corrected", "needs_human_check"}:
                 status = "needs_human_check"
             issues = report.get("issues") if isinstance(report.get("issues"), list) else []
-            issue_count = len(issues)
             corrected = str(report.get("corrected_narration") or "").strip()
+
+            # The model may not ignore a deterministic contradiction. If it
+            # fails to explicitly account for one, keep the draft blocked.
+            addressed_story_ids = {
+                str(issue.get("story_id") or "")
+                for issue in issues
+                if isinstance(issue, dict)
+            }
+            missing_red_flags = [
+                flag for flag in deterministic_red_flags
+                if str(flag.get("story_id") or "") not in addressed_story_ids
+            ]
+            if missing_red_flags:
+                issues.extend(missing_red_flags)
+                status = "needs_human_check"
+            issue_count = len(issues)
             if status == "pass" or issue_count == 0:
                 corrected = draft_text
                 status = "pass"
@@ -1578,6 +1672,7 @@ def _run_narration_fact_check(
                 "issue_count": issue_count,
                 "issues": issues,
                 "fresh_verification_sources": fresh_sources,
+                "deterministic_red_flags": deterministic_red_flags,
                 "provider": actual_provider,
                 "model": actual_model,
             }
@@ -1595,6 +1690,7 @@ def _run_narration_fact_check(
             "correction_basis": "Run the narration reviewer before approval.",
         }],
         "fresh_verification_sources": fresh_sources,
+        "deterministic_red_flags": deterministic_red_flags,
         "provider": preferred_provider,
         "model": preferred_model,
         "error": last_error,
