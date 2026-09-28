@@ -674,7 +674,7 @@ def _image_candidate(
                 semantic,
                 key=lambda item: (
                     abs(float(item.get("_narration_ratio") or 0) - current_ratio),
-                    0 if str(item.get("coverage_kind") or "") == "fun_fact" else 1,
+                    0 if str(item.get("coverage_kind") or "") in {"fun_fact", "multi_panel"} else 1,
                 ),
             )
     # Preserve the original deterministic round-robin order when no semantic
