@@ -1659,19 +1659,26 @@ OFFICIAL_WEB_DOMAIN_TERMS = (
 def _web_video_search_queries(story: dict) -> list[str]:
     contextual_kind = str(story.get("_contextual_kind") or "")
     contextual_subject = (_story_subjects(story) or [clean_story_query(story.get("canonical_title", ""))])[0]
-    if contextual_kind == "cast/director":
+    if contextual_kind in {"cast/director", "person", "interview", "event_photo"}:
         return list(dict.fromkeys([
             f'"{contextual_subject}" interview 4K',
             f'"{contextual_subject}" press junket 1080p',
             f'"{contextual_subject}" red carpet premiere',
             f'"{contextual_subject}" behind the scenes',
         ]))
-    if contextual_kind == "previous installment/franchise":
+    if contextual_kind in {"previous installment/franchise", "related_title", "comparison", "fun_fact"}:
         return list(dict.fromkeys([
             f'"{contextual_subject}" "official trailer" 4K',
             f'"{contextual_subject}" "official clip" 4K',
-            f'"{contextual_subject}" official featurette',
+            f'"{contextual_subject}" official featurette behind the scenes',
             f'"{contextual_subject}" official trailer site:vimeo.com',
+        ]))
+    if contextual_kind == "behind_the_scenes":
+        return list(dict.fromkeys([
+            f'"{contextual_subject}" official behind the scenes 4K',
+            f'"{contextual_subject}" official making of 4K',
+            f'"{contextual_subject}" official featurette production',
+            f'"{contextual_subject}" set visit official',
         ]))
 
     if _is_corporate_story(story):
@@ -1849,20 +1856,27 @@ def _youtube_search_queries(story: dict) -> list[str]:
 
     contextual_kind = str(story.get("_contextual_kind") or "")
     contextual_subject = (_story_subjects(story) or [base])[0]
-    if contextual_kind == "cast/director":
+    if contextual_kind in {"cast/director", "person", "interview", "event_photo"}:
         return list(dict.fromkeys([
-            f'{contextual_subject} interview',
+            f'{contextual_subject} interview 4K',
             f'{contextual_subject} press junket',
             f'{contextual_subject} press conference',
             f'{contextual_subject} red carpet premiere',
             f'{contextual_subject} behind the scenes',
         ]))
-    if contextual_kind == "previous installment/franchise":
+    if contextual_kind in {"previous installment/franchise", "related_title", "comparison", "fun_fact"}:
         return list(dict.fromkeys([
             f'{contextual_subject} official trailer 4K',
             f'{contextual_subject} official trailer',
             f'{contextual_subject} official clip',
-            f'{contextual_subject} official featurette',
+            f'{contextual_subject} official featurette behind the scenes',
+        ]))
+    if contextual_kind == "behind_the_scenes":
+        return list(dict.fromkeys([
+            f'{contextual_subject} official behind the scenes 4K',
+            f'{contextual_subject} official making of',
+            f'{contextual_subject} official featurette production',
+            f'{contextual_subject} set visit official',
         ]))
 
     if _is_corporate_story(story):
@@ -2020,10 +2034,22 @@ PREFERRED_IMAGE_SOURCE_TERMS = (
 def _image_search_queries(story: dict) -> list[str]:
     contextual_kind = str(story.get("_contextual_kind") or "")
     contextual_subject = (_story_subjects(story) or [clean_story_query(story.get("canonical_title", ""))])[0]
-    if contextual_kind == "cast/director":
+    if contextual_kind in {"cast/director", "person", "interview", "event_photo"}:
         return list(dict.fromkeys([
-            f'{contextual_subject} official press photo 4K landscape',
-            f'{contextual_subject} premiere red carpet photo landscape high resolution',
+            f'{contextual_subject} official press photo high resolution',
+            f'{contextual_subject} premiere red carpet photo high resolution',
+            f'{contextual_subject} interview portrait press photo',
+        ]))
+    if contextual_kind in {"related_title", "comparison", "fun_fact", "previous installment/franchise"}:
+        return list(dict.fromkeys([
+            f'{contextual_subject} official still 4K landscape',
+            f'{contextual_subject} official poster key art high resolution',
+            f'{contextual_subject} press kit still high resolution',
+        ]))
+    if contextual_kind == "behind_the_scenes":
+        return list(dict.fromkeys([
+            f'{contextual_subject} behind the scenes official set photo high resolution',
+            f'{contextual_subject} production still making of high resolution',
         ]))
     if _is_corporate_story(story):
         queries: list[str] = []
@@ -2081,7 +2107,10 @@ def _image_candidate_score(item: dict, story: dict) -> int:
         elif aspect >= 1.25:
             score += 20
         elif aspect < 1.0:
-            score -= 42
+            contextual_kind = str(story.get("_contextual_kind") or "")
+            # Portraits are useful for two/three-up celebrity layouts even
+            # though a single full-frame portrait is a poor 16:9 choice.
+            score += 18 if contextual_kind in {"cast/director", "person", "interview", "event_photo"} else -42
 
         if width >= 3200 and height >= 1600:
             score += 34
@@ -2093,7 +2122,8 @@ def _image_candidate_score(item: dict, story: dict) -> int:
             score += 6
 
         if "poster" in haystack and aspect < 1.0:
-            score -= 18
+            contextual_kind = str(story.get("_contextual_kind") or "")
+            score += 8 if contextual_kind in {"related_title", "comparison", "fun_fact", "previous installment/franchise"} else -18
     else:
         # Unknown dimensions remain eligible, but known UHD/landscape results
         # should outrank them.
