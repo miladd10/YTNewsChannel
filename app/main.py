@@ -692,24 +692,26 @@ def run_research(project_id: str, body: ResearchBody):
     if body.ai_rank:
         try:
             stories, actual_provider, actual_model = ai_rank_stories(stories, project, provider, model)
-            context_articles, sources_by_story, context_diagnostics = fetch_story_spice_sources(
-                stories,
-                project["date_start"],
-                project["date_end"],
-            )
-            stories, actual_provider, actual_model = ai_enrich_story_spice(
-                stories,
-                sources_by_story,
-                project,
-                provider,
-                model,
-            )
-            articles.extend(context_articles)
-            diagnostics.extend(context_diagnostics)
         except Exception as exc:
-            if not ai_error:
-                ai_error = str(exc)
-            else:
+            ai_error = str(exc)
+
+        if not ai_error:
+            try:
+                context_articles, sources_by_story, context_diagnostics = fetch_story_spice_sources(
+                    stories,
+                    project["date_start"],
+                    project["date_end"],
+                )
+                articles.extend(context_articles)
+                diagnostics.extend(context_diagnostics)
+                stories, actual_provider, actual_model = ai_enrich_story_spice(
+                    stories,
+                    sources_by_story,
+                    project,
+                    provider,
+                    model,
+                )
+            except Exception as exc:
                 spice_error = str(exc)
 
     run_id = str(uuid.uuid4())
