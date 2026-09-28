@@ -588,6 +588,49 @@ def _assign_transitions(clips: list[dict], fps: int) -> None:
 
 
 
+def _media_quality_warnings(story_id: str, candidates: list[dict]) -> list[str]:
+    warnings: list[str] = []
+    for item in candidates:
+        title = str(item.get("title") or item.get("id") or "media")
+        media_type = str(item.get("media_type") or "")
+        try:
+            width = int(item.get("width") or 0)
+            height = int(item.get("height") or 0)
+        except (TypeError, ValueError):
+            width = height = 0
+
+        if media_type == "video" and height and height < 720:
+            warnings.append(
+                f"Story {story_id} selected video is below HD ({width}x{height}): {title}. "
+                "Regenerate Media Sources and prefer 1080p/4K footage when available."
+            )
+        elif media_type == "video" and height and height < 1080:
+            warnings.append(
+                f"Story {story_id} selected video is only {width}x{height}: {title}. "
+                "A 1080p/4K alternative is preferable for the UHD timeline."
+            )
+
+        if media_type == "image" and width and height:
+            aspect = width / height
+            if aspect < 1.2:
+                warnings.append(
+                    f"Story {story_id} selected still is portrait/square ({width}x{height}): {title}. "
+                    "Prefer a landscape 16:9/high-resolution still."
+                )
+            elif width < 1920 or height < 900:
+                warnings.append(
+                    f"Story {story_id} selected still is below preferred landscape HD ({width}x{height}): {title}."
+                )
+
+        coverage_kind = str(item.get("coverage_kind") or "")
+        if coverage_kind and coverage_kind not in ("current", "supporting image"):
+            warnings.append(
+                f"Story {story_id} uses contextual {coverage_kind} footage: {title}. "
+                "It is not footage from the current title/story."
+            )
+    return list(dict.fromkeys(warnings))
+
+
 def build_edit_plan(project: dict, voice_segments: list[dict], candidates: list[dict], fps: int = DEFAULT_FPS) -> dict:
     fps = max(1, min(60, int(fps or DEFAULT_FPS)))
     voice, total_duration = voice_timeline(voice_segments)
@@ -611,6 +654,7 @@ def build_edit_plan(project: dict, voice_segments: list[dict], candidates: list[
                 + f" ({window['duration']:.2f}s)."
             )
             continue
+        warnings.extend(_media_quality_warnings(story_id, story_candidates))
         root_value = project.get("root_path")
         root = Path(root_value) if root_value else None
         cache_dir = (root / "media" / "analysis") if root else None
