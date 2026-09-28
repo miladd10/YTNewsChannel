@@ -1,11 +1,12 @@
 from app.main import _reconcile_voice_story_rows, _resolve_input_signature, _resolve_prerequisites
 
 
-def voice_row(index=1, story_id="story", approved=True):
+def voice_row(index=1, story_id="story", approved=True, source_text=""):
     return {
         "id": f"v{index}",
         "segment_index": index,
         "story_id": story_id,
+        "source_text": source_text,
         "audio_path": f"audio/narration/{index:04d}.mp3",
         "duration_seconds": 10.0,
         "selected_take": 1 if approved else 0,
@@ -127,3 +128,49 @@ def test_resolve_signature_changes_when_effective_story_mapping_changes():
     original = _resolve_input_signature(voices, media)
     remapped = _resolve_input_signature([dict(voices[0], story_id="new-story")], media)
     assert remapped != original
+
+
+
+def test_resolve_reconciles_changed_historical_title_with_fuzzy_title_match():
+    voices = [voice_row(1, story_id="old-narnia")]
+    historical = [
+        story_row(
+            "old-narnia",
+            "Greta Gerwig's Narnia movie gets a 2027 theatrical release",
+            url="https://netflix.com/tudum/narnia-old",
+        )
+    ]
+    current = [
+        story_row(
+            "new-narnia",
+            "Narnia: The Magician’s Nephew, Directed by Greta Gerwig, Roars to Life in 2027",
+            url="https://netflix.com/tudum/narnia-new",
+        )
+    ]
+    resolved, info = _reconcile_voice_story_rows(voices, current, historical)
+    assert resolved[0]["story_id"] == "new-narnia"
+    assert info["unresolved_story_ids"] == []
+
+
+def test_resolve_can_recover_missing_historical_story_from_narration_text():
+    voices = [
+        voice_row(
+            1,
+            story_id="hallucinated-old-id",
+            source_text="The new Werwulf trailer from Robert Eggers has finally arrived.",
+        )
+    ]
+    current = [
+        story_row(
+            "new-werwulf",
+            "‘Feed upon the flesh of mankind!’ Robert Eggers sics chilling new ‘Werwulf’ trailer on fans",
+        ),
+        story_row(
+            "new-ray",
+            "Brad Bird’s ‘Ray Gunn’ Gets First Trailer, 70mm Theatrical Release, Expanded Voice Cast",
+        ),
+    ]
+    resolved, info = _reconcile_voice_story_rows(voices, current, [])
+    assert resolved[0]["story_id"] == "new-werwulf"
+    assert info["unresolved_story_ids"] == []
+    assert info["match_details"]["hallucinated-old-id"]["method"] == "narration-text"
