@@ -22,7 +22,17 @@ from .services.elevenlabs_client import ElevenLabsError, MODEL_ID as ELEVEN_MODE
 from .services.voice_pipeline import extract_narration_segments, performance_text_is_safe, prepare_performance
 from .services.voice_takes import approve_take as approve_voice_take_service, clear_segment_files, generate_take as generate_voice_take_service
 from .services.project_store import choose_folder, create_project_folder, reveal_in_file_manager, save_manifest
-from .services.prompts import CINEMA_WEEKLY_SECTIONS, MEDIA_PLAN_SYSTEM, NARRATION_SYSTEM
+from .services.prompts import MEDIA_PLAN_SYSTEM
+from .services.cinema_format import (
+    CINEMA_WEEKLY_FORMAT,
+    REVISION_SYSTEM,
+    REVIEWER_SYSTEM,
+    SECTION_ORDER,
+    WRITER_SYSTEM,
+    build_style_packet,
+    format_packet,
+    parse_review_gate,
+)
 from .services.research import ai_rank_stories, cluster_articles, fetch_google_news
 from .services.resolve_plan import build_edit_plan, write_resolve_package
 from .services.secrets import delete_api_key, get_api_key, masked_status, save_ai_settings, set_api_key
@@ -758,7 +768,7 @@ def selected_story_packet(conn, project_id: str) -> list[dict]:
     if not run_id:
         return []
     stories = []
-    for row in conn.execute("SELECT * FROM stories WHERE run_id=? AND decision='include' ORDER BY score DESC", (run_id,)).fetchall():
+    for row in conn.execute("SELECT * FROM stories WHERE run_id=? AND decision='include'", (run_id,)).fetchall():
         item = dict(row)
         article_ids = json.loads(item.pop("article_ids_json") or "[]")
         articles = []
@@ -769,7 +779,47 @@ def selected_story_packet(conn, project_id: str) -> list[dict]:
             ).fetchall()]
         item["articles"] = articles
         stories.append(item)
+    stories.sort(key=lambda item: (
+        SECTION_ORDER.get(str(item.get("category") or ""), 999),
+        -float(item.get("score") or 0),
+    ))
     return stories
+
+
+def _style_transcripts(conn, channel: str = "cinema", content_type: str = "weekly_news") -> list[dict]:
+    return [dict(row) for row in conn.execute(
+        """SELECT * FROM style_transcripts
+           WHERE channel=? AND content_type=?
+           ORDER BY enabled DESC, created_at""",
+        (channel, content_type),
+    ).fetchall()]
+
+
+def _sectioned_story_packet(stories: list[dict]) -> list[dict]:
+    result = []
+    for section in CINEMA_WEEKLY_FORMAT:
+        items = [story for story in stories if story.get("category") == section["key"]]
+        result.append({
+            "section": section["key"],
+            "label": section["label"],
+            "writer_role": section.get("writer_role") or "",
+            "stories": items,
+        })
+    return result
+
+
+def _narration_version(conn, project_id: str) -> int:
+    return int(conn.execute(
+        "SELECT COALESCE(MAX(version_number),0)+1 v FROM narrations WHERE project_id=?",
+        (project_id,),
+    ).fetchone()["v"])
+
+
+def _write_narration_file(project: dict, version: int, content: str) -> None:
+    root = Path(project["root_path"])
+    folder = root / "narration"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"v{version:02d}.md").write_text(content, encoding="utf-8")
 
 
 @app.post("/api/projects/{project_id}/narration")
@@ -780,31 +830,63 @@ def generate_narration(project_id: str, body: GenerateBody):
     with db() as conn:
         project = project_or_404(conn, project_id)
         stories = selected_story_packet(conn, project_id)
+        style_rows = _style_transcripts(conn, project.get("channel") or "cinema", project.get("content_type") or "weekly_news")
     if not stories:
         raise HTTPException(400, "Include at least one story before generating narration.")
+
     packet = {
-        "project": project,
-        "weekly_section_template": CINEMA_WEEKLY_SECTIONS,
-        "selected_stories": stories,
+        "project": {
+            "name": project.get("name"),
+            "channel": project.get("channel"),
+            "content_type": project.get("content_type"),
+            "language": project.get("language"),
+            "target_minutes": project.get("target_minutes"),
+            "date_start": project.get("date_start"),
+            "date_end": project.get("date_end"),
+            "geographic_focus": project.get("geographic_focus"),
+            "editorial_focus": project.get("editorial_focus"),
+        },
+        "format_blueprint": format_packet(),
+        "approved_sections": _sectioned_story_packet(stories),
         "additional_instructions": body.instructions,
     }
+    user = (
+        "<current_week_authoritative_packet>\n"
+        + json.dumps(packet, ensure_ascii=False)
+        + "\n</current_week_authoritative_packet>\n\n"
+        + build_style_packet(style_rows)
+    )
     try:
-        text, actual_provider, actual_model = generate_text(provider, model, NARRATION_SYSTEM, json.dumps(packet, ensure_ascii=False))
+        text, actual_provider, actual_model = generate_text(provider, model, WRITER_SYSTEM, user)
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
+
     narration_id = str(uuid.uuid4())
     stamp = now()
     with db() as conn:
-        version = conn.execute("SELECT COALESCE(MAX(version_number),0)+1 v FROM narrations WHERE project_id=?", (project_id,)).fetchone()["v"]
+        project = project_or_404(conn, project_id)
+        version = _narration_version(conn, project_id)
         conn.execute(
-            "INSERT INTO narrations(id,project_id,version_number,content,provider,model,story_ids_json,created_at,approved) VALUES (?,?,?,?,?,?,?,?,0)",
-            (narration_id, project_id, version, text, actual_provider, actual_model, json.dumps([s["id"] for s in stories]), stamp),
+            """INSERT INTO narrations(
+                id,project_id,version_number,content,provider,model,story_ids_json,
+                created_at,approved,parent_narration_id,revision_review_id
+            ) VALUES (?,?,?,?,?,?,?,?,0,'','')""",
+            (
+                narration_id, project_id, version, text, actual_provider, actual_model,
+                json.dumps([story["id"] for story in stories]), stamp,
+            ),
         )
-        root = Path(project["root_path"])
-        (root / "narration" / f"v{version:02d}.md").write_text(text, encoding="utf-8")
+        _write_narration_file(project, version, text)
         conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (stamp, project_id))
         save_manifest(conn, project_id)
-    return {"id": narration_id, "version_number": version, "content": text, "provider": actual_provider, "model": actual_model}
+    return {
+        "id": narration_id,
+        "version_number": version,
+        "content": text,
+        "provider": actual_provider,
+        "model": actual_model,
+        "style_transcript_count": sum(1 for row in style_rows if int(row.get("enabled") or 0)),
+    }
 
 
 @app.get("/api/projects/{project_id}/narrations")
@@ -812,6 +894,265 @@ def list_narrations(project_id: str):
     with db() as conn:
         project_or_404(conn, project_id)
         return [dict(row) for row in conn.execute("SELECT * FROM narrations WHERE project_id=? ORDER BY version_number DESC", (project_id,)).fetchall()]
+
+
+class StyleTranscriptBody(BaseModel):
+    name: str = Field(min_length=1, max_length=240)
+    content: str = Field(min_length=1)
+    channel: str = "cinema"
+    content_type: str = "weekly_news"
+    enabled: bool = True
+
+
+class StyleTranscriptToggleBody(BaseModel):
+    enabled: bool
+
+
+class NarrationReviewBody(BaseModel):
+    provider: str | None = None
+    model: str | None = None
+
+
+class NarrationRevisionBody(BaseModel):
+    review_id: str = ""
+    provider: str | None = None
+    model: str | None = None
+
+
+@app.get("/api/style-transcripts")
+def list_style_transcripts(channel: str = "cinema", content_type: str = "weekly_news"):
+    with db() as conn:
+        return _style_transcripts(conn, channel, content_type)
+
+
+@app.post("/api/style-transcripts")
+def add_style_transcript(body: StyleTranscriptBody):
+    transcript_id = str(uuid.uuid4())
+    stamp = now()
+    with db() as conn:
+        conn.execute(
+            """INSERT INTO style_transcripts(
+                id,channel,content_type,name,content,char_count,enabled,created_at,updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                transcript_id, body.channel.strip() or "cinema",
+                body.content_type.strip() or "weekly_news", body.name.strip(),
+                body.content, len(body.content), 1 if body.enabled else 0, stamp, stamp,
+            ),
+        )
+        row = conn.execute("SELECT * FROM style_transcripts WHERE id=?", (transcript_id,)).fetchone()
+        return dict(row)
+
+
+@app.patch("/api/style-transcripts/{transcript_id}")
+def toggle_style_transcript(transcript_id: str, body: StyleTranscriptToggleBody):
+    with db() as conn:
+        row = conn.execute("SELECT 1 FROM style_transcripts WHERE id=?", (transcript_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Style transcript not found")
+        conn.execute(
+            "UPDATE style_transcripts SET enabled=?,updated_at=? WHERE id=?",
+            (1 if body.enabled else 0, now(), transcript_id),
+        )
+    return {"ok": True, "enabled": body.enabled}
+
+
+@app.delete("/api/style-transcripts/{transcript_id}")
+def delete_style_transcript(transcript_id: str):
+    with db() as conn:
+        conn.execute("DELETE FROM style_transcripts WHERE id=?", (transcript_id,))
+    return {"ok": True}
+
+
+@app.get("/api/projects/{project_id}/narration-workspace")
+def narration_workspace(project_id: str):
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        stories = selected_story_packet(conn, project_id)
+        narrations = [dict(row) for row in conn.execute(
+            "SELECT * FROM narrations WHERE project_id=? ORDER BY version_number DESC",
+            (project_id,),
+        ).fetchall()]
+        reviews = [dict(row) for row in conn.execute(
+            "SELECT * FROM narration_reviews WHERE project_id=? ORDER BY created_at DESC",
+            (project_id,),
+        ).fetchall()]
+        styles = _style_transcripts(conn, project.get("channel") or "cinema", project.get("content_type") or "weekly_news")
+    return {
+        "format_blueprint": format_packet(),
+        "sections": _sectioned_story_packet(stories),
+        "narrations": narrations,
+        "reviews": reviews,
+        "style_transcripts": styles,
+    }
+
+
+@app.post("/api/projects/{project_id}/narrations/{narration_id}/review")
+def review_narration(project_id: str, narration_id: str, body: NarrationReviewBody):
+    settings = masked_status()
+    provider = body.provider or settings.get("reviewer_provider", "claude_local")
+    model = body.model or settings.get("reviewer_model", "default")
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        draft = conn.execute(
+            "SELECT * FROM narrations WHERE id=? AND project_id=?",
+            (narration_id, project_id),
+        ).fetchone()
+        if not draft:
+            raise HTTPException(404, "Narration draft not found")
+        stories = selected_story_packet(conn, project_id)
+        styles = _style_transcripts(conn, project.get("channel") or "cinema", project.get("content_type") or "weekly_news")
+
+    user = "\n".join([
+        "<current_week_authoritative_packet>",
+        json.dumps({
+            "project": {
+                "language": project.get("language"),
+                "target_minutes": project.get("target_minutes"),
+                "date_start": project.get("date_start"),
+                "date_end": project.get("date_end"),
+            },
+            "format_blueprint": format_packet(),
+            "approved_sections": _sectioned_story_packet(stories),
+        }, ensure_ascii=False),
+        "</current_week_authoritative_packet>",
+        "",
+        build_style_packet(styles),
+        "",
+        "<draft_to_review>",
+        draft["content"],
+        "</draft_to_review>",
+    ])
+    try:
+        review_text, actual_provider, actual_model = generate_text(provider, model, REVIEWER_SYSTEM, user)
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+    gate = parse_review_gate(review_text)
+    review_id = str(uuid.uuid4())
+    stamp = now()
+    with db() as conn:
+        review_number = int(conn.execute(
+            "SELECT COALESCE(MAX(review_number),0)+1 v FROM narration_reviews WHERE narration_id=?",
+            (narration_id,),
+        ).fetchone()["v"])
+        conn.execute(
+            """INSERT INTO narration_reviews(
+                id,project_id,narration_id,review_number,content,provider,model,gate_status,
+                blocking_count,major_count,minor_count,created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                review_id, project_id, narration_id, review_number, review_text,
+                actual_provider, actual_model, gate["gate_status"],
+                gate["blocking_count"], gate["major_count"], gate["minor_count"], stamp,
+            ),
+        )
+        root = Path(project["root_path"]) / "narration" / "reviews"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / f"v{int(draft['version_number']):02d}_r{review_number:02d}.md").write_text(review_text, encoding="utf-8")
+        save_manifest(conn, project_id)
+    return {"id": review_id, "review_number": review_number, "content": review_text, **gate}
+
+
+@app.post("/api/projects/{project_id}/narrations/{narration_id}/revise")
+def revise_narration(project_id: str, narration_id: str, body: NarrationRevisionBody):
+    settings = masked_status()
+    provider = body.provider or settings.get("writer_provider", "codex_local")
+    model = body.model or settings.get("writer_model", "default")
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        draft = conn.execute(
+            "SELECT * FROM narrations WHERE id=? AND project_id=?",
+            (narration_id, project_id),
+        ).fetchone()
+        if not draft:
+            raise HTTPException(404, "Narration draft not found")
+        if body.review_id:
+            review = conn.execute(
+                "SELECT * FROM narration_reviews WHERE id=? AND narration_id=?",
+                (body.review_id, narration_id),
+            ).fetchone()
+        else:
+            review = conn.execute(
+                "SELECT * FROM narration_reviews WHERE narration_id=? ORDER BY review_number DESC LIMIT 1",
+                (narration_id,),
+            ).fetchone()
+        if not review:
+            raise HTTPException(400, "Run a reviewer pass on this draft first.")
+        stories = selected_story_packet(conn, project_id)
+
+    user = "\n".join([
+        "<current_week_authoritative_packet>",
+        json.dumps({
+            "format_blueprint": format_packet(),
+            "approved_sections": _sectioned_story_packet(stories),
+        }, ensure_ascii=False),
+        "</current_week_authoritative_packet>",
+        "",
+        "<existing_narration>",
+        draft["content"],
+        "</existing_narration>",
+        "",
+        "<review_change_list>",
+        review["content"],
+        "</review_change_list>",
+    ])
+    try:
+        revised_text, actual_provider, actual_model = generate_text(provider, model, REVISION_SYSTEM, user)
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    new_id = str(uuid.uuid4())
+    stamp = now()
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        version = _narration_version(conn, project_id)
+        conn.execute(
+            """INSERT INTO narrations(
+                id,project_id,version_number,content,provider,model,story_ids_json,
+                created_at,approved,parent_narration_id,revision_review_id
+            ) VALUES (?,?,?,?,?,?,?,?,0,?,?)""",
+            (
+                new_id, project_id, version, revised_text, actual_provider, actual_model,
+                draft["story_ids_json"], stamp, narration_id, review["id"],
+            ),
+        )
+        _write_narration_file(project, version, revised_text)
+        conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (stamp, project_id))
+        save_manifest(conn, project_id)
+    return {
+        "id": new_id,
+        "version_number": version,
+        "content": revised_text,
+        "provider": actual_provider,
+        "model": actual_model,
+        "parent_narration_id": narration_id,
+        "revision_review_id": review["id"],
+    }
+
+
+@app.post("/api/projects/{project_id}/narrations/{narration_id}/approve")
+def approve_narration(project_id: str, narration_id: str):
+    with db() as conn:
+        project_or_404(conn, project_id)
+        draft = conn.execute(
+            "SELECT * FROM narrations WHERE id=? AND project_id=?",
+            (narration_id, project_id),
+        ).fetchone()
+        if not draft:
+            raise HTTPException(404, "Narration draft not found")
+        review = conn.execute(
+            "SELECT * FROM narration_reviews WHERE narration_id=? ORDER BY review_number DESC LIMIT 1",
+            (narration_id,),
+        ).fetchone()
+        if not review:
+            raise HTTPException(400, "Run Reviewer before approving this narration.")
+        if review["gate_status"] == "revision_required":
+            raise HTTPException(400, "Reviewer still requires revision. Revise this draft and review the new version first.")
+        conn.execute("UPDATE narrations SET approved=0 WHERE project_id=?", (project_id,))
+        conn.execute("UPDATE narrations SET approved=1 WHERE id=?", (narration_id,))
+        conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
+        save_manifest(conn, project_id)
+    return {"ok": True, "approved_narration_id": narration_id}
 
 
 class ElevenLabsKeyBody(BaseModel):
@@ -829,7 +1170,7 @@ class PerformanceTextBody(BaseModel):
 
 def _latest_narration(conn, project_id: str):
     return conn.execute(
-        "SELECT * FROM narrations WHERE project_id=? ORDER BY version_number DESC LIMIT 1",
+        "SELECT * FROM narrations WHERE project_id=? ORDER BY approved DESC, version_number DESC LIMIT 1",
         (project_id,),
     ).fetchone()
 
@@ -969,6 +1310,8 @@ def prepare_narrator_voice(project_id: str):
         settings = conn.execute("SELECT * FROM voice_settings WHERE project_id=?", (project_id,)).fetchone()
     if not narration:
         raise HTTPException(400, "Generate narration first.")
+    if not int(narration["approved"] or 0):
+        raise HTTPException(400, "Review and approve a narration draft in Step 3 before preparing voice.")
     if not settings or not settings["voice_id"]:
         raise HTTPException(400, "Choose one ElevenLabs narrator voice first.")
 
