@@ -9,12 +9,15 @@ import subprocess
 from pathlib import Path
 
 from .media import duration_seconds
+from .shot_planner import analyze_video_shots, choose_video_shot
 
 RESOLVE_WIDTH = 3840
 RESOLVE_HEIGHT = 2160
 DEFAULT_FPS = 30
-DEFAULT_VIDEO_CUT = 7.0
+DEFAULT_VIDEO_CUT = 5.5
 DEFAULT_IMAGE_HOLD = 5.0
+DEFAULT_DISSOLVE_FRAMES = 6
+IMAGE_DISSOLVE_FRAMES = 8
 
 
 def _rt(value: int | float, fps: int) -> dict:
@@ -229,51 +232,172 @@ def _video_source_start(candidate: dict, use_index: int, wanted: float) -> float
     return (base + use_index * stride) % max(1.0, latest)
 
 
-def _visual_slices(window: dict, candidates: list[dict]) -> list[dict]:
+def _candidate_source_path(root: Path | None, candidate: dict) -> Path | None:
+    if root is None:
+        return None
+    return _safe_path(root, str(candidate.get("stored_path") or ""))
+
+
+def _smart_video_choice(
+    candidate: dict,
+    *,
+    root: Path | None,
+    cache_dir: Path | None,
+    wanted: float,
+    used_ranges: list[tuple[float, float]],
+    use_index: int,
+) -> dict:
+    source = _candidate_source_path(root, candidate)
+    if source is not None:
+        try:
+            analysis = analyze_video_shots(source, cache_dir=cache_dir)
+            chosen = choose_video_shot(
+                analysis,
+                wanted=wanted,
+                used_ranges=used_ranges,
+                hint_start=float(candidate.get("clip_start_sec") or 0),
+            )
+            if chosen:
+                chosen["source_media_duration"] = analysis.get("duration")
+                return chosen
+        except Exception:
+            pass
+
+    start = _video_source_start(candidate, use_index, wanted)
+    available = _candidate_available_seconds(candidate)
+    hold = wanted
+    if available is not None:
+        hold = min(hold, max(0.05, available - start))
+    return {
+        "start": round(start, 6),
+        "end": round(start + hold, 6),
+        "duration": round(hold, 6),
+        "shot_index": None,
+        "scene_start": None,
+        "scene_end": None,
+        "score": 0.0,
+        "analysis_mode": "legacy_fallback",
+        "reason": "timing-safe fallback source range",
+        "source_media_duration": available,
+    }
+
+
+def _image_candidate(images: list[dict], last_candidate_id: str | None, cursor: int) -> dict | None:
+    if not images:
+        return None
+    for offset in range(len(images)):
+        item = images[(cursor + offset) % len(images)]
+        if str(item.get("id") or "") != str(last_candidate_id or "") or len(images) == 1:
+            return item
+    return images[cursor % len(images)]
+
+
+def _visual_slices(
+    window: dict,
+    candidates: list[dict],
+    *,
+    root: Path | None = None,
+    cache_dir: Path | None = None,
+) -> list[dict]:
     duration = max(0.0, float(window.get("duration") or 0))
     if duration <= 0 or not candidates:
         return []
 
-    # Favor video, but keep selected stills useful as short visual resets.
-    ordered = sorted(
-        candidates,
-        key=lambda item: (
-            0 if item.get("media_type") == "video" else 1,
-            str(item.get("title") or ""),
-        ),
+    videos = sorted(
+        [item for item in candidates if item.get("media_type") == "video"],
+        key=lambda item: str(item.get("title") or ""),
+    )
+    images = sorted(
+        [item for item in candidates if item.get("media_type") == "image"],
+        key=lambda item: str(item.get("title") or ""),
     )
 
-    slices = []
+    slices: list[dict] = []
     cursor = float(window["start"])
     end = float(window["end"])
     uses: dict[str, int] = {}
-    asset_index = 0
+    used_ranges: dict[str, list[tuple[float, float]]] = {}
+    last_candidate_id: str | None = None
+    consecutive_video = 0
+    image_cursor = 0
 
     while cursor < end - 0.02:
-        item = ordered[asset_index % len(ordered)]
-        asset_index += 1
-        media_type = item.get("media_type") or ""
         remaining = end - cursor
-        default_hold = DEFAULT_VIDEO_CUT if media_type == "video" else DEFAULT_IMAGE_HOLD
-        # Avoid a tiny tail cut when one slightly longer final hold is cleaner.
-        hold = min(default_hold, remaining)
-        if remaining > default_hold and remaining - default_hold < 2.5:
-            hold = remaining
-        hold = max(0.05, hold)
 
-        key = str(item.get("page_url") or item.get("id") or "")
-        use_index = uses.get(key, 0)
-        uses[key] = use_index + 1
+        # Prefer moving footage. Use a selected still as a visual reset only
+        # after two consecutive video cuts, or when no usable video exists.
+        choose_image = bool(images) and (not videos or consecutive_video >= 2)
+        item = None
+        smart = None
 
-        source_in = 0.0
-        source_out = None
-        available = _candidate_available_seconds(item)
-        if media_type == "video":
-            source_in = _video_source_start(item, use_index, hold)
-            if available is not None:
-                hold = min(hold, max(0.05, available - source_in))
+        if not choose_image and videos:
+            best_score = -10_000.0
+            best = None
+            for video in videos:
+                key = str(video.get("page_url") or video.get("id") or "")
+                use_index = uses.get(key, 0)
+                wanted = min(DEFAULT_VIDEO_CUT, remaining)
+                proposal = _smart_video_choice(
+                    video,
+                    root=root,
+                    cache_dir=cache_dir,
+                    wanted=wanted,
+                    used_ranges=used_ranges.get(key, []),
+                    use_index=use_index,
+                )
+                score = float(proposal.get("score") or 0)
+                if str(video.get("id") or "") == str(last_candidate_id or ""):
+                    score -= 18
+                if use_index >= 2:
+                    score -= use_index * 4
+                if score > best_score:
+                    best_score = score
+                    best = (video, proposal, key, use_index)
+            if best:
+                item, smart, key, use_index = best
+                uses[key] = use_index + 1
+                used_ranges.setdefault(key, []).append((float(smart["start"]), float(smart["end"])))
+        if item is None and images:
+            item = _image_candidate(images, last_candidate_id, image_cursor)
+            image_cursor += 1
+            smart = None
+            consecutive_video = 0
+        elif item is not None:
+            consecutive_video += 1
+
+        if item is None:
+            break
+
+        media_type = item.get("media_type") or ""
+        if media_type == "image":
+            hold = min(DEFAULT_IMAGE_HOLD, remaining)
+            # A still should not sit for a long tail. Keep image cadence at
+            # roughly five seconds even when there is only one image available.
+            if remaining > DEFAULT_IMAGE_HOLD and remaining - DEFAULT_IMAGE_HOLD < 1.25:
+                hold = min(remaining, DEFAULT_IMAGE_HOLD)
+            source_in = 0.0
+            source_out = None
+            available = None
+            use_index = image_cursor - 1
+            selection_reason = "five-second still cadence"
+            shot_index = None
+            scene_start = None
+            scene_end = None
+            analysis_mode = "still"
+        else:
+            hold = min(remaining, max(0.05, float((smart or {}).get("duration") or DEFAULT_VIDEO_CUT)))
+            source_in = float((smart or {}).get("start") or 0)
             source_out = source_in + hold
+            available = (smart or {}).get("source_media_duration")
+            use_index = uses.get(str(item.get("page_url") or item.get("id") or ""), 1) - 1
+            selection_reason = str((smart or {}).get("reason") or "scene-aware video shot")
+            shot_index = (smart or {}).get("shot_index")
+            scene_start = (smart or {}).get("scene_start")
+            scene_end = (smart or {}).get("scene_end")
+            analysis_mode = (smart or {}).get("analysis_mode")
 
+        timeline_end = min(end, cursor + hold)
+        actual_hold = timeline_end - cursor
         slices.append({
             "story_id": window.get("story_id") or "",
             "candidate_id": item.get("id") or "",
@@ -283,22 +407,77 @@ def _visual_slices(window: dict, candidates: list[dict]) -> list[dict]:
             "page_url": item.get("page_url") or "",
             "stored_path": item.get("stored_path") or "",
             "timeline_start": round(cursor, 6),
-            "timeline_end": round(min(end, cursor + hold), 6),
-            "timeline_duration": round(min(end, cursor + hold) - cursor, 6),
+            "timeline_end": round(timeline_end, 6),
+            "timeline_duration": round(actual_hold, 6),
             "source_in": round(source_in, 6),
-            "source_out": round(source_out, 6) if source_out is not None else None,
+            "source_out": round(source_in + actual_hold, 6) if source_out is not None else None,
             "source_media_duration": available,
             "source_audio": "muted",
             "playback_speed": 1.0,
             "crop": crop_instruction(item.get("width"), item.get("height")),
             "shared_source": bool(item.get("shared_source")),
             "use_index": use_index,
+            "shot_index": shot_index,
+            "scene_start": scene_start,
+            "scene_end": scene_end,
+            "shot_analysis_mode": analysis_mode,
+            "selection_reason": selection_reason,
+            "transition_in_frames": 0,
+            "transition_out_frames": 0,
+            "transition_type": "cut",
         })
-        cursor += hold
-        if hold <= 0.05 and remaining > 0.05:
+        last_candidate_id = str(item.get("id") or "")
+        cursor = timeline_end
+
+        if media_type == "image":
+            consecutive_video = 0
+        if actual_hold <= 0.05 and remaining > 0.05:
             break
 
     return slices
+
+
+def _assign_transitions(clips: list[dict], fps: int) -> None:
+    for clip in clips:
+        clip["transition_in_frames"] = 0
+        clip["transition_out_frames"] = 0
+        clip["transition_type"] = "cut"
+
+    for index in range(len(clips) - 1):
+        left = clips[index]
+        right = clips[index + 1]
+        if abs(float(left.get("timeline_end") or 0) - float(right.get("timeline_start") or 0)) > 0.02:
+            continue
+
+        same_story = str(left.get("story_id") or "") == str(right.get("story_id") or "")
+        same_candidate = str(left.get("candidate_id") or "") == str(right.get("candidate_id") or "")
+        both_video = left.get("media_type") == "video" and right.get("media_type") == "video"
+
+        # Trailer scenes cut cleanly on detected shot boundaries. Dissolves are
+        # reserved for asset/type changes and story boundaries.
+        if same_story and same_candidate and both_video:
+            continue
+        if same_story and both_video:
+            continue
+
+        total = IMAGE_DISSOLVE_FRAMES if (
+            left.get("media_type") == "image" or right.get("media_type") == "image"
+        ) else DEFAULT_DISSOLVE_FRAMES
+        if not same_story:
+            total = max(total, DEFAULT_DISSOLVE_FRAMES)
+
+        left_frames = max(1, int(round(float(left.get("timeline_duration") or 0) * fps)))
+        right_frames = max(1, int(round(float(right.get("timeline_duration") or 0) * fps)))
+        total = min(total, max(0, left_frames // 4), max(0, right_frames // 4))
+        if total < 2:
+            continue
+        before = total // 2
+        after = total - before
+        left["transition_out_frames"] = before
+        right["transition_in_frames"] = after
+        left["transition_type"] = "dissolve"
+        right["transition_type"] = "dissolve"
+
 
 
 def build_edit_plan(project: dict, voice_segments: list[dict], candidates: list[dict], fps: int = DEFAULT_FPS) -> dict:
@@ -324,10 +503,29 @@ def build_edit_plan(project: dict, voice_segments: list[dict], candidates: list[
                 + f" ({window['duration']:.2f}s)."
             )
             continue
-        visuals.extend(_visual_slices(window, story_candidates))
+        root_value = project.get("root_path")
+        root = Path(root_value) if root_value else None
+        cache_dir = (root / "media" / "analysis") if root else None
+        visuals.extend(_visual_slices(window, story_candidates, root=root, cache_dir=cache_dir))
+
+    _assign_transitions(visuals, fps)
+
+    for window in windows:
+        story_id = str(window.get("story_id") or "")
+        if not story_id:
+            continue
+        story_clips = [clip for clip in visuals if str(clip.get("story_id") or "") == story_id]
+        if story_clips and all(clip.get("media_type") == "image" for clip in story_clips):
+            distinct_images = len({str(clip.get("candidate_id") or "") for clip in story_clips})
+            needed = max(1, int(math.ceil(float(window.get("duration") or 0) / DEFAULT_IMAGE_HOLD)))
+            if distinct_images < min(needed, 2):
+                warnings.append(
+                    f"Story {story_id} is image-only for {window['duration']:.2f}s but has only "
+                    f"{distinct_images} distinct selected image(s). Select more images for ~5s visual changes."
+                )
 
     return {
-        "version": 1,
+        "version": 2,
         "generator": "YT News Studio",
         "project_id": project.get("id"),
         "project_name": project.get("name"),
@@ -340,6 +538,9 @@ def build_edit_plan(project: dict, voice_segments: list[dict], candidates: list[
             "video_scaling": "Scale full frame with crop",
             "video_source_audio": "muted",
             "voice_master_timing": True,
+            "shot_selection": "scene-aware",
+            "image_hold_seconds": DEFAULT_IMAGE_HOLD,
+            "transition_policy": "hard cuts on trailer scene boundaries; short dissolves for still/media/story changes",
         },
         "voice_segments": voice,
         "story_windows": windows,
