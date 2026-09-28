@@ -530,10 +530,10 @@ def build_edit_plan(project: dict, voice_segments: list[dict], candidates: list[
         if story_clips and all(clip.get("media_type") == "image" for clip in story_clips):
             distinct_images = len({str(clip.get("candidate_id") or "") for clip in story_clips})
             needed = max(1, int(math.ceil(float(window.get("duration") or 0) / DEFAULT_IMAGE_HOLD)))
-            if distinct_images < min(needed, 2):
+            if distinct_images < needed:
                 warnings.append(
-                    f"Story {story_id} is image-only for {window['duration']:.2f}s but has only "
-                    f"{distinct_images} distinct selected image(s). Select more images for ~5s visual changes."
+                    f"Story {story_id} is image-only for {window['duration']:.2f}s and ideally needs "
+                    f"{needed} distinct images for ~5s visual changes, but only {distinct_images} are selected."
                 )
 
     return {
@@ -1136,7 +1136,7 @@ def write_resolve_package(root: Path, plan: dict) -> dict:
         "resolve_safe_media": True,
         "video_stage_format": "H.264 MP4 · yuv420p · CFR exact frames · avc1 · no source audio",
         "image_stage_format": "H.264 MP4 still hold · yuv420p · CFR exact frames",
-        "shot_selection": "cached FFmpeg scene-boundary analysis",
+        "shot_selection": "cached keyframe-first scene-boundary analysis",
         "image_cadence_seconds": DEFAULT_IMAGE_HOLD,
         "transitions": "hard cuts inside trailers; short SMPTE dissolves for still/media/story changes",
         "warnings": staged_plan.get("warnings") or [],
