@@ -2184,11 +2184,14 @@ def narration_workspace(project_id: str):
         content_type = project.get("content_type") or "weekly_news"
         styles = _style_transcripts(conn, channel, content_type)
         style_profile = _style_profile_status(conn, channel, content_type, styles)
+        claim_ledger_entries, narration_claim_checks = _claim_rows_for_workspace(conn, project_id)
     return {
         "format_blueprint": format_packet(),
         "sections": _sectioned_story_packet(stories),
         "narrations": narrations,
         "reviews": reviews,
+        "claim_ledger": claim_ledger_entries,
+        "claim_checks": narration_claim_checks,
         "style_transcripts": styles,
         "style_profile": style_profile,
     }
@@ -2224,6 +2227,9 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         provider,
         model,
     )
+    claim_ledger, fresh_claim_sources, _, _ = _build_verified_claim_ledger(
+        project, stories, provider, model
+    )
 
     user = "\n".join([
         "<current_week_authoritative_packet>",
@@ -2235,8 +2241,13 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
             },
             "format_blueprint": format_packet(),
             "approved_sections": _sectioned_story_packet(stories),
+            "verified_claim_ledger": ledger_for_writer(claim_ledger),
         }, ensure_ascii=False),
         "</current_week_authoritative_packet>",
+        "",
+        "<verified_claim_ledger>",
+        json.dumps(ledger_for_writer(claim_ledger), ensure_ascii=False),
+        "</verified_claim_ledger>",
         "",
         "<style_blueprint>",
         style_profile.get("profile_text") or "",
@@ -2264,6 +2275,13 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         rewritten_text,
         actual_provider,
         actual_model,
+        fresh_sources=fresh_claim_sources,
+    )
+    claim_audit, _, _ = audit_narration_claims(
+        rewritten_text,
+        claim_ledger,
+        settings.get("reviewer_provider") or actual_provider,
+        settings.get("reviewer_model") or actual_model,
     )
 
     new_id = str(uuid.uuid4())
@@ -2299,6 +2317,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
             json.dumps(fact_check, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+        _persist_claim_audit(conn, project, new_id, version, claim_ledger, claim_audit)
         conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (stamp, project_id))
         save_manifest(conn, project_id)
     return {
@@ -2318,6 +2337,11 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         "fact_check_status": fact_check.get("status") or "needs_human_check",
         "fact_check_issue_count": int(fact_check.get("issue_count") or 0),
         "fact_check_issues": fact_check.get("issues") or [],
+        "claim_audit_status": claim_audit.get("status") or "blocked",
+        "claim_count": int(claim_audit.get("claim_count") or 0),
+        "claim_verified_count": int(claim_audit.get("verified_count") or 0),
+        "claim_attributed_count": int(claim_audit.get("attributed_count") or 0),
+        "claim_blocked_count": int(claim_audit.get("blocked_count") or 0),
     }
 
 
@@ -2445,14 +2469,22 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         provider,
         model,
     )
+    claim_ledger, fresh_claim_sources, _, _ = _build_verified_claim_ledger(
+        project, stories, provider, model
+    )
 
     user = "\n".join([
         "<current_week_authoritative_packet>",
         json.dumps({
             "format_blueprint": format_packet(),
             "approved_sections": _sectioned_story_packet(stories),
+            "verified_claim_ledger": ledger_for_writer(claim_ledger),
         }, ensure_ascii=False),
         "</current_week_authoritative_packet>",
+        "",
+        "<verified_claim_ledger>",
+        json.dumps(ledger_for_writer(claim_ledger), ensure_ascii=False),
+        "</verified_claim_ledger>",
         "",
         "<style_blueprint>",
         style_profile.get("profile_text") or "",
@@ -2479,6 +2511,13 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         revised_text,
         actual_provider,
         actual_model,
+        fresh_sources=fresh_claim_sources,
+    )
+    claim_audit, _, _ = audit_narration_claims(
+        revised_text,
+        claim_ledger,
+        settings.get("reviewer_provider") or actual_provider,
+        settings.get("reviewer_model") or actual_model,
     )
 
     new_id = str(uuid.uuid4())
@@ -2514,6 +2553,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
             json.dumps(fact_check, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+        _persist_claim_audit(conn, project, new_id, version, claim_ledger, claim_audit)
         conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (stamp, project_id))
         save_manifest(conn, project_id)
     return {
@@ -2527,6 +2567,11 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         "fact_check_status": fact_check.get("status") or "needs_human_check",
         "fact_check_issue_count": int(fact_check.get("issue_count") or 0),
         "fact_check_issues": fact_check.get("issues") or [],
+        "claim_audit_status": claim_audit.get("status") or "blocked",
+        "claim_count": int(claim_audit.get("claim_count") or 0),
+        "claim_verified_count": int(claim_audit.get("verified_count") or 0),
+        "claim_attributed_count": int(claim_audit.get("attributed_count") or 0),
+        "claim_blocked_count": int(claim_audit.get("blocked_count") or 0),
     }
 
 
@@ -2553,6 +2598,12 @@ def approve_narration(project_id: str, narration_id: str):
             raise HTTPException(
                 400,
                 "Automatic fact check has not passed. Generate/revise this draft again or resolve the fact-check warning before approval.",
+            )
+        claim_status = str(draft["claim_audit_status"] or "not_run")
+        if claim_status != "pass" or int(draft["claim_blocked_count"] or 0) > 0 or int(draft["claim_count"] or 0) <= 0:
+            raise HTTPException(
+                400,
+                "Claim Ledger audit has not passed. Every factual narration claim must map to verified evidence before approval.",
             )
         conn.execute("UPDATE narrations SET approved=0 WHERE project_id=?", (project_id,))
         conn.execute("UPDATE narrations SET approved=1 WHERE id=?", (narration_id,))
