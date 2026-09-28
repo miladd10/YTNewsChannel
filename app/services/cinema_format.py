@@ -755,6 +755,7 @@ Writing rules:
 - Prefer content-driven transitions such as "حالا که...", "از این یکی بگذریم...", "خب فیلم بسه..." or another natural bridge when appropriate, rather than repeatedly announcing "خبر بعدی".
 - Keep section headings only as quiet organization for the app; the spoken prose underneath should flow rather than announcing the template.
 - Mention sources aloud only as the ATTRIBUTION POLICY below allows, or when the source itself is part of the story.
+- NAMES READ ALOUD: this script is voiced by text-to-speech. Transliterate each foreign person/company name into the narration script once and spell it identically every time. When the bare transliteration could be read as ordinary words in the narration language, or its vowels are ambiguous, add short-vowel marks (in Persian: اعراب such as ـَ ـِ ـُ) to that name so it is read as a name. Keep film/series titles in their official form.
 - LENGTH: the packet's length_target gives the spoken word budget for this episode. Reach acceptable_words by telling supported beats more fully and covering every selected story, never by filler. If the approved evidence genuinely cannot fill the range, stay shorter rather than pad.
 - Return only the complete narration in Markdown.
 """ + ATTRIBUTION_POLICY
@@ -817,6 +818,7 @@ Check:
 - whether Intro hooks the actual episode and Outro closes briefly;
 - whether the draft resembles the style corpus in broad craft without copying phrases;
 - whether important selected stories were accidentally omitted.
+- NAME PRONUNCIATION: flag a transliterated name whose bare spelling would be read as ordinary words (or ambiguously) by text-to-speech and lacks vowel marks, and any name spelled inconsistently across the draft.
 - LENGTH: compare length_target.current_draft_words with acceptable_words. Under the range while the packet still has unused supported beats or selected stories is a major Format issue ("under length"). Under the range only because evidence is thin is a minor note. More than 15% over the range is a major issue.
 
 Return Markdown using exactly this structure:

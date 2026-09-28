@@ -25,7 +25,13 @@ from .services.claim_ledger import (
 from .services.local_cli import all_statuses, launch_login
 from .services.media import _coverage_balanced_results, download_candidate, search_story_media, story_media_key, story_visual_plan, suggested_clip_range
 from .services.elevenlabs_client import ElevenLabsError, MODEL_ID as ELEVEN_MODEL_ID, forced_alignment, list_voices, mp3_duration_seconds, text_to_speech
-from .services.voice_pipeline import extract_narration_segments, performance_text_is_safe, prepare_performance
+from .services.voice_pipeline import (
+    apply_pronunciations,
+    extract_narration_segments,
+    parse_pronunciation_lines,
+    performance_text_is_safe,
+    prepare_performance,
+)
 from .services.voice_takes import approve_take as approve_voice_take_service, clear_segment_files, generate_take as generate_voice_take_service
 from .services.project_store import choose_folder, create_project_folder, reveal_in_file_manager, save_manifest
 from .services.prompts import MEDIA_PLAN_SYSTEM
@@ -2837,6 +2843,46 @@ def save_narrator_voice(project_id: str, body: NarratorVoiceBody):
         return _voice_payload(conn, project_id)
 
 
+def _language_key(language: str) -> str:
+    return str(language or "").strip().casefold() or "default"
+
+
+def _pronunciation_entries(conn, language: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT written, spoken FROM pronunciations WHERE language=? ORDER BY written",
+        (_language_key(language),),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+class PronunciationBody(BaseModel):
+    language: str = "Persian"
+    text: str = ""
+
+
+@app.get("/api/pronunciations")
+def get_pronunciations(language: str = "Persian"):
+    with db() as conn:
+        entries = _pronunciation_entries(conn, language)
+    return {"language": language, "entries": entries,
+            "text": "\n".join(f"{item['written']} = {item['spoken']}" for item in entries)}
+
+
+@app.put("/api/pronunciations")
+def save_pronunciations(body: PronunciationBody):
+    entries, rejected = parse_pronunciation_lines(body.text)
+    key = _language_key(body.language)
+    stamp = now()
+    with db() as conn:
+        conn.execute("DELETE FROM pronunciations WHERE language=?", (key,))
+        for item in entries:
+            conn.execute(
+                "INSERT INTO pronunciations(language, written, spoken, updated_at) VALUES (?,?,?,?)",
+                (key, item["written"], item["spoken"], stamp),
+            )
+    return {"language": body.language, "entries": entries, "rejected": rejected}
+
+
 @app.post("/api/projects/{project_id}/voice/prepare")
 def prepare_narrator_voice(project_id: str):
     stamp = now()
@@ -2855,6 +2901,14 @@ def prepare_narrator_voice(project_id: str):
     if not raw_segments:
         raise HTTPException(400, "No spoken narration could be extracted from the latest narration.")
     performance, warnings, provider, model = prepare_performance(raw_segments)
+    with db() as conn:
+        lexicon = _pronunciation_entries(conn, project.get("language") or "")
+    if lexicon:
+        for segment in raw_segments:
+            base = performance.get(segment["id"], segment["source_text"])
+            candidate = apply_pronunciations(base, lexicon)
+            if performance_text_is_safe(segment["source_text"], candidate):
+                performance[segment["id"]] = candidate
 
     root = Path(project["root_path"])
     audio_dir = root / "audio" / "narration"

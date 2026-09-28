@@ -129,8 +129,70 @@ def extract_narration_segments(content: str, target_chars: int = NARRATION_CONTI
     return merged
 
 
+# Arabic-script short-vowel and pronunciation marks (fatha, kasra, damma,
+# tanwin, sukun, shadda, superscript alef, hamza above/below). They change how
+# a word is pronounced, not which word it is.
+VOWEL_MARKS_RE = re.compile("[\u064B-\u0652\u0654\u0655\u0670]")
+
+
+def strip_vowel_marks(text: str) -> str:
+    return VOWEL_MARKS_RE.sub("", text or "")
+
+
+def _normalize_spacing(text: str) -> str:
+    return re.sub(r"\s+", " ", strip_vowel_marks(text or "")).strip()
+
+
+def parse_pronunciation_lines(text: str) -> tuple[list[dict], list[str]]:
+    """Parse "written = pronounced" lines.
+
+    An entry may only add vowel marks to the written form, so the spoken
+    words stay exactly the approved narration (the voice safety check still
+    holds). Anything else is rejected with a reason.
+    """
+    entries: list[dict] = []
+    rejected: list[str] = []
+    seen: set[str] = set()
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            rejected.append(f"{line} — use: written = pronounced")
+            continue
+        written, spoken = (part.strip() for part in line.split("=", 1))
+        if not written or not spoken:
+            rejected.append(f"{line} — both sides are required")
+            continue
+        if _normalize_spacing(spoken) != _normalize_spacing(written):
+            rejected.append(f"{line} — the pronounced form may only add vowel marks (اعراب) to the written form")
+            continue
+        if spoken == written:
+            rejected.append(f"{line} — pronounced form adds no vowel marks")
+            continue
+        key = _normalize_spacing(written)
+        if key in seen:
+            rejected.append(f"{line} — duplicate entry")
+            continue
+        seen.add(key)
+        entries.append({"written": written, "spoken": spoken})
+    return entries, rejected
+
+
+def apply_pronunciations(text: str, entries: list[dict]) -> str:
+    value = text or ""
+    for entry in sorted(entries or [], key=lambda item: len(item.get("written") or ""), reverse=True):
+        written = str(entry.get("written") or "").strip()
+        spoken = str(entry.get("spoken") or "").strip()
+        if not written or not spoken:
+            continue
+        pattern = r"\s+".join(re.escape(part) for part in written.split())
+        value = re.sub(rf"(?<![\w\u200c]){pattern}(?![\w\u064B-\u0652])", lambda _m: spoken, value)
+    return value
+
+
 def _spoken_words(text: str) -> list[str]:
-    value = re.sub(r"\[[^\]]+\]", " ", text or "")
+    value = re.sub(r"\[[^\]]+\]", " ", strip_vowel_marks(text or ""))
     return [x.casefold().replace("’", "'") for x in re.findall(r"[^\W_]+(?:['’\-][^\W_]+)*", value, flags=re.UNICODE)]
 
 
@@ -152,6 +214,7 @@ The episode uses ONE narrator voice from beginning to end.
 Never add, remove, replace, translate, paraphrase, reorder, or normalize spoken words.
 Preserve names, numbers, currencies, dates, titles, abbreviations, facts, and wording exactly.
 You may only add Eleven v3 square-bracket vocal tags, punctuation, ellipses, em dashes, capitalization for emphasis, paragraph breaks, and spacing.
+For Persian, you may also add short-vowel marks (اعراب) to a foreign name whose bare spelling could be read as ordinary Persian words; never change its letters.
 Never use SSML/XML and never put original spoken words inside square brackets.
 Keep one stable narrator identity, baseline energy, pace, and vocal placement across the whole episode.
 Treat each segment as one continuous recording session even when visuals change.

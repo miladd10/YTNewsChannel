@@ -343,6 +343,14 @@ def init_db() -> None:
                 FOREIGN KEY(story_id) REFERENCES stories(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS pronunciations (
+                language TEXT NOT NULL,
+                written TEXT NOT NULL,
+                spoken TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(language, written)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_articles_project_run ON research_articles(project_id, run_id);
             CREATE INDEX IF NOT EXISTS idx_stories_project_run ON stories(project_id, run_id);
             CREATE INDEX IF NOT EXISTS idx_stories_project_decision ON stories(project_id, decision);
