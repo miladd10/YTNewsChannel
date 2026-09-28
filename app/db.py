@@ -134,6 +134,7 @@ def init_db() -> None:
                 search_subject TEXT NOT NULL DEFAULT '',
                 spice_json TEXT NOT NULL DEFAULT '[]',
                 spice_source_ids_json TEXT NOT NULL DEFAULT '[]',
+                visual_context_json TEXT NOT NULL DEFAULT '[]',
                 context_searched_at TEXT NOT NULL DEFAULT '',
                 context_search_count INTEGER NOT NULL DEFAULT 0,
                 context_search_error TEXT NOT NULL DEFAULT '',
@@ -281,6 +282,10 @@ def init_db() -> None:
                 shared_source INTEGER NOT NULL DEFAULT 0,
                 coverage_label TEXT NOT NULL DEFAULT '',
                 coverage_kind TEXT NOT NULL DEFAULT '',
+                coverage_group TEXT NOT NULL DEFAULT '',
+                coverage_cue TEXT NOT NULL DEFAULT '',
+                coverage_reason TEXT NOT NULL DEFAULT '',
+                layout_hint TEXT NOT NULL DEFAULT 'single',
                 selected INTEGER NOT NULL DEFAULT 0,
                 download_status TEXT NOT NULL DEFAULT 'not_downloaded',
                 stored_path TEXT NOT NULL DEFAULT '',
@@ -299,6 +304,8 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_media_candidates_selected ON media_candidates(project_id, selected);
             """
         )
+        if not _column_exists(conn, "stories", "visual_context_json"):
+            conn.execute("ALTER TABLE stories ADD COLUMN visual_context_json TEXT NOT NULL DEFAULT '[]'")
         if not _column_exists(conn, "stories", "context_searched_at"):
             conn.execute("ALTER TABLE stories ADD COLUMN context_searched_at TEXT NOT NULL DEFAULT ''")
         if not _column_exists(conn, "stories", "context_search_count"):
@@ -402,3 +409,11 @@ def init_db() -> None:
             conn.execute("ALTER TABLE media_candidates ADD COLUMN coverage_label TEXT NOT NULL DEFAULT ''")
         if not _column_exists(conn, "media_candidates", "coverage_kind"):
             conn.execute("ALTER TABLE media_candidates ADD COLUMN coverage_kind TEXT NOT NULL DEFAULT ''")
+        if not _column_exists(conn, "media_candidates", "coverage_group"):
+            conn.execute("ALTER TABLE media_candidates ADD COLUMN coverage_group TEXT NOT NULL DEFAULT ''")
+        if not _column_exists(conn, "media_candidates", "coverage_cue"):
+            conn.execute("ALTER TABLE media_candidates ADD COLUMN coverage_cue TEXT NOT NULL DEFAULT ''")
+        if not _column_exists(conn, "media_candidates", "coverage_reason"):
+            conn.execute("ALTER TABLE media_candidates ADD COLUMN coverage_reason TEXT NOT NULL DEFAULT ''")
+        if not _column_exists(conn, "media_candidates", "layout_hint"):
+            conn.execute("ALTER TABLE media_candidates ADD COLUMN layout_hint TEXT NOT NULL DEFAULT 'single'")
