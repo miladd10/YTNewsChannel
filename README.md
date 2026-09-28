@@ -113,8 +113,14 @@ The local SQLite index lives in `data/ytnews.db` and is intentionally ignored by
 
 
 ### v0.3.24 Smart shot selection
-- Step 7 analyzes each selected downloaded trailer/clip with cached FFmpeg scene detection instead of taking arbitrary 7-second ranges.
+- Step 7 analyzes each selected downloaded trailer/clip with cached keyframe-first scene analysis instead of taking arbitrary 7-second ranges. Full pixel scene detection is used only when a file exposes too few useful keyframes.
 - The planner avoids typical trailer intro/outro regions when possible, prefers roughly 2.5–6 second scene-aware shots, and penalizes overlap so repeated use of the same source moves to a different part of the trailer.
 - Hard cuts are kept between detected scenes from the same trailer. Short SMPTE dissolves are used only for still/media changes and story boundaries, with real staged transition handles so Resolve has source frames on both sides.
 - Image-only coverage changes at roughly 5-second cadence and rotates distinct selected images when available. Step 7 warns when a long image-only story does not have enough distinct stills.
 - Scene analysis is cached under media/analysis so regenerating the Resolve package does not need to re-analyze unchanged video files.
+
+
+### v0.3.25 Fast smart-shot analysis
+- Smart shot discovery now reads encoded keyframe/scene-cut timestamps first, which is far faster on 4K trailers than decoding every frame for scene scoring.
+- Full FFmpeg scene detection remains a fallback for sources with too few useful keyframes.
+- Image-only Resolve warnings now state the exact number of distinct stills recommended for the story duration at the ~5-second image cadence.
