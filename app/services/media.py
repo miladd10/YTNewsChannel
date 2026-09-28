@@ -2242,7 +2242,7 @@ def search_story_media(
             variant["_contextual_kind"] = kind
             variant["_allow_archive_media"] = True
 
-        if kind in {"cast/director", "person", "interview", "event_photo"}:
+        if kind in {"cast/director", "person", "interview", "event_photo", "fun_fact"}:
             variant["_allow_spoken_broll"] = True
             variant["category"] = "celebrities"
         if kind == "behind_the_scenes":
