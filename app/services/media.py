@@ -2234,11 +2234,21 @@ def search_story_media(
         variant = dict(story)
         variant["_media_subject_override"] = label
 
-        if kind == "cast/director":
-            variant["_allow_spoken_broll"] = True
+        semantic_kind = kind
+        if kind == "title":
+            coverage_kind = "current"
+        else:
+            coverage_kind = kind
+            variant["_contextual_kind"] = kind
             variant["_allow_archive_media"] = True
-            variant["_contextual_kind"] = "cast/director"
+
+        if kind in {"cast/director", "person", "interview", "event_photo"}:
+            variant["_allow_spoken_broll"] = True
             variant["category"] = "celebrities"
+        if kind == "behind_the_scenes":
+            variant["_allow_archive_media"] = False
+        if kind in {"related_title", "comparison", "fun_fact"}:
+            variant["_allow_archive_media"] = True
 
         youtube_videos, youtube_errors = _search_youtube_videos(
             variant,
@@ -2253,11 +2263,10 @@ def search_story_media(
         errors.extend(youtube_errors)
         errors.extend(web_errors)
 
-        coverage_kind = "cast/director" if kind == "cast/director" else "current"
-        tagged = _tag_coverage(youtube_videos + web_videos, label, coverage_kind)
-        if kind == "cast/director":
+        tagged = _tag_coverage(youtube_videos + web_videos, label, coverage_kind, beat)
+        if kind != "title":
             for item in tagged:
-                item["provider"] = "Contextual B-roll · cast/director"
+                item["provider"] = f"Contextual B-roll · {semantic_kind}"
         gathered_videos.extend(tagged)
 
     current_hd_labels = {
@@ -2312,16 +2321,30 @@ def search_story_media(
     # Images are no longer all-or-nothing. If one narration beat has no useful
     # video, or the narration needs more visual changes than the distinct video
     # choices provide, search supporting stills for the uncovered beat(s).
-    image_targets: list[tuple[str, str]] = []
+    image_targets: list[dict] = []
+    image_target_keys: set[tuple[str, str, str]] = set()
     for beat in beats:
         label = str(beat.get("label") or "").strip()
         kind = str(beat.get("kind") or "title")
-        if label and label not in hd_labels:
-            image_targets.append((label, kind))
+        layout = str(beat.get("layout_hint") or "single")
+        # Semantic support shots deserve image options even when a trailer
+        # exists: portraits, posters and production stills are often the more
+        # professional visual for the exact narration beat.
+        wants_supporting_still = (
+            kind in {"person", "cast/director", "related_title", "fun_fact", "comparison", "event_photo"}
+            or layout in {"two_up", "three_up", "person_plus_title", "collage"}
+        )
+        if label and (label not in hd_labels or wants_supporting_still):
+            key = (label.casefold(), kind, str(beat.get("group_id") or ""))
+            if key not in image_target_keys:
+                image_target_keys.add(key)
+                image_targets.append(dict(beat))
     if distinct_video_choices < target_count:
         for subject in title_subjects:
-            if (subject, "title") not in image_targets:
-                image_targets.append((subject, "title"))
+            key = (subject.casefold(), "title", "")
+            if key not in image_target_keys:
+                image_target_keys.add(key)
+                image_targets.append({"label": subject, "kind": "title", "layout_hint": "single"})
             if len(image_targets) >= max_images:
                 break
 
@@ -2333,7 +2356,7 @@ def search_story_media(
     if image_targets:
         reference_images = _reference_page_images(story, reference_page_cache, max_images)
         primary_label = title_subjects[0] if title_subjects else base
-        for item in _tag_coverage(reference_images, primary_label, "supporting image"):
+        for item in _tag_coverage(reference_images, primary_label, "supporting image", {"layout_hint": "single"}):
             key = str(item.get("asset_url") or item.get("page_url") or "")
             if not key or key in seen_image_urls:
                 continue
@@ -2342,20 +2365,30 @@ def search_story_media(
             if len(images) >= max_images:
                 break
 
-    for label, kind in image_targets:
+    for beat in image_targets:
         if len(images) >= max_images:
             break
+        label = str(beat.get("label") or "").strip()
+        kind = str(beat.get("kind") or "title")
+        if not label:
+            continue
         variant = dict(story)
         variant["_media_subject_override"] = label
-        if kind == "cast/director":
-            variant["_contextual_kind"] = "cast/director"
+        if kind != "title":
+            variant["_contextual_kind"] = kind
+            variant["_allow_archive_media"] = kind in {
+                "person", "cast/director", "interview", "event_photo",
+                "related_title", "comparison", "fun_fact",
+            }
+        if kind in {"person", "cast/director", "interview", "event_photo"}:
             variant["category"] = "celebrities"
         found_images, image_errors = _image_fallback(
             variant,
             max(1, min(2, max_images - len(images))),
         )
         errors.extend(image_errors)
-        for item in _tag_coverage(found_images, label, "supporting image"):
+        image_kind = kind if kind != "title" else "supporting image"
+        for item in _tag_coverage(found_images, label, image_kind, beat):
             key = str(item.get("asset_url") or item.get("page_url") or "")
             if not key or key in seen_image_urls:
                 continue
