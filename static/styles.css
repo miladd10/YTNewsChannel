@@ -205,3 +205,14 @@
 .enrichment-sources summary{cursor:pointer;color:#c3cfda;font-size:8px}
 .enrichment-sources a{display:block;margin-top:6px;font-size:8px;line-height:1.4}
 @media(max-width:980px){.enrichment-head,.enrichment-story-head{flex-direction:column;align-items:stretch}.enrichment-story-head .btn{align-self:flex-start}}
+
+.style-profile-card{margin:10px 0 12px;padding:11px;border:1px solid #31404f;border-radius:10px;background:#0e151c}
+.style-profile-card.current{border-color:#315f49}
+.style-profile-card.stale{border-color:#765b35}
+.style-profile-card.missing{border-style:dashed}
+.style-profile-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.style-profile-head strong{display:block;font-size:10px}
+.style-profile-head span{display:block;margin-top:3px;color:var(--muted);font-size:8px}
+.style-profile-card details{margin-top:9px}
+.style-profile-card summary{cursor:pointer;font-size:8px;color:#c5d1dc}
+.style-profile-text{margin-top:8px;max-height:430px;overflow:auto;white-space:pre-wrap;font-size:9px;line-height:1.5}
