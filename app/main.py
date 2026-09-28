@@ -111,8 +111,11 @@ def _resolve_story_match_score(historical: dict, current: dict) -> int:
         old_tokens = set(_resolve_title_tokens(old_title))
         new_tokens = set(_resolve_title_tokens(new_title))
         if old_tokens and new_tokens:
-            overlap_ratio = len(old_tokens & new_tokens) / max(1, min(len(old_tokens), len(new_tokens)))
-            if overlap_ratio >= 0.75:
+            shared_count = len(old_tokens & new_tokens)
+            overlap_ratio = shared_count / max(1, min(len(old_tokens), len(new_tokens)))
+            if shared_count >= 3 and overlap_ratio >= 0.5:
+                score += 360 + min(80, shared_count * 10)
+            elif overlap_ratio >= 0.75:
                 score += int(260 * overlap_ratio)
             elif overlap_ratio >= 0.5 and ratio >= 0.55:
                 score += int(180 * overlap_ratio)
