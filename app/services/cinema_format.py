@@ -622,6 +622,8 @@ Writing rules:
 - SOCIAL REACTION: never say "همه دارن می‌گن" or imply consensus from thin evidence. Name the actual platform whenever evidence is platform-specific: "توی ردیت بعضی از کاربرا...", "توی X یکی از بحث‌ها...", "توی تیک‌تاک...". Avoid generic "مردم توی شبکه‌های اجتماعی دارن می‌گن" unless multiple named platforms genuinely support the same pattern.
 - CRITICS: only call something critic reaction when the supplied angle is type=critic_reaction. Do not turn audience/social comments into critic consensus.
 - COOL FACTS / BACKGROUND: use a surprising supported detail when it helps a casual viewer care, but keep it short and clearly contextual.
+- FUN-FACT VISUAL BEAT: when a story has a strong safe_to_narrate cool_fact that is also represented in visual_context, prefer ONE short, self-contained spoken sentence/beat for it. This gives the editor one clean visual shot. Do not announce "fun fact" mechanically unless that fits the host voice; just make the fact land cleanly. Do not force a fun fact when evidence is weak.
+- RELATED-WORK CONTEXT: if the supplied evidence says a director/actor is known for another film/show and visual_context includes that title, a short recognition cue may mention it naturally. This is useful because Media Sources can then show that related title's poster/still/clip. Never add a credit from memory.
 - Avoid generic AI/news-presenter filler such as long "this may seem small but..." setups, ceremonial section intros, or commentary that adds no information. Common oral connectors like "جالبش اینجاست" or "یعنی" are allowed when they introduce a real new beat; the problem is mechanical repetition, not the phrase itself.
 - Do not end quick stories with empty placeholder commentary such as "حالا باید دید...", "باید زیر نظرش داشت", "زمان مشخص می‌کند", or "این پروژه کم‌کم شکل می‌گیرد" unless the approved evidence gives a concrete unresolved question worth saying. Prefer ending on the strongest supported detail, reaction, comparison, or consequence.
 - Do not mechanically start each item with "خبر بعدی..." / "از دنیای ... هم..." / "اما می‌رسیم به...". Let one story naturally hand off to the next when possible.
@@ -751,6 +753,8 @@ Rules:
 - Keep critic reaction separate from fan/social reaction.
 - A quick story normally needs at most one strong extra angle. A deep Trends story may use up to 2-3 distinct strong angles.
 - Prefer useful drama, rumor, critic reaction, social discussion, cool supported facts, production context, or surprising comparisons over generic filler.
+- When a strong safe cool_fact has matching visual_context, shape it as one clean short beat/sentence so it can receive one dedicated shot in the edit.
+- Preserve supported creator/actor-to-related-title context when visual_context marks it; this lets Media Sources cover the exact related movie/show instead of showing only the current trailer.
 - Do not pad a story merely because a context search was run.
 - Preserve concise casual-audience familiarity cues when supported.
 - Related database story IDs can be merged into one flowing spoken item when they are about the same film/event, while keeping every <!-- STORY:id --> marker immediately before the claim(s) it supports.
