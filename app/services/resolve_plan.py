@@ -15,7 +15,7 @@ RESOLVE_WIDTH = 3840
 RESOLVE_HEIGHT = 2160
 DEFAULT_FPS = 30
 DEFAULT_VIDEO_CUT = 5.5
-DEFAULT_IMAGE_HOLD = 5.0
+DEFAULT_IMAGE_HOLD = 3.0
 DEFAULT_DISSOLVE_FRAMES = 6
 IMAGE_DISSOLVE_FRAMES = 8
 
@@ -294,14 +294,24 @@ def _smart_video_choice(
     }
 
 
-def _image_candidate(images: list[dict], last_candidate_id: str | None, cursor: int) -> dict | None:
+def _image_candidate(images: list[dict], used_image_ids: set[str], cursor: int) -> dict | None:
     if not images:
         return None
     for offset in range(len(images)):
         item = images[(cursor + offset) % len(images)]
-        if str(item.get("id") or "") != str(last_candidate_id or "") or len(images) == 1:
+        candidate_id = str(item.get("id") or "")
+        if candidate_id and candidate_id not in used_image_ids:
             return item
-    return images[cursor % len(images)]
+    return None
+
+
+def _max_video_uses(candidate: dict) -> int | None:
+    title = str(candidate.get("title") or "").casefold()
+    # Logo/fanfare/title-card material is useful as a quick establishing beat,
+    # but repeating it makes the edit feel obviously recycled.
+    if any(term in title for term in ("logo", "fanfare", "ident", "title announcement", "studio intro")):
+        return 1
+    return None
 
 
 def _visual_slices(
@@ -332,13 +342,15 @@ def _visual_slices(
     last_candidate_id: str | None = None
     consecutive_video = 0
     image_cursor = 0
+    used_image_ids: set[str] = set()
 
     while cursor < end - 0.02:
         remaining = end - cursor
 
         # Prefer moving footage. Use a selected still as a visual reset only
         # after two consecutive video cuts, or when no usable video exists.
-        choose_image = bool(images) and (not videos or consecutive_video >= 2)
+        unused_images_exist = any(str(item.get("id") or "") not in used_image_ids for item in images)
+        choose_image = unused_images_exist and (not videos or consecutive_video >= 2)
         item = None
         smart = None
 
@@ -348,6 +360,9 @@ def _visual_slices(
             for video in videos:
                 key = str(video.get("page_url") or video.get("id") or "")
                 use_index = uses.get(key, 0)
+                max_uses = _max_video_uses(video)
+                if max_uses is not None and use_index >= max_uses:
+                    continue
                 wanted = min(DEFAULT_VIDEO_CUT, remaining)
                 proposal = _smart_video_choice(
                     video,
@@ -359,9 +374,9 @@ def _visual_slices(
                 )
                 score = float(proposal.get("score") or 0)
                 if str(video.get("id") or "") == str(last_candidate_id or ""):
-                    score -= 18
-                if use_index >= 2:
-                    score -= use_index * 4
+                    score -= 30
+                if use_index >= 1:
+                    score -= use_index * 12
                 if score > best_score:
                     best_score = score
                     best = (video, proposal, key, use_index)
@@ -369,9 +384,11 @@ def _visual_slices(
                 item, smart, key, use_index = best
                 uses[key] = use_index + 1
                 used_ranges.setdefault(key, []).append((float(smart["start"]), float(smart["end"])))
-        if item is None and images:
-            item = _image_candidate(images, last_candidate_id, image_cursor)
-            image_cursor += 1
+        if item is None and unused_images_exist:
+            item = _image_candidate(images, used_image_ids, image_cursor)
+            if item is not None:
+                image_cursor += 1
+                used_image_ids.add(str(item.get("id") or ""))
             smart = None
             consecutive_video = 0
         elif item is not None:
@@ -383,15 +400,11 @@ def _visual_slices(
         media_type = item.get("media_type") or ""
         if media_type == "image":
             hold = min(DEFAULT_IMAGE_HOLD, remaining)
-            # A still should not sit for a long tail. Keep image cadence at
-            # roughly five seconds even when there is only one image available.
-            if remaining > DEFAULT_IMAGE_HOLD and remaining - DEFAULT_IMAGE_HOLD < 1.25:
-                hold = min(remaining, DEFAULT_IMAGE_HOLD)
             source_in = 0.0
             source_out = None
             available = None
             use_index = image_cursor - 1
-            selection_reason = "five-second still cadence"
+            selection_reason = "unique still · three-second max"
             shot_index = None
             scene_start = None
             scene_end = None
@@ -533,8 +546,15 @@ def build_edit_plan(project: dict, voice_segments: list[dict], candidates: list[
             if distinct_images < needed:
                 warnings.append(
                     f"Story {story_id} is image-only for {window['duration']:.2f}s and ideally needs "
-                    f"{needed} distinct images for ~5s visual changes, but only {distinct_images} are selected."
+                    f"{needed} distinct images for ~3s visual changes, but only {distinct_images} are selected."
                 )
+        covered = sum(float(clip.get("timeline_duration") or 0) for clip in story_clips)
+        missing = max(0.0, float(window.get("duration") or 0) - covered)
+        if missing > 0.10:
+            warnings.append(
+                f"Story {story_id} has {missing:.2f}s intentionally left without news B-roll because unique "
+                "usable media was exhausted. Select more distinct video/image sources to fill it."
+            )
 
     return {
         "version": 2,
@@ -552,6 +572,7 @@ def build_edit_plan(project: dict, voice_segments: list[dict], candidates: list[
             "voice_master_timing": True,
             "shot_selection": "scene-aware",
             "image_hold_seconds": DEFAULT_IMAGE_HOLD,
+            "image_reuse": "never",
             "transition_policy": "hard cuts on trailer scene boundaries; short dissolves for still/media/story changes",
         },
         "voice_segments": voice,
@@ -1175,7 +1196,7 @@ equivalent of **Scale full frame with crop**.
 The planner now performs cached FFmpeg scene-boundary analysis on downloaded trailers/clips,
 avoids the typical trailer intro/outro area when possible, prefers non-overlapping 2.5–6 second
 shots, and uses hard cuts when moving between detected scenes from the same trailer. Selected
-stills change at roughly five-second cadence. Short SMPTE dissolves are inserted only when
+stills are shown once only and for at most three seconds. Short SMPTE dissolves are inserted only when
 switching between still/media types or story boundaries; staged files include transition handles.
 This is shot-aware visual editing, not full semantic vision matching to every spoken sentence.
 """
