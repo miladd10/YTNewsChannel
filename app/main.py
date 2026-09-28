@@ -41,6 +41,7 @@ from .services.cinema_format import (
     WRITER_SYSTEM,
     build_style_packet,
     format_packet,
+    length_target,
     parse_review_gate,
     style_corpus_hash,
 )
@@ -1926,6 +1927,7 @@ def generate_narration(project_id: str, body: GenerateBody):
             "editorial_focus": project.get("editorial_focus"),
         },
         "format_blueprint": format_packet(),
+        "length_target": length_target(project, None),
         "approved_sections": _sectioned_story_packet(baseline_stories),
         "verified_claim_ledger": ledger_for_writer(claim_ledger),
         "additional_instructions": body.instructions,
@@ -2193,6 +2195,7 @@ def narration_workspace(project_id: str):
         claim_ledger_entries, narration_claim_checks = _claim_rows_for_workspace(conn, project_id)
     return {
         "format_blueprint": format_packet(),
+        "length_target": length_target(project),
         "sections": _sectioned_story_packet(stories),
         "narrations": narrations,
         "reviews": reviews,
@@ -2246,6 +2249,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
                 "date_end": project.get("date_end"),
             },
             "format_blueprint": format_packet(),
+            "length_target": length_target(project, draft["content"]),
             "approved_sections": _sectioned_story_packet(stories),
             "verified_claim_ledger": ledger_for_writer(claim_ledger),
         }, ensure_ascii=False),
@@ -2443,6 +2447,7 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
                 "date_end": project.get("date_end"),
             },
             "format_blueprint": format_packet(),
+            "length_target": length_target(project, draft["content"]),
             "approved_sections": _sectioned_story_packet(stories),
         }, ensure_ascii=False),
         "</current_week_authoritative_packet>",
@@ -2549,6 +2554,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         "<current_week_authoritative_packet>",
         json.dumps({
             "format_blueprint": format_packet(),
+            "length_target": length_target(project, draft["content"]),
             "approved_sections": _sectioned_story_packet(stories),
             "verified_claim_ledger": ledger_for_writer(claim_ledger),
         }, ensure_ascii=False),

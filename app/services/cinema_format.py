@@ -363,6 +363,44 @@ RESEARCH_SECTIONS = [item for item in CINEMA_WEEKLY_FORMAT if item.get("research
 SECTION_ORDER = {item["key"]: index for index, item in enumerate(CINEMA_WEEKLY_FORMAT)}
 
 
+# Spoken pace used to turn the project's target minutes into a word budget.
+# Conversational Persian narration runs roughly 130-150 words per minute.
+SPOKEN_WORDS_PER_MINUTE = {"persian": 140, "farsi": 140}
+DEFAULT_WORDS_PER_MINUTE = 150
+
+
+def _words_per_minute(language: str) -> int:
+    return SPOKEN_WORDS_PER_MINUTE.get(str(language or "").strip().casefold(), DEFAULT_WORDS_PER_MINUTE)
+
+
+def narration_word_count(text: str) -> int:
+    body = re.sub(r"<!--.*?-->", " ", text or "", flags=re.S)
+    body = re.sub(r"(?m)^\s*#+\s.*$", " ", body)
+    body = re.sub(r"\[[^\]]{1,40}\]", " ", body)  # ElevenLabs performance tags
+    return len(re.findall(r"[^\s\u200c]+(?:\u200c[^\s\u200c]+)*", body))
+
+
+def length_target(project: dict, draft_text: str | None = None) -> dict:
+    minutes = float(project.get("target_minutes") or 0) or 0.0
+    wpm = _words_per_minute(project.get("language") or "")
+    target_words = int(round(minutes * wpm))
+    result = {
+        "target_minutes": minutes,
+        "spoken_words_per_minute": wpm,
+        "target_words": target_words,
+        "acceptable_words": [int(round(target_words * 0.85)), int(round(target_words * 1.10))],
+        "rule": (
+            "Aim for acceptable_words by using more of the supported beats and selected stories. "
+            "Never pad with filler; if the approved evidence cannot fill the range, a shorter draft is acceptable."
+        ),
+    }
+    if draft_text is not None:
+        words = narration_word_count(draft_text)
+        result["current_draft_words"] = words
+        result["current_draft_minutes"] = round(words / wpm, 1) if wpm else 0.0
+    return result
+
+
 def section_label(key: str) -> str:
     return (FORMAT_BY_KEY.get(key) or {}).get("label") or key.replace("_", " ").title()
 
@@ -717,6 +755,7 @@ Writing rules:
 - Prefer content-driven transitions such as "حالا که...", "از این یکی بگذریم...", "خب فیلم بسه..." or another natural bridge when appropriate, rather than repeatedly announcing "خبر بعدی".
 - Keep section headings only as quiet organization for the app; the spoken prose underneath should flow rather than announcing the template.
 - Mention sources aloud only as the ATTRIBUTION POLICY below allows, or when the source itself is part of the story.
+- LENGTH: the packet's length_target gives the spoken word budget for this episode. Reach acceptable_words by telling supported beats more fully and covering every selected story, never by filler. If the approved evidence genuinely cannot fill the range, stay shorter rather than pad.
 - Return only the complete narration in Markdown.
 """ + ATTRIBUTION_POLICY
 
@@ -778,6 +817,7 @@ Check:
 - whether Intro hooks the actual episode and Outro closes briefly;
 - whether the draft resembles the style corpus in broad craft without copying phrases;
 - whether important selected stories were accidentally omitted.
+- LENGTH: compare length_target.current_draft_words with acceptable_words. Under the range while the packet still has unused supported beats or selected stories is a major Format issue ("under length"). Under the range only because evidence is thin is a minor note. More than 15% over the range is a major issue.
 
 Return Markdown using exactly this structure:
 
@@ -859,6 +899,7 @@ Rules:
 - Do not use empty adjective payoffs such as "ترکیب سنگینی", "کنجکاوی‌برانگیز", or "مهم برای مخاطب" unless a concrete supported detail immediately earns that description.
 - Keep Persian conversational, compact and natural. Follow recurring Filmbaz craft without copying reference wording.
 - Return only the complete rewritten narration in Markdown.
+- LENGTH: the packet's length_target gives the spoken word budget for this episode. Reach acceptable_words by telling supported beats more fully and covering every selected story, never by filler. If the approved evidence genuinely cannot fill the range, stay shorter rather than pad.
 """ + ATTRIBUTION_POLICY
 
 REVISION_SYSTEM = """You are the narration revision writer inside YT News Studio.
@@ -882,6 +923,7 @@ Rules:
 - Remove fake/empty hype rather than replacing it with different hype.
 - Do not broadly restart or re-outline the episode unless a blocking review issue explicitly requires it.
 - Return the complete revised narration only in Markdown.
+- LENGTH: the packet's length_target gives the spoken word budget for this episode. Reach acceptable_words by telling supported beats more fully and covering every selected story, never by filler. If the approved evidence genuinely cannot fill the range, stay shorter rather than pad.
 """ + ATTRIBUTION_POLICY
 
 

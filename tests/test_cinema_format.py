@@ -518,3 +518,14 @@ def test_spoken_outlet_phrasing_counts_as_attribution():
     assert _attribution_present("ورایتی می‌گه حدود ۴۰ میلیون فروخته", claim, True)
     assert _attribution_present("حدود ۴۰ میلیون فروخته", claim, True)
     assert not _attribution_present("۴۰ میلیون فروخته", claim, True)
+
+
+def test_length_target_and_word_count():
+    from app.services.cinema_format import length_target, narration_word_count, WRITER_SYSTEM, REVIEWER_SYSTEM
+    draft = "## بخش\n\n<!-- STORY:a --> [thoughtful] این یک جملهٔ کوتاهه و می‌شه شمردش.\n"
+    assert narration_word_count(draft) == 7
+    target = length_target({"target_minutes": 5, "language": "Persian"}, draft)
+    assert target["target_words"] == 700
+    assert target["acceptable_words"] == [595, 770]
+    assert target["current_draft_words"] == 7
+    assert "length_target" in WRITER_SYSTEM and "length_target" in REVIEWER_SYSTEM
