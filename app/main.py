@@ -897,7 +897,7 @@ def search_story_context(project_id: str, story_id: str, body: StoryContextSearc
     with db() as conn:
         project = project_or_404(conn, project_id)
         draft = conn.execute(
-            "SELECT id FROM narrations WHERE project_id=? ORDER BY version_number DESC LIMIT 1",
+            "SELECT id,content FROM narrations WHERE project_id=? ORDER BY version_number DESC LIMIT 1",
             (project_id,),
         ).fetchone()
         if not draft:
@@ -915,6 +915,12 @@ def search_story_context(project_id: str, story_id: str, body: StoryContextSearc
         story = next((item for item in stories if item["id"] == story_id), None)
         if not story:
             raise HTTPException(400, "This story no longer passes the current selection/verification gates.")
+        draft_segments = extract_narration_segments(str(draft["content"] or ""))
+        story["_narration_text"] = " ".join(
+            str(segment.get("source_text") or "")
+            for segment in draft_segments
+            if str(segment.get("story_id") or "") == story_id
+        ).strip()
 
         previous_ids = json.loads(row["spice_source_ids_json"] or "[]")
         previous_sources: list[dict] = []
@@ -966,6 +972,7 @@ def search_story_context(project_id: str, story_id: str, body: StoryContextSearc
         search_error = str(exc)
         combined_sources = previous_sources
         story["spice_angles"] = json.loads(row["spice_json"] or "[]")
+        story["visual_context"] = json.loads(row["visual_context_json"] or "[]")
 
     with db() as conn:
         project = project_or_404(conn, project_id)
@@ -1004,12 +1011,13 @@ def search_story_context(project_id: str, story_id: str, body: StoryContextSearc
         count = int(row["context_search_count"] or 0) + 1
         conn.execute(
             """UPDATE stories
-               SET spice_json=?,spice_source_ids_json=?,context_searched_at=?,
+               SET spice_json=?,spice_source_ids_json=?,visual_context_json=?,context_searched_at=?,
                    context_search_count=?,context_search_error=?,updated_at=?
                WHERE id=? AND project_id=?""",
             (
                 json.dumps(story.get("spice_angles") or [], ensure_ascii=False),
                 json.dumps(all_source_ids),
+                json.dumps(story.get("visual_context") or [], ensure_ascii=False),
                 stamp, count, search_error, stamp, story_id, project_id,
             ),
         )
@@ -1022,6 +1030,7 @@ def search_story_context(project_id: str, story_id: str, body: StoryContextSearc
                 "provider": actual_provider,
                 "model": actual_model,
                 "angles": story.get("spice_angles") or [],
+                "visual_context": story.get("visual_context") or [],
                 "sources": combined_sources,
                 "diagnostics": diagnostics,
                 "error": search_error,
@@ -1039,6 +1048,7 @@ def search_story_context(project_id: str, story_id: str, body: StoryContextSearc
         "search_count": int(row["context_search_count"] or 0) + 1,
         "angle_count": len(story.get("spice_angles") or []),
         "safe_angle_count": sum(1 for angle in story.get("spice_angles") or [] if angle.get("safe_to_narrate")),
+        "visual_context_count": len(story.get("visual_context") or []),
         "source_count": len(combined_sources),
         "angles": story.get("spice_angles") or [],
         "error": search_error,
@@ -1074,12 +1084,13 @@ def selected_story_packet(conn, project_id: str) -> list[dict]:
         item["reddit_only"] = bool(item.get("reddit_only"))
         item["familiarity_needed"] = bool(item.get("familiarity_needed"))
         item["spice_angles"] = json.loads(item.pop("spice_json") or "[]")
+        item["visual_context"] = json.loads(item.pop("visual_context_json") or "[]")
         spice_ids = json.loads(item.pop("spice_source_ids_json") or "[]")
         item["spice_sources"] = []
         if spice_ids:
             spice_placeholders = ",".join("?" for _ in spice_ids)
             spice_rows = conn.execute(
-                f"""SELECT title,url,source,published_at,snippet,raw_json
+                f"""SELECT id,title,url,source,published_at,snippet,raw_json
                     FROM research_articles WHERE id IN ({spice_placeholders})""", spice_ids
             ).fetchall()
             for spice_row in spice_rows:
