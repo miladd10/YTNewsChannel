@@ -727,7 +727,7 @@ def test_landscape_4k_still_ranks_above_portrait_poster():
         "articles": [],
     }
     landscape = {
-        "title": "Narnia official first look still",
+        "title": "Narnia The Magician's Nephew official first look still",
         "source": "Netflix",
         "url": "https://netflix.com/narnia",
         "image": "https://cdn.example/narnia-landscape.jpg",
@@ -735,7 +735,7 @@ def test_landscape_4k_still_ranks_above_portrait_poster():
         "height": 2160,
     }
     portrait = {
-        "title": "Narnia official poster",
+        "title": "Narnia The Magician's Nephew official poster",
         "source": "TMDB",
         "url": "https://themoviedb.org/narnia",
         "image": "https://cdn.example/narnia-poster.jpg",
