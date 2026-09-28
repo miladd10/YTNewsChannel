@@ -784,7 +784,6 @@ def fetch_story_spice_sources(
         if str(story.get("freshness") or "") in {"current", "followup"}
         and str(story.get("verification_gate") or "") == "pass"
         and str(story.get("section_fit") or "medium") != "low"
-        and float(story.get("score") or 0) >= 5.0
     ][:max_stories]
 
     all_articles: list[dict] = []
