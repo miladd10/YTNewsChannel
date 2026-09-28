@@ -261,8 +261,85 @@ SECTION_CONTRACTS = {
     },
 }
 
+SECTION_INTELLIGENCE_SCHEMA_VERSION = 1
+
+COMMON_FRESHNESS_POLICY = {
+    "require_current_week_hook": True,
+    "window_semantics": "date_start inclusive; date_end exclusive",
+    "allow_followup": True,
+    "background_sources_allowed": True,
+    "background_sources_count_as_freshness": False,
+    "undated_source_counts_as_freshness": False,
+    "republished_old_story_rule": (
+        "A source published inside the window is not enough by itself. The story must contain a "
+        "specific new development inside the selected window. Pure recaps/reposts of an older event are stale."
+    ),
+}
+
+COMMON_VERIFICATION_POLICY = {
+    "reddit_role": "discovery_or_reaction_only",
+    "social_account_rule": (
+        "A discovered X/TikTok URL may support what that account posted, but discovery alone does not prove "
+        "the account is official. Corroborate external factual claims."
+    ),
+    "cross_source_rule": "Prefer independent sources; syndicated copies do not count as independent confirmation.",
+    "background_rule": "Background/context may use older sources but every current-week claim must trace to current evidence.",
+    "include_gate": (
+        "Include requires an in-window news hook plus verified/reported evidence. "
+        "needs_verification, stale, date_unknown, or missing-hook stories stay Maybe/Skip."
+    ),
+}
+
+SECTION_VERIFICATION_OVERRIDES = {
+    "trend": {
+        "verification_target": "Prefer 2 independent current sources; one authoritative primary source may establish a straightforward announcement, but performance/reaction claims should be corroborated.",
+        "freshness_examples": ["new opening-weekend result", "new score/reaction", "new controversy/development", "new filmmaker statement tied to the lead story"],
+    },
+    "industry": {
+        "verification_target": "Prefer an official company/regulator/legal source plus reputable trade/business reporting, or 2 independent reputable reports.",
+        "freshness_examples": ["new filing", "new deal term", "new regulator action", "new executive move", "new labor/business decision"],
+    },
+    "upcoming_films": {
+        "verification_target": "One clearly authoritative studio/filmmaker/festival announcement can establish the new hook; rumors require reputable corroboration.",
+        "freshness_examples": ["new trailer", "new first look", "new casting", "production start", "festival reaction", "release-date change", "new sequel announcement"],
+    },
+    "tv_series": {
+        "verification_target": "Prefer network/platform or trade confirmation for renewal/cancellation/delay/showrunner/premiere claims.",
+        "freshness_examples": ["renewed this week", "cancelled this week", "new delay/premiere date", "new showrunner/platform decision"],
+    },
+    "celebrities": {
+        "verification_target": "Direct verified interview/event/representative source is strongest. Personal social posts need account authenticity plus corroboration when the claim extends beyond what was visibly posted.",
+        "freshness_examples": ["new award/honor", "new public announcement", "new interview anecdote", "new incident", "new event appearance"],
+    },
+    "ai_tech": {
+        "verification_target": "Prefer original demo/company/research source plus independent reporting for capability claims or viral demonstrations.",
+        "freshness_examples": ["new demo", "new production use", "new policy/tool announcement", "new viral tech incident with a verified reality check"],
+    },
+    "viral_images": {
+        "verification_target": "Prefer the original dated post/image. Reposts and screenshots need provenance; Reddit reaction does not establish image origin.",
+        "freshness_examples": ["original image/post published in the selected week", "new award/on-set/photo reveal that became notable this week"],
+    },
+    "box_office": {
+        "verification_target": "Use recognized current box-office reporting/data. Forecasts and actuals must be labeled separately.",
+        "freshness_examples": ["current weekend chart", "new running total", "new milestone reached during the selected week"],
+    },
+    "now_available": {
+        "verification_target": "Prefer official platform/studio availability or reputable release-date reporting.",
+        "freshness_examples": ["digital/PVOD/VOD/streaming availability that begins during the selected week"],
+    },
+    "toxic_news": {
+        "verification_target": "Low-stakes does not mean low-evidence: verify the incident/post through a primary or reputable source; Reddit-only gossip cannot be narrated as fact.",
+        "freshness_examples": ["new odd incident", "new public social mishap", "new location/production anecdote reported during the selected week"],
+    },
+}
+
 for _section in CINEMA_WEEKLY_FORMAT:
     _section.update(SECTION_CONTRACTS.get(_section["key"], {}))
+    _section["freshness_policy"] = dict(COMMON_FRESHNESS_POLICY)
+    _section["verification_policy"] = {
+        **COMMON_VERIFICATION_POLICY,
+        **SECTION_VERIFICATION_OVERRIDES.get(_section["key"], {}),
+    }
 
 FORMAT_BY_KEY = {item["key"]: item for item in CINEMA_WEEKLY_FORMAT}
 RESEARCH_SECTIONS = [item for item in CINEMA_WEEKLY_FORMAT if item.get("research")]
@@ -297,6 +374,9 @@ def format_packet() -> list[dict]:
             "preferred_sources": item.get("preferred_sources") or [],
             "social_sources": item.get("social_sources") or [],
             "social_policy": item.get("social_policy") or "",
+            "freshness_policy": item.get("freshness_policy") or {},
+            "verification_policy": item.get("verification_policy") or {},
+            "intelligence_schema_version": SECTION_INTELLIGENCE_SCHEMA_VERSION,
         }
         for item in CINEMA_WEEKLY_FORMAT
     ]
