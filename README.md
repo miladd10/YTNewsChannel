@@ -201,3 +201,21 @@ The local SQLite index lives in `data/ytnews.db` and is intentionally ignored by
 - Section Selection surfaces the proposed familiarity cue so it is inspectable before narration.
 - Reviewer Style Audit explicitly checks for fake enthusiasm, empty hype, generic AI/news-presenter phrasing, overlong "why this matters" setups, weak hooks, missing/overdone familiarity context, and whether the result actually reflects recurring Filmbaz reference behavior.
 - Revision instructions remove empty hype rather than replacing it with different hype and preserve already-good material while applying reviewer fixes.
+
+
+### v0.3.33 Evidence-backed story spice
+- Research now has a second, story-specific context pass for strong current candidates. After the verified news hook is established, the app searches around that exact movie/person/company/event for rumor/controversy, critic reaction, Reddit/public social discussion, behind-the-scenes context, and useful comparisons.
+- Ranking produces a concise `search_subject` for each story so related-context searches target the actual film/person/deal instead of blindly searching the full article headline.
+- Related context is stored separately from the verified current-week hook. It can enrich narration but cannot make an otherwise stale/unverified story eligible.
+- The context AI may return only these structured angle types: rumor, controversy, critic_reaction, social_buzz, cool_fact, surprising_comparison, and production_context.
+- Every angle carries evidence status, exact supplied source URLs, a safe-to-narrate flag, and a framing note. Hallucinated source URLs are discarded.
+- Rumors are allowed only when supplied evidence explicitly establishes that a rumor/report/speculation exists. Social-only rumor chatter is forced unsafe in code even if the model marks it safe.
+- One isolated social post cannot become "social buzz"; social-only buzz needs multiple social results. Reddit remains discussion/discovery rather than factual confirmation.
+- Critic reaction cannot be synthesized from fan comments. Controversy must be a concrete supported dispute/backlash/conflict, not ordinary disagreement.
+- Step 2 now exposes Related Context / Spice cards so the editor can inspect exactly what the writer is allowed to use and whether each angle is narratable or reference-only.
+- The narration writer uses at most the strongest useful angle for a quick story and up to 2–3 for a deep Trends story. If no strong angle exists, it must not manufacture drama.
+- Rumors must stay explicitly labeled as unconfirmed/reporting/speculation in narration and can never replace the verified news hook.
+- The Reviewer has a dedicated Context / Spice Audit that flags invented/overstated rumors, false critic/social consensus, missed strong context that leaves a story unnecessarily flat, and overloading a quick story with too much context.
+- Related context enrichment is non-blocking: a social/reaction lookup failure does not invalidate otherwise verified weekly research.
+- Narration now treats story IDs as evidence boundaries rather than mandatory paragraph boundaries. Multiple selected rows about the same film/event—especially box-office totals and milestones—may be merged into one flowing spoken item while STORY markers remain next to the claims they support.
+- Writer/reviewer rules explicitly reject empty endings such as generic "we'll have to wait and see" filler and generic intros that could fit any week's episode.
