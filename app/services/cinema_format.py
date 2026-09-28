@@ -493,11 +493,57 @@ def style_corpus_hash(transcripts: Iterable[dict]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+GARBLED_UNIQUE_WORD_SHARE = 0.25
+_REFERENCE_DATE_RE = re.compile(r"(?<!\d)((?:19|20)\d{2})-(\d{2})-(\d{2})(?!\d)")
+
+
+def reference_date(name: str) -> str:
+    """YYYY-MM-DD found in a transcript's name (e.g. an upload date), or ''."""
+    match = _REFERENCE_DATE_RE.search(str(name or ""))
+    return "-".join(match.groups()) if match else ""
+
+
+def annotate_style_quality(transcripts: Iterable[dict]) -> list[dict]:
+    """Flag transcripts that look like garbled automatic transcription.
+
+    Signal: share of a transcript's words that occur in no other transcript.
+    Clean speech reuses the corpus vocabulary (roughly 5-10% unique words);
+    broken ASR invents non-words (well above 25%). Needs at least 4
+    transcripts to compare against, otherwise nothing is flagged.
+    """
+    rows = [dict(item) for item in transcripts]
+    tokenized = [re.findall(r"[^\W\d_]+", str(row.get("content") or "").casefold()) for row in rows]
+    document_frequency: dict[str, int] = {}
+    for tokens in tokenized:
+        for token in set(tokens):
+            document_frequency[token] = document_frequency.get(token, 0) + 1
+    comparable = sum(1 for tokens in tokenized if tokens) >= 4
+    for row, tokens in zip(rows, tokenized):
+        share = (sum(1 for token in tokens if document_frequency.get(token, 0) <= 1) / len(tokens)) if tokens else 0.0
+        row["unique_word_share"] = round(share, 3)
+        row["likely_garbled"] = bool(comparable and share > GARBLED_UNIQUE_WORD_SHARE)
+        row["reference_date"] = reference_date(row.get("name") or "")
+    return rows
+
+
+def usable_style_transcripts(transcripts: Iterable[dict]) -> list[dict]:
+    return [row for row in transcripts
+            if int(row.get("enabled", 1) or 0) and str(row.get("content") or "").strip()
+            and not row.get("likely_garbled")]
+
+
+def style_rows_for_window(transcripts: Iterable[dict], date_start: str) -> list[dict]:
+    """Drop references dated on/after the episode's first day: they may cover
+    the same news the episode is about, and their facts must never leak in."""
+    start = str(date_start or "")[:10]
+    return [row for row in transcripts
+            if not (start and row.get("reference_date") and str(row["reference_date"]) >= start)]
+
+
 def build_style_packet(transcripts: Iterable[dict], max_chars: int = 120000) -> str:
-    enabled = [dict(item) for item in transcripts if int(item.get("enabled", 1) or 0)]
-    enabled = [item for item in enabled if str(item.get("content") or "").strip()]
+    enabled = usable_style_transcripts(transcripts)
     if not enabled:
-        return "<style_corpus>No style transcripts have been imported yet.</style_corpus>"
+        return "<style_corpus>No usable style transcripts are available for this episode.</style_corpus>"
 
     # Two complementary views are useful:
     # 1) every transcript contributes distributed samples, so the model learns

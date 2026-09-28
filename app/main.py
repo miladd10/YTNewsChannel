@@ -45,11 +45,14 @@ from .services.cinema_format import (
     SECTION_ORDER,
     STYLE_PROFILE_SYSTEM,
     WRITER_SYSTEM,
+    annotate_style_quality,
     build_style_packet,
     format_packet,
     length_target,
     parse_review_gate,
     style_corpus_hash,
+    style_rows_for_window,
+    usable_style_transcripts,
 )
 from .services.research import (
     ai_enrich_story_spice,
@@ -1356,12 +1359,12 @@ def selected_story_packet(conn, project_id: str) -> list[dict]:
 
 
 def _style_transcripts(conn, channel: str = "cinema", content_type: str = "weekly_news") -> list[dict]:
-    return [dict(row) for row in conn.execute(
+    return annotate_style_quality(dict(row) for row in conn.execute(
         """SELECT * FROM style_transcripts
            WHERE channel=? AND content_type=?
            ORDER BY enabled DESC, created_at""",
         (channel, content_type),
-    ).fetchall()]
+    ).fetchall())
 
 
 def _parse_json_object_text(value: str) -> dict:
@@ -1380,7 +1383,7 @@ def _parse_json_object_text(value: str) -> dict:
 
 
 def _style_profile_status(conn, channel: str, content_type: str, style_rows: list[dict]) -> dict:
-    enabled = [row for row in style_rows if int(row.get("enabled") or 0) and str(row.get("content") or "").strip()]
+    enabled = usable_style_transcripts(style_rows)
     current_hash = style_corpus_hash(enabled)
     row = conn.execute(
         "SELECT * FROM style_profiles WHERE channel=? AND content_type=?",
@@ -1414,7 +1417,7 @@ def _ensure_style_profile(
     *,
     force: bool = False,
 ) -> dict:
-    enabled = [row for row in style_rows if int(row.get("enabled") or 0) and str(row.get("content") or "").strip()]
+    enabled = usable_style_transcripts(style_rows)
     if not enabled:
         return {
             "id": "",
@@ -2058,7 +2061,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_style_packet(style_rows, max_chars=80000),
+        build_style_packet(style_rows_for_window(style_rows, project.get("date_start")), max_chars=80000),
     ])
     try:
         text, actual_provider, actual_model = generate_text(provider, model, WRITER_SYSTEM, user)
@@ -2342,7 +2345,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_style_packet(styles, max_chars=80000),
+        build_style_packet(style_rows_for_window(styles, project.get("date_start")), max_chars=80000),
         "",
         "<existing_first_draft>",
         draft["content"],
@@ -2543,7 +2546,7 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_style_packet(styles, max_chars=80000),
+        build_style_packet(style_rows_for_window(styles, project.get("date_start")), max_chars=80000),
         "",
         "<draft_to_review>",
         draft["content"],
@@ -2647,7 +2650,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_style_packet(styles, max_chars=70000),
+        build_style_packet(style_rows_for_window(styles, project.get("date_start")), max_chars=70000),
         "",
         "<existing_narration>",
         draft["content"],
