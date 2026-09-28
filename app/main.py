@@ -1531,14 +1531,14 @@ def _deterministic_fact_red_flags(
         spoken = narration.casefold()
 
         approaching = bool(re.search(
-            r"(نزدیک|در\\s+آستانه|به\\s+مرز|هنوز.{0,20}(?:رد|عبور).{0,12}ن|"
-            r"approach(?:ing|es|ed)?|near(?:s|ing)?|close\\s+to)",
+            r"(نزدیک|در\s+آستانه|به\s+مرز|هنوز.{0,20}(?:رد|عبور).{0,12}ن|"
+            r"approach(?:ing|es|ed)?|near(?:s|ing)?|close\s+to)",
             spoken,
             flags=re.IGNORECASE,
         ))
         crossed = bool(re.search(
-            r"\\b(cross(?:ed|es)|pass(?:ed|es)|surpass(?:ed|es)|exceed(?:ed|s)|"
-            r"tops?|topped|over)\\b.{0,45}\\b(?:million|billion|m|b)\\b",
+            r"\b(cross(?:ed|es)|pass(?:ed|es)|surpass(?:ed|es)|exceed(?:ed|s)|"
+            r"tops?|topped|over)\b.{0,45}\b(?:million|billion|m|b)\b",
             evidence,
             flags=re.IGNORECASE,
         ))
@@ -1555,13 +1555,13 @@ def _deterministic_fact_red_flags(
             })
 
         says_new_title = bool(re.search(
-            r"(فیلم\\s+(?:جدید|تازه)|قسمت\\s+(?:جدید|تازه)|brand[- ]new\\s+(?:movie|film)|new\\s+movie)",
+            r"(فیلم\s+(?:جدید|تازه)|قسمت\s+(?:جدید|تازه)|brand[- ]new\s+(?:movie|film)|new\s+movie)",
             spoken,
             flags=re.IGNORECASE,
         ))
         evidence_rerelease = bool(re.search(
-            r"(re-?release|returns?\\s+to\\s+theat(?:er|re)s|back\\s+in\\s+theat(?:er|re)s|"
-            r"same\\s+(?:2019\\s+)?movie|new\\s+version\\s+of\\s+the\\s+2019|extended\\s+cut)",
+            r"(re-?release|returns?\s+to\s+theat(?:er|re)s|back\s+in\s+theat(?:er|re)s|"
+            r"same\s+(?:2019\s+)?movie|new\s+version\s+of\s+the\s+2019|extended\s+cut)",
             evidence,
             flags=re.IGNORECASE,
         ))
@@ -1578,18 +1578,18 @@ def _deterministic_fact_red_flags(
             })
 
         rank_claim = bool(re.search(
-            r"(صدر\\s+جدول|رتبه[ٔ\s]*اول|شماره\\s*یک|#\\s*1|number\\s+one|"
-            r"topp?ed\\s+(?:the\\s+)?(?:box\\s+office|chart)|went\\s+straight\\s+to\\s+#?1)",
+            r"(صدر\s+جدول|رتبه[ٔ\s]*اول|شماره\s*یک|#\s*1|number\s+one|"
+            r"topp?ed\s+(?:the\s+)?(?:box\s+office|chart)|went\s+straight\s+to\s+#?1)",
             spoken,
             flags=re.IGNORECASE,
         ))
         period_scope = bool(re.search(
-            r"(آخر\\s*هفته|هفتگی|روزانه|جمعه|شنبه|یکشنبه|weekend|weekly|daily)",
+            r"(آخر\s*هفته|هفتگی|روزانه|جمعه|شنبه|یکشنبه|weekend|weekly|daily)",
             spoken,
             flags=re.IGNORECASE,
         ))
         market_scope = bool(re.search(
-            r"(آمریکای\\s+شمالی|گیشه[ٔ\s]+آمریکا|داخلی|domestic|u\\.?s\\.?\\s+box\\s+office|"
+            r"(آمریکای\s+شمالی|گیشه[ٔ\s]+آمریکا|داخلی|domestic|u\.?s\.?\s+box\s+office|"
             r"worldwide|جهانی)",
             spoken,
             flags=re.IGNORECASE,
