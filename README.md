@@ -275,3 +275,11 @@ The local SQLite index lives in `data/ytnews.db` and is intentionally ignored by
 - Preferred sources (official studio/platform, AP/Reuters, major trades/business press, Box Office Mojo/The Numbers, etc.) outrank supplemental search results during conflicts.
 - Step 3 shows the fact-check status and issue list. A narration with status `needs_human_check` cannot be approved for Voice.
 - Fact-check reports are saved under `narration/fact-checks/` in each project.
+
+
+### v0.3.38 Box Office Scope Guard
+- Fact-check searches now verify domestic **daily, weekend and weekly** box-office scopes separately instead of treating every #1 claim as the same chart.
+- Ranking claims must explicitly identify their period and market. Vague wording such as "this week went #1" / "صدر جدول این هفته" is blocked unless the narration states a supported scope such as the domestic Sep. 25-27 weekend chart.
+- Fresh verification results carry a query_scope (daily_domestic / weekend_domestic / weekly_domestic / worldwide_cumulative / milestone / title_identity) so the fact checker compares like with like.
+- Deterministic guards now block unqualified #1/top-chart narration before approval.
+- Fixed regex escaping in the deterministic milestone/title-identity guards; the stale Coyote-vs-Acme milestone and new-movie-vs-rerelease checks now execute correctly.
