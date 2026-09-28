@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
 import os
@@ -8,6 +9,8 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+
+from PIL import Image, ImageOps
 
 from .media import duration_seconds
 from .shot_planner import analyze_video_shots, choose_video_shot
@@ -129,6 +132,139 @@ def _safe_path(root: Path, stored: str) -> Path | None:
     if root.resolve() not in path.parents or not path.exists() or not path.is_file():
         return None
     return path
+
+
+
+def _compose_image_panel(root: Path, images: list[dict], layout_hint: str, group_label: str) -> dict | None:
+    usable = []
+    for item in images[:3]:
+        path = _safe_path(root, str(item.get("stored_path") or ""))
+        if path is not None:
+            usable.append((item, path))
+    if len(usable) < 2:
+        return None
+
+    count = min(3, len(usable))
+    layout = layout_hint if layout_hint in {"two_up", "three_up", "person_plus_title", "collage"} else ("three_up" if count >= 3 else "two_up")
+    if count == 2:
+        boxes = [(0, 0, 1912, RESOLVE_HEIGHT), (1928, 0, RESOLVE_WIDTH, RESOLVE_HEIGHT)]
+    else:
+        boxes = [
+            (0, 0, 1269, RESOLVE_HEIGHT),
+            (1285, 0, 2555, RESOLVE_HEIGHT),
+            (2571, 0, RESOLVE_WIDTH, RESOLVE_HEIGHT),
+        ]
+
+    key_payload = "|".join(
+        [layout, group_label, *[str(path.resolve()) for _, path in usable[:count]]]
+    )
+    digest = hashlib.sha1(key_payload.encode("utf-8")).hexdigest()[:12]
+    folder = root / "media" / "composites"
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"{layout}_{digest}.jpg"
+
+    if not target.exists():
+        canvas = Image.new("RGB", (RESOLVE_WIDTH, RESOLVE_HEIGHT), (14, 16, 20))
+        for (item, path), box in zip(usable[:count], boxes):
+            left, top, right, bottom = box
+            size = (right - left, bottom - top)
+            with Image.open(path) as source:
+                source = source.convert("RGB")
+                panel = ImageOps.fit(source, size, method=Image.Resampling.LANCZOS, centering=(0.5, 0.45))
+                canvas.paste(panel, (left, top))
+        canvas.save(target, "JPEG", quality=95, subsampling=0)
+
+    labels = [str(item.get("coverage_label") or item.get("title") or "").strip() for item, _ in usable[:count]]
+    group = str(usable[0][0].get("coverage_group") or "")
+    cue = next((str(item.get("coverage_cue") or "").strip() for item, _ in usable[:count] if str(item.get("coverage_cue") or "").strip()), "")
+    reason = next((str(item.get("coverage_reason") or "").strip() for item, _ in usable[:count] if str(item.get("coverage_reason") or "").strip()), "")
+    return {
+        "id": f"composite:{digest}",
+        "story_id": usable[0][0].get("story_id") or "",
+        "media_type": "image",
+        "title": f"{layout.replace('_', ' ')} · " + " + ".join(label for label in labels if label),
+        "source": "YT News Studio composite",
+        "page_url": "",
+        "stored_path": target.relative_to(root).as_posix(),
+        "width": RESOLVE_WIDTH,
+        "height": RESOLVE_HEIGHT,
+        "coverage_label": group_label or " + ".join(labels),
+        "coverage_kind": "multi_panel",
+        "coverage_group": group,
+        "coverage_cue": cue,
+        "coverage_reason": reason,
+        "layout_hint": layout,
+        "_narration_ratio": min(
+            [float(item.get("_narration_ratio")) for item, _ in usable[:count] if item.get("_narration_ratio") is not None] or [0.5]
+        ),
+        "_composite_source_ids": [str(item.get("id") or "") for item, _ in usable[:count]],
+    }
+
+
+def _semantic_composite_candidates(root: Path | None, images: list[dict]) -> list[dict]:
+    if root is None:
+        return []
+    grouped: dict[str, list[dict]] = {}
+    for item in images:
+        group = str(item.get("coverage_group") or "").strip()
+        layout = str(item.get("layout_hint") or "single")
+        if not group or layout not in {"two_up", "three_up", "person_plus_title", "collage"}:
+            continue
+        grouped.setdefault(group, []).append(item)
+
+    composites: list[dict] = []
+    for group, members in grouped.items():
+        unique_labels = []
+        chosen = []
+        for item in sorted(members, key=lambda x: (float(x.get("_narration_ratio") or 1.0), str(x.get("coverage_label") or ""))):
+            label = str(item.get("coverage_label") or "").strip().casefold()
+            if label and label in unique_labels:
+                continue
+            if label:
+                unique_labels.append(label)
+            chosen.append(item)
+            if len(chosen) >= 3:
+                break
+        if len(chosen) < 2:
+            continue
+        layout = str(chosen[0].get("layout_hint") or ("three_up" if len(chosen) >= 3 else "two_up"))
+        composite = _compose_image_panel(
+            root,
+            chosen,
+            layout,
+            " + ".join(str(item.get("coverage_label") or "").strip() for item in chosen),
+        )
+        if composite:
+            composites.append(composite)
+    return composites
+
+
+def _semantic_position(item: dict, narration_text: str) -> float | None:
+    text = (narration_text or "").casefold()
+    if not text:
+        return None
+    needles = [
+        str(item.get("coverage_cue") or "").strip().casefold(),
+        str(item.get("coverage_label") or "").strip().casefold(),
+    ]
+    best: int | None = None
+    for needle in needles:
+        if not needle:
+            continue
+        pos = text.find(needle)
+        if pos >= 0 and (best is None or pos < best):
+            best = pos
+    if best is None:
+        # Exact Persian/English cue matching can fail after punctuation/style
+        # changes. A distinctive coverage label token still gives a useful
+        # approximate spoken position.
+        tokens = [token for token in re.findall(r"[\w\u0600-\u06FF]+", needles[-1]) if len(token) >= 4]
+        positions = [text.find(token) for token in tokens if text.find(token) >= 0]
+        if positions:
+            best = min(positions)
+    if best is None:
+        return None
+    return max(0.0, min(1.0, best / max(1, len(text))))
 
 
 def crop_instruction(width: int | None, height: int | None) -> dict:
