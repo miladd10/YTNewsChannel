@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.37"
+APP_VERSION = "0.3.38"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Automatic Fresh-Fact Audit"
+APP_RELEASE_NAME = "Box Office Scope Guard"
