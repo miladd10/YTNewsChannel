@@ -828,6 +828,46 @@ def _story_context_subject(story: dict) -> str:
     return title[:140]
 
 
+def _fact_check_subjects(story: dict) -> list[str]:
+    """Return short entity/title variants for fresh verification searches.
+
+    Search subjects generated during research are normally best, but older
+    projects can contain a full headline here. Pull quoted film/show names out
+    as additional variants so exact milestone/identity searches do not quote an
+    entire sentence such as "Coyote vs. Acme approaches $100M ...".
+    """
+    values: list[str] = []
+    primary = _story_context_subject(story)
+    if primary:
+        values.append(primary)
+
+    title = str(story.get("canonical_title") or "")
+    quote_patterns = (
+        r'["“”]([^"“”]{2,100})["“”]',
+        r"[‘’']([^‘’']{2,100})[‘’']",
+    )
+    for pattern in quote_patterns:
+        for match in re.finditer(pattern, title):
+            value = re.sub(r"\s+", " ", match.group(1)).strip(" :-–—")
+            if value and value.casefold() not in {x.casefold() for x in values}:
+                values.append(value)
+
+    # Safe headline fallback for unquoted movie names such as
+    # "Coyote vs. Acme crosses..." or "Resident Evil breaks...".
+    cleaned = re.sub(r"\s+-\s+[^-]{2,80}$", "", title).strip()
+    split = re.split(
+        r"(?i)\b(?:crosses?|passed?|passes|nears?|approaches?|breaks?|sets?|opens?|"
+        r"hits?|reaches?|gets?|lands?|adds?|beats?|tops?|returns?|release[sd]?|"
+        r"trailer|box\s+office)\b",
+        cleaned,
+        maxsplit=1,
+    )[0].strip(" :-–—")
+    if 2 <= len(split) <= 100 and split.casefold() not in {x.casefold() for x in values}:
+        values.append(split)
+
+    return values[:3]
+
+
 
 FACT_CHECK_PREFERRED_DOMAINS = (
     "apnews.com", "reuters.com", "variety.com", "deadline.com",
@@ -851,10 +891,9 @@ def _fact_check_trust_tier(url: str) -> str:
 
 def _fact_check_queries(story: dict, date_start: str, date_end: str) -> list[str]:
     """Queries aimed at claims that can become stale inside a weekly script."""
-    subject = _story_context_subject(story)
-    if not subject:
+    subjects = _fact_check_subjects(story)
+    if not subjects:
         return []
-    quoted = f'"{subject}"'
     category = str(story.get("category") or "")
     date_bits = ""
     if date_start:
@@ -862,36 +901,54 @@ def _fact_check_queries(story: dict, date_start: str, date_end: str) -> list[str
     if date_end:
         date_bits += f" before:{date_end}"
 
-    queries = [f"{quoted} latest update{date_bits}"]
     story_text = " ".join([
         str(story.get("canonical_title") or ""),
         str(story.get("summary") or ""),
         str(story.get("news_hook") or ""),
     ]).casefold()
 
-    if category in {"box_office", "trend"} or any(
-        token in story_text for token in ("box office", "gross", "opening", "million", "billion", "گیشه")
-    ):
-        queries = [
-            f"{quoted} latest box office worldwide total domestic international weekend{date_bits}",
-            f"{quoted} box office second weekend cumulative total{date_bits}",
-        ]
-    elif category == "industry":
-        queries = [
-            f"{quoted} latest deal settlement acquisition value terms{date_bits}",
-            f"{quoted} official settlement agreement value latest{date_bits}",
-        ]
-    elif category == "upcoming_films":
-        queries = [
-            f"{quoted} official trailer release date theatrical limited wide latest{date_bits}",
-            f"{quoted} studio release date official latest{date_bits}",
-        ]
-    elif category == "tv_series":
-        queries = [
-            f"{quoted} Netflix official title cast premiere latest{date_bits}",
-            f"{quoted} official series announcement latest{date_bits}",
-        ]
+    queries: list[str] = []
+    for subject in subjects[:2]:
+        quoted = f'"{subject}"'
+        # Identity/type is a separate fact from release timing. This prevents a
+        # new subtitle from being guessed as a sequel/new film or vice versa.
+        queries.append(
+            f"{quoted} official new movie sequel remake reboot re-release rerelease extended cut returns theaters{date_bits}"
+        )
+
+        if category in {"box_office", "trend"} or any(
+            token in story_text for token in ("box office", "gross", "opening", "million", "billion", "گیشه")
+        ):
+            queries.extend([
+                f"{quoted} latest box office worldwide total domestic international weekend{date_bits}",
+                f"{quoted} latest worldwide cumulative box office total{date_bits}",
+                f"{quoted} crossed passed reached milestone million worldwide box office{date_bits}",
+                f"{quoted} second weekend cumulative total box office{date_bits}",
+            ])
+        elif category == "industry":
+            queries.extend([
+                f"{quoted} latest deal settlement acquisition value terms{date_bits}",
+                f"{quoted} official settlement agreement value latest{date_bits}",
+            ])
+        elif category == "upcoming_films":
+            queries.extend([
+                f"{quoted} official trailer release date theatrical limited wide latest{date_bits}",
+                f"{quoted} studio release date official latest{date_bits}",
+            ])
+        elif category == "tv_series":
+            queries.extend([
+                f"{quoted} Netflix official title cast premiere latest{date_bits}",
+                f"{quoted} official series announcement latest{date_bits}",
+            ])
+        else:
+            queries.append(f"{quoted} latest update{date_bits}")
+
     return list(dict.fromkeys(query.strip() for query in queries if query.strip()))
+
+
+def _fact_check_date_rank(value: str) -> float:
+    parsed = _parse_source_datetime(value)
+    return parsed.timestamp() if parsed is not None else 0.0
 
 
 def fetch_narration_fact_check_sources(
@@ -950,13 +1007,25 @@ def fetch_narration_fact_check_sources(
                     "query": query,
                     "trust_tier": _fact_check_trust_tier(url),
                 })
-                if len(by_story[story_id]) >= per_query_limit * 2:
+                # Limit each query independently. Do not let the first generic
+                # query consume the whole story budget before milestone/identity
+                # queries have a chance to contribute newer evidence.
+                query_hits = sum(1 for item in by_story[story_id] if item.get("query") == query)
+                if query_hits >= per_query_limit:
                     break
-        by_story[story_id].sort(key=lambda item: (
-            0 if item.get("trust_tier") == "preferred" else 1,
-            0 if item.get("temporal_role") == "current" else 1,
-            str(item.get("published_at") or ""),
-        ))
+
+        ranked = sorted(
+            by_story[story_id],
+            key=lambda item: (
+                1 if item.get("trust_tier") == "preferred" else 0,
+                1 if item.get("temporal_role") == "current" else 0,
+                _fact_check_date_rank(str(item.get("published_at") or "")),
+            ),
+            reverse=True,
+        )
+        # Keep enough diversity for identity + cumulative total + milestone
+        # checks, while preventing the final fact packet from ballooning.
+        by_story[story_id] = ranked[: max(12, per_query_limit * 3)]
     return by_story
 
 
