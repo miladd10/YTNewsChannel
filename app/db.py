@@ -157,6 +157,12 @@ def init_db() -> None:
                 fact_check_status TEXT NOT NULL DEFAULT 'not_run',
                 fact_check_issue_count INTEGER NOT NULL DEFAULT 0,
                 fact_check_json TEXT NOT NULL DEFAULT '{}',
+                claim_audit_status TEXT NOT NULL DEFAULT 'not_run',
+                claim_count INTEGER NOT NULL DEFAULT 0,
+                claim_verified_count INTEGER NOT NULL DEFAULT 0,
+                claim_attributed_count INTEGER NOT NULL DEFAULT 0,
+                claim_blocked_count INTEGER NOT NULL DEFAULT 0,
+                claim_audit_json TEXT NOT NULL DEFAULT '{}',
                 UNIQUE(project_id, version_number),
                 FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
@@ -213,6 +219,43 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_narration_reviews_project
                 ON narration_reviews(project_id, created_at);
+
+            CREATE TABLE IF NOT EXISTS claim_ledger (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                narration_id TEXT NOT NULL,
+                story_id TEXT NOT NULL DEFAULT '',
+                claim_type TEXT NOT NULL DEFAULT 'other',
+                canonical_text TEXT NOT NULL DEFAULT '',
+                verification_status TEXT NOT NULL DEFAULT 'blocked',
+                attribution_required INTEGER NOT NULL DEFAULT 0,
+                source_urls_json TEXT NOT NULL DEFAULT '[]',
+                data_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY(narration_id) REFERENCES narrations(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS narration_claim_checks (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                narration_id TEXT NOT NULL,
+                story_id TEXT NOT NULL DEFAULT '',
+                claim_type TEXT NOT NULL DEFAULT 'other',
+                sentence TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'blocked',
+                ledger_claim_ids_json TEXT NOT NULL DEFAULT '[]',
+                issue TEXT NOT NULL DEFAULT '',
+                data_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY(narration_id) REFERENCES narrations(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_claim_ledger_narration
+                ON claim_ledger(project_id, narration_id, story_id);
+            CREATE INDEX IF NOT EXISTS idx_narration_claim_checks_narration
+                ON narration_claim_checks(project_id, narration_id, status);
 
             CREATE TABLE IF NOT EXISTS media_plans (
                 id TEXT PRIMARY KEY,
@@ -365,6 +408,18 @@ def init_db() -> None:
             conn.execute("ALTER TABLE narrations ADD COLUMN fact_check_issue_count INTEGER NOT NULL DEFAULT 0")
         if not _column_exists(conn, "narrations", "fact_check_json"):
             conn.execute("ALTER TABLE narrations ADD COLUMN fact_check_json TEXT NOT NULL DEFAULT '{}'")
+        if not _column_exists(conn, "narrations", "claim_audit_status"):
+            conn.execute("ALTER TABLE narrations ADD COLUMN claim_audit_status TEXT NOT NULL DEFAULT 'not_run'")
+        if not _column_exists(conn, "narrations", "claim_count"):
+            conn.execute("ALTER TABLE narrations ADD COLUMN claim_count INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists(conn, "narrations", "claim_verified_count"):
+            conn.execute("ALTER TABLE narrations ADD COLUMN claim_verified_count INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists(conn, "narrations", "claim_attributed_count"):
+            conn.execute("ALTER TABLE narrations ADD COLUMN claim_attributed_count INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists(conn, "narrations", "claim_blocked_count"):
+            conn.execute("ALTER TABLE narrations ADD COLUMN claim_blocked_count INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists(conn, "narrations", "claim_audit_json"):
+            conn.execute("ALTER TABLE narrations ADD COLUMN claim_audit_json TEXT NOT NULL DEFAULT '{}'")
         if not _column_exists(conn, "narrations", "parent_narration_id"):
             conn.execute("ALTER TABLE narrations ADD COLUMN parent_narration_id TEXT NOT NULL DEFAULT ''")
         if not _column_exists(conn, "narrations", "revision_review_id"):
