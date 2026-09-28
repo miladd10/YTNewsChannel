@@ -450,6 +450,7 @@ Hard factual rules:
 - Never import a fact, number, date, quote, opinion, event, cast detail, score, rumor, or release date from the style corpus.
 - APPROVED CURRENT-WEEK NEWS has already passed freshness and verification gates. Do not revive skipped/Maybe stories from memory or the style corpus.
 - Every story must be about its stored news_hook. Older background facts may explain context, but do not present them as this week's development.
+- Each approved story may include spice_angles researched specifically around that story. Use ONLY angles with safe_to_narrate=true. The spice layer is optional evidence, not a quota.
 - Never turn a background source into a current-week claim.
 - Do not invent missing facts to make a section feel complete.
 - If a format section has no approved current-week material, omit it except Intro/Outro.
@@ -462,6 +463,11 @@ Writing rules:
 - Sound like one conversational host telling the week to a friend, not like a list of article summaries.
 - Treat the full style corpus as a behavioral reference. Notice recurring Filmbaz patterns across many episodes: how quickly the host reaches the actual news, how background is slipped in without stopping the story, how sections accelerate/decelerate, where a funny aside fits, and how transitions avoid sounding scripted.
 - Make the narration interesting because the FACTS are interesting: lead with the strongest concrete hook, useful comparison, odd detail, consequence, or contrast that is actually supported. Do not manufacture drama, fake excitement, rhetorical questions, or empty hype.
+- STORY SPICE RULE: before writing each story, inspect its safe_to_narrate spice_angles. If there is a genuinely useful rumor, controversy, critic reaction, social reaction, cool fact, production context, or surprising comparison, weave the strongest 1 angle naturally into a quick item and up to 2-3 into a deep Trends story. If there are no strong supported angles, do not pretend there are.
+- RUMORS: use them ONLY when the story packet contains a safe_to_narrate angle with type=rumor. Always frame it explicitly as unconfirmed/reporting/speculation ("فعلاً در حد شایعه‌ست...", "گزارش‌ها می‌گن...") and never let the rumor overwrite the verified news hook.
+- SOCIAL REACTION: never say "همه دارن می‌گن" or imply consensus from thin evidence. Attribute the platform/scale honestly ("بین بعضی از طرفدارها در ردیت...", "یکی از بحث‌هایی که بعد از تریلر راه افتاده...") according to the supplied angle.
+- CRITICS: only call something critic reaction when the supplied angle is type=critic_reaction. Do not turn audience/social comments into critic consensus.
+- COOL FACTS / BACKGROUND: use a surprising supported detail when it helps a casual viewer care, but keep it short and clearly contextual.
 - Avoid generic AI/news-presenter filler such as long "this may seem small but..." setups, repeated "the interesting thing is...", repeated "this means...", ceremonial section intros, or commentary that adds no information.
 - Prefer specific spoken phrasing over abstract corporate language. Explain a business/industry item in plain language only as much as a casual viewer needs to understand why it matters.
 - CASUAL-AUDIENCE FAMILIARITY RULE: on the first important mention of a director, actor, creator, or company that a general movie viewer may not immediately place, use the story's familiarity_anchor once when available: a very short natural reminder of the best-known relevant work/identity ("Brad Bird, the director many people know from The Incredibles"). Do not turn it into a biography. Skip the reminder for globally obvious household names/entities. For older story rows that do not yet have familiarity_anchor, you may use ONE recognition cue only when that credit/identity is explicitly supported by the story's approved article/background snippets. Never invent an anchor; never fill it from memory or guesswork.
@@ -498,6 +504,10 @@ Check:
 - whether each story reaches its strongest supported hook early enough;
 - CASUAL-AUDIENCE FAMILIARITY: when an approved story has familiarity_needed=true and a supported familiarity_anchor, check that the draft naturally gives that short recognition cue on first important mention. For older rows without those fields, still flag a missing cue when a non-obvious central name clearly needs orientation and the approved evidence explicitly supplies a safe recognizable credit. Also flag biographies, multiple-credit dumps, or unnecessary explanations for household names;
 - whether the narration uses concrete details/contrasts from the approved packet to create interest instead of invented drama;
+- whether the writer ignored a strong safe_to_narrate spice angle that would materially improve an otherwise flat story;
+- whether any rumor was added without an explicit safe type=rumor angle, or was phrased as fact instead of clearly unconfirmed;
+- whether critic reaction, social buzz, controversy, or "people are talking about..." claims actually match the supplied spice evidence and its scale;
+- whether the draft overuses spice: quick stories usually need at most one strong extra angle, not every available fact/reaction;
 - whether the draft reflects recurring patterns across the full style corpus rather than generic YouTube-news prose or quirks copied from one reference;
 - whether Trends receives appropriate depth while quick sections remain quick;
 - whether Intro hooks the actual episode and Outro closes briefly;
@@ -524,6 +534,10 @@ A concise assessment.
 # Freshness Audit
 - Status: PASS | NEEDS_WORK
 - Notes: ...
+
+# Context / Spice Audit
+- Status: PASS | NEEDS_WORK
+- Notes: Check supported rumors, controversy, critics, social reaction, cool facts and comparisons; flag invented/overstated spice AND obvious missed strong context that leaves a story unnecessarily flat.
 
 # Storytelling Audit
 - Status: PASS | NEEDS_WORK
@@ -558,6 +572,7 @@ Rules:
 - Do not import facts from the style transcript corpus.
 - When fixing style, use the corpus for recurring behavior (rhythm, compact context, transitions, natural humor), never for copied phrases.
 - If the review requests a familiarity cue, use only the approved story's familiarity_anchor; keep it to one short clause.
+- If the review requests richer context, use only safe_to_narrate spice_angles from that story. A rumor must remain explicitly labeled as rumor/unconfirmed.
 - Remove fake/empty hype rather than replacing it with different hype.
 - Do not broadly restart or re-outline the episode unless a blocking review issue explicitly requires it.
 - Return the complete revised narration only in Markdown.
@@ -584,6 +599,7 @@ def parse_review_gate(text: str) -> dict:
         "style_status": status("# Style Audit"),
         "factual_status": status("# Factual / Source Audit"),
         "freshness_status": status("# Freshness Audit"),
+        "spice_status": status("# Context / Spice Audit"),
         "storytelling_status": status("# Storytelling Audit"),
     }
     if counts["blocking"] or counts["major"] or any(value != "pass" for value in audits.values()):
