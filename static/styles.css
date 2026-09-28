@@ -175,3 +175,18 @@
 .draft-feedback-panel{margin-top:12px}
 
 .familiarity-note{margin:8px 0;padding:8px 10px;border-left:2px solid #45647e;background:#101720;color:#c6d2df;font-size:9px;line-height:1.45}
+
+.spice-panel{margin:10px 0;padding:10px 12px;border:1px solid #574831;border-radius:10px;background:#17130e}
+.spice-angle{padding:8px 0;border-top:1px solid #332b21}
+.spice-angle:first-of-type{border-top:0}
+.spice-angle.safe{opacity:1}
+.spice-angle.unsafe{opacity:.65}
+.spice-angle-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:4px}
+.spice-type{display:inline-flex;padding:3px 6px;border:1px solid #755b34;border-radius:999px;font-size:7px;text-transform:uppercase;letter-spacing:.04em}
+.spice-type.rumor{border-color:#7a4a69}
+.spice-type.controversy{border-color:#7a493c}
+.spice-type.critic_reaction{border-color:#48647c}
+.spice-type.social_buzz{border-color:#5b4c7c}
+.spice-evidence{font-size:8px;color:var(--muted)}
+.spice-text{font-size:9px;line-height:1.5;color:#d5dce4}
+.spice-angle small{display:block;margin-top:3px;color:var(--muted);font-size:8px;line-height:1.4}
