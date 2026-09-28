@@ -186,6 +186,8 @@ def voice_timeline(voice_segments: list[dict]) -> tuple[list[dict], float]:
             "end": round(end, 6),
             "duration": round(duration, 6),
             "alignment": _loads_alignment(row.get("alignment_json")),
+            "reserved_tail_seconds": max(0.0, float(row.get("reserved_tail_seconds") or 0)),
+            "reserved_tail_kind": str(row.get("reserved_tail_kind") or ""),
         })
         cursor = end
     return result, round(cursor, 6)
@@ -203,25 +205,46 @@ def _loads_alignment(value) -> dict:
 
 def story_windows(voice: list[dict]) -> list[dict]:
     windows: list[dict] = []
-    for segment in voice:
-        story_id = segment.get("story_id") or ""
+
+    def add_window(story_id: str, start: float, end: float, segment_id, kind: str = "") -> None:
+        if end <= start:
+            return
         if (
             windows
             and windows[-1]["story_id"] == story_id
-            and abs(float(windows[-1]["end"]) - float(segment["start"])) < 0.001
+            and windows[-1].get("reserved_kind", "") == kind
+            and abs(float(windows[-1]["end"]) - float(start)) < 0.001
         ):
-            windows[-1]["end"] = segment["end"]
-            windows[-1]["duration"] = round(float(windows[-1]["end"]) - float(windows[-1]["start"]), 6)
-            windows[-1]["segment_ids"].append(segment["id"])
+            windows[-1]["end"] = round(end, 6)
+            windows[-1]["duration"] = round(float(end) - float(windows[-1]["start"]), 6)
+            windows[-1]["segment_ids"].append(segment_id)
+            return
+        windows.append({
+            "story_id": story_id,
+            "start": round(start, 6),
+            "end": round(end, 6),
+            "duration": round(end - start, 6),
+            "segment_ids": [segment_id],
+            "reserved_kind": kind,
+        })
+
+    for segment in voice:
+        story_id = segment.get("story_id") or ""
+        start = float(segment["start"])
+        end = float(segment["end"])
+        reserved_tail = min(
+            max(0.0, float(segment.get("reserved_tail_seconds") or 0)),
+            max(0.0, end - start),
+        )
+        if story_id and reserved_tail > 0.05:
+            story_end = end - reserved_tail
+            add_window(story_id, start, story_end, segment["id"])
+            add_window("", story_end, end, segment["id"], segment.get("reserved_tail_kind") or "outro")
         else:
-            windows.append({
-                "story_id": story_id,
-                "start": segment["start"],
-                "end": segment["end"],
-                "duration": segment["duration"],
-                "segment_ids": [segment["id"]],
-            })
+            kind = segment.get("reserved_tail_kind") if not story_id else ""
+            add_window(story_id, start, end, segment["id"], kind or "")
     return windows
+
 
 
 def _candidate_available_seconds(candidate: dict) -> float | None:
