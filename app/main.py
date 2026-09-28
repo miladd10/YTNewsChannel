@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import json
 import re
 import uuid
@@ -621,8 +622,8 @@ def meta():
         "version": APP_VERSION,
         "release_name": APP_RELEASE_NAME,
         "pipeline": PIPELINE,
-        "cinema_weekly_sections": CINEMA_WEEKLY_SECTIONS,
-        "port": 8787,
+        "cinema_weekly_sections": [section["label"] for section in CINEMA_WEEKLY_FORMAT],
+        "port": int(os.environ.get("YT_NEWS_PORT", "8787")),
     }
 
 

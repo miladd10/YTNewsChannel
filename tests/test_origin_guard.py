@@ -28,3 +28,10 @@ def test_middleware_blocks_cross_site_post_end_to_end():
     client = TestClient(app)
     r = client.post("/api/pronunciations", json={"text": ""}, headers={"Origin": "https://evil.example"})
     assert r.status_code == 403
+
+
+def test_meta_endpoint_works():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    r = TestClient(app).get("/api/meta")
+    assert r.status_code == 200 and "Intro" in r.json()["cinema_weekly_sections"]
