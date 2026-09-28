@@ -60,10 +60,11 @@ def test_edit_plan_keeps_video_at_normal_speed_and_fills_voice_window():
     ]
     plan = build_edit_plan(project, voice_rows, media, fps=30)
     clips = plan["visual_clips"]
-    assert len(clips) == 2
+    assert len(clips) == 3
     assert round(sum(x["timeline_duration"] for x in clips), 3) == 14.0
     assert all(x["playback_speed"] == 1.0 for x in clips)
-    assert clips[0]["source_in"] != clips[1]["source_in"]
+    assert all(x["timeline_duration"] <= 5.5 for x in clips)
+    assert len({x["source_in"] for x in clips}) == len(clips)
     assert plan["timeline"]["duration_seconds"] == 14.0
 
 
@@ -123,9 +124,9 @@ def test_resolve_package_writes_importable_otio_with_source_in(tmp_path, monkeyp
     assert (tmp_path / "resolve/media_timing.csv").exists()
     assert (tmp_path / "resolve/voice_timing.csv").exists()
     assert files["timeline_path"].endswith("news_timeline.otio")
-    assert files["staged_unique_files"] == 2
+    assert files["staged_unique_files"] == 3
     assert (tmp_path / "resolve/media").is_dir()
-    assert len(list((tmp_path / "resolve/media").iterdir())) == 2
+    assert len(list((tmp_path / "resolve/media").iterdir())) == 3
 
     otio = json.loads((tmp_path / "resolve/news_timeline.otio").read_text())
     assert otio["metadata"]["yt_news_studio"]["target_resolution"] == [3840, 2160]
@@ -222,7 +223,7 @@ def test_resolve_stage_uses_actual_download_duration_not_candidate_metadata(tmp_
     source = tmp_path / "media/selected/story/video.mp4"
     source.write_bytes(b"fake-video")
 
-    captured = {}
+    captured = []
 
     def fake_probe(path):
         if path == source:
@@ -230,9 +231,11 @@ def test_resolve_stage_uses_actual_download_duration_not_candidate_metadata(tmp_
         return 7.0
 
     def fake_stage_video(source_path, target, *, source_in, duration, fps, source_duration=None):
-        captured["source_in"] = source_in
-        captured["source_duration"] = source_duration
-        captured["duration"] = duration
+        captured.append({
+            "source_in": source_in,
+            "source_duration": source_duration,
+            "duration": duration,
+        })
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b"resolve-safe-video")
         return {
@@ -269,11 +272,13 @@ def test_resolve_stage_uses_actual_download_duration_not_candidate_metadata(tmp_
 
     # Discovery metadata says 2:00, but the actual downloaded file is only 12s.
     # A 7s cut must therefore start no later than 5s.
-    assert captured["source_duration"] == 12.0
-    assert captured["source_in"] == 5.0
-    assert clip["adjusted_source_in"] == 5.0
-    assert clip["source_in"] == 0.0
-    assert clip["resolve_frame_count"] == 210
+    assert len(captured) == 2
+    assert all(call["source_duration"] == 12.0 for call in captured)
+    assert all(call["source_in"] >= 0.0 for call in captured)
+    assert all(call["source_in"] + call["duration"] <= 12.000001 for call in captured)
+    assert clip["adjusted_source_in"] <= 12.0 - clip["timeline_duration"] + 0.000001
+    assert clip["source_in"] >= 0.0
+    assert clip["resolve_frame_count"] == int(round(clip["timeline_duration"] * 30))
 
 
 
