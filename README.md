@@ -164,3 +164,14 @@ The local SQLite index lives in `data/ytnews.db` and is intentionally ignored by
 - Only an approved narration is eligible for Voice preparation. Approved narration is preferred over newer unapproved experiments.
 - Narration review files are stored under narration/reviews and review metadata is persisted in project.json.
 - The format/style architecture is data-driven so Games and Music can later add their own section blueprints and transcript libraries without replacing the Writer/Reviewer engine.
+
+
+### v0.3.30 Cinema section intelligence + social discovery
+- Every recurring cinema section now has an explicit semantic contract: mission, included story types, excluded story types, evidence expectations, preferred source types, social-source policy, and target story count.
+- AI ranking now also acts as a section-fit classifier. Stories are assigned by meaning rather than being permanently tied to whichever search query discovered them; weak-fit stories are downgraded instead of padding a section.
+- Public social discovery is added for appropriate sections using web-indexed Reddit, X/Twitter, and TikTok URLs. Celebrity, Viral Images, Toxic News, AI/Tech, Trends, Upcoming Films, Industry, and Now Available use social discovery only where the section contract allows it.
+- Social trust is explicit: a public X/TikTok post can be a primary-post candidate for what that account posted, but the app does not assume a discovered account is official. Reddit is discovery/community reaction and cannot by itself confirm an external factual claim unless the story is explicitly about Reddit reaction.
+- Section Selection shows platform badges (News, X/Twitter, TikTok, Reddit), section-fit status, and a warning for Reddit-only stories.
+- Step 2 now shows every cinema section, including zero-result sections, with a concise description of what belongs there and the expected story-count range. Missing coverage is visible instead of silently disappearing.
+- Social platform matching uses exact hostname boundaries, preventing false matches such as netflix.com being mistaken for x.com.
+- Public social discovery does not imply authenticated/private-feed access; logged-in-only, private, deleted, or non-indexed posts remain unavailable without a platform-specific authenticated integration.
