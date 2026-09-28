@@ -576,6 +576,10 @@ Rules:
 - Mark a story quick when evidence is thin.
 - For an unfamiliar creator/person/company, include one supported recognition cue when available.
 - Prefer concrete oddities, contrasts, production details, plot premise, critic/social reaction, numbers, dates and causal facts over abstract editorial language.
+- For every volatile number/date/status, preserve its exact semantic scope in the plan: opening weekend vs cumulative total, weekend gross vs total gross, domestic vs international vs worldwide, estimate vs final, limited vs wide release, announced vs already released.
+- SOURCE DATE IS NOT EVENT DATE. A current-week article can mention an older opening weekend or milestone as background. Do not promote that older subtotal into the current value.
+- When multiple supplied sources contain successive values for the same volatile metric, use the latest reliable in-window value for "current total / now / has reached" wording and keep older values only as explicitly historical comparisons.
+- If a later supplied source shows a milestone already happened, never plan stale wording such as "approaching", "close to", or "on the way to".
 - Keep rumors explicitly identified as rumor/unconfirmed.
 - Social reaction must preserve its actual platform and scale.
 - Merge planning for multiple story IDs only when they clearly describe the same movie/event; still keep every ID represented.
@@ -636,6 +640,10 @@ Hard factual rules:
 - Never import a fact, number, date, quote, opinion, event, cast detail, score, rumor, or release date from the style corpus.
 - APPROVED CURRENT-WEEK NEWS has already passed freshness and verification gates. Do not revive skipped/Maybe stories from memory or the style corpus.
 - Every story must be about its stored news_hook. Older background facts may explain context, but do not present them as this week's development.
+- Numeric/status scope is part of the fact. Never rewrite "opened to $108.3M worldwide" as "has reached $108.3M worldwide" if the packet is already in a later weekend. Keep opening-weekend figures explicitly labeled as opening-weekend figures.
+- For box office, distinguish current cumulative total from this weekend's gross, opening weekend, domestic total, international total, and worldwide total. Prefer the latest reliable in-window figure when saying "now", "currently", "has reached", or equivalent Persian wording like "رسیده".
+- A fresh article can quote an old number. Publication this week does NOT make every number in that article current.
+- Preserve release scope: a limited 70mm/special theatrical engagement must not become a generic or wide theatrical release.
 - Each approved story may include spice_angles researched specifically around that story. Use ONLY angles with safe_to_narrate=true. The spice layer is optional evidence, not a quota.
 - Never turn a background source into a current-week claim.
 - Do not invent missing facts to make a section feel complete.
@@ -696,6 +704,11 @@ The style corpus is never factual authority. Never ask the writer to copy old wo
 
 Check:
 - unsupported or invented facts;
+- CLAIM-SCOPE ERRORS: check every number/date/status for opening-vs-cumulative, weekend-vs-total, domestic-vs-worldwide, estimate-vs-final, limited-vs-wide, and historical-vs-current wording;
+- STALE VOLATILE VALUES: if later supplied evidence supersedes an older box-office total/rank/milestone, flag the older value when the draft phrases it as current. Example: an opening-weekend worldwide number cannot be narrated as the film's current worldwide total after a later weekend;
+- SOURCE-DATE CONFUSION: a source published inside the selected window can still describe an event/number from before the window. Flag any draft that treats the article publication date as proof that the underlying metric is current;
+- MILESTONE DRIFT: flag "approaching/close to" when later supplied evidence says the threshold was already crossed;
+- RELEASE-SCOPE DRIFT: flag limited/special theatrical runs rewritten as broad theatrical releases;
 - any narration that treats old/background context as if it happened in the selected week;
 - whether every story actually narrates its stored current-week news_hook;
 - any story whose evidence/verification limits are overstated;
@@ -787,6 +800,7 @@ Rules:
 - Use only spice_angles with safe_to_narrate=true.
 - It is correct for a searched story to receive no extra line if nothing strong was found.
 - Keep each verified news_hook as the core. Related context enriches it; it never replaces it.
+- Do not regress factual freshness while enriching. Preserve exact scope for box-office numbers, dates, rankings, opening-weekend figures, current cumulative totals, and release type. Never turn an older subtotal into a current "has reached" statement.
 - Rumor may appear ONLY when type=rumor and safe_to_narrate=true. Keep it explicitly unconfirmed/reporting/speculation.
 - Never turn rumor into fact.
 - For social_buzz, NAME THE PLATFORM. Prefer wording like "توی ردیت بعضی از کاربرا..." or "توی X یکی از بحث‌ها..." when that is where the evidence comes from. Avoid vague "مردم توی شبکه‌های اجتماعی می‌گن" unless multiple explicitly named platforms genuinely support the same pattern.
@@ -816,6 +830,7 @@ Rules:
 - Make only changes needed to resolve the review, BUT if the Style/Storytelling audit says an affected story is fundamentally over-compressed or article-like, rewrite that whole story's spoken passage rather than patching one sentence.
 - Preserve everything already correct.
 - Preserve current-week factual fidelity and STORY markers.
+- Preserve claim scope exactly: opening weekend is not current cumulative total; weekend gross is not total gross; domestic is not worldwide; limited theatrical is not wide theatrical. If reviewer feedback identifies a stale volatile value, use only the newer supported value in the packet or qualify/remove the claim.
 - Do not import facts from the style transcript corpus.
 - When fixing style, obey the supplied Style Blueprint first and use the corpus/flow anchors for recurring behavior (oral syntax, story micro-arcs, rhythm, context, transitions, natural humor), never for copied phrases.
 - A revision must not preserve a weak two-sentence news brief merely because its facts are correct. If the approved packet contains richer supported beats, rebuild the passage into a natural spoken mini-story.
