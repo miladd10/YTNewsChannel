@@ -1314,12 +1314,51 @@ def generate_narration(project_id: str, body: GenerateBody):
         "approved_sections": _sectioned_story_packet(baseline_stories),
         "additional_instructions": body.instructions,
     }
-    user = (
-        "<current_week_authoritative_packet>\n"
-        + json.dumps(packet, ensure_ascii=False)
-        + "\n</current_week_authoritative_packet>\n\n"
-        + build_style_packet(style_rows)
+    channel = project.get("channel") or "cinema"
+    content_type = project.get("content_type") or "weekly_news"
+    style_profile = _ensure_style_profile(
+        channel,
+        content_type,
+        style_rows,
+        provider,
+        model,
     )
+
+    content_plan_error = ""
+    try:
+        plan_text, _, _ = generate_text(
+            provider,
+            model,
+            CONTENT_PLAN_SYSTEM,
+            json.dumps(packet, ensure_ascii=False),
+        )
+        content_plan = _parse_json_object_text(plan_text)
+    except Exception as exc:
+        # Do not silently replace the facts with made-up planning. The writer
+        # still gets the complete authoritative packet and an explicit planner
+        # error so it can keep thin stories short.
+        content_plan_error = str(exc)
+        content_plan = {
+            "intro_hooks": [],
+            "sections": [],
+            "planner_error": content_plan_error,
+        }
+
+    user = "\n".join([
+        "<current_week_authoritative_packet>",
+        json.dumps(packet, ensure_ascii=False),
+        "</current_week_authoritative_packet>",
+        "",
+        "<content_plan>",
+        json.dumps(content_plan, ensure_ascii=False),
+        "</content_plan>",
+        "",
+        "<style_blueprint>",
+        style_profile.get("profile_text") or "",
+        "</style_blueprint>",
+        "",
+        build_style_packet(style_rows, max_chars=80000),
+    ])
     try:
         text, actual_provider, actual_model = generate_text(provider, model, WRITER_SYSTEM, user)
     except Exception as exc:
@@ -1341,6 +1380,12 @@ def generate_narration(project_id: str, body: GenerateBody):
             ),
         )
         _write_narration_file(project, version, text)
+        plan_folder = Path(project["root_path"]) / "narration" / "plans"
+        plan_folder.mkdir(parents=True, exist_ok=True)
+        (plan_folder / f"v{version:02d}_content_plan.json").write_text(
+            json.dumps(content_plan, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
         conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (stamp, project_id))
         save_manifest(conn, project_id)
     return {
@@ -1350,6 +1395,9 @@ def generate_narration(project_id: str, body: GenerateBody):
         "provider": actual_provider,
         "model": actual_model,
         "style_transcript_count": sum(1 for row in style_rows if int(row.get("enabled") or 0)),
+        "style_profile_current": bool(style_profile.get("current")),
+        "style_profile_transcript_count": int(style_profile.get("enabled_transcript_count") or 0),
+        "content_plan_error": content_plan_error,
     }
 
 
