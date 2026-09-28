@@ -145,8 +145,20 @@ def _compose_image_panel(root: Path, images: list[dict], layout_hint: str, group
         return None
 
     count = min(3, len(usable))
-    layout = layout_hint if layout_hint in {"two_up", "three_up", "person_plus_title", "collage"} else ("three_up" if count >= 3 else "two_up")
-    if count == 2:
+    layout = layout_hint if layout_hint in {
+        "two_up", "three_up", "stacked_two", "stacked_three", "person_plus_title", "collage"
+    } else ("three_up" if count >= 3 else "two_up")
+    if layout == "stacked_two" and count >= 2:
+        boxes = [(0, 0, RESOLVE_WIDTH, 1072), (0, 1088, RESOLVE_WIDTH, RESOLVE_HEIGHT)]
+        count = 2
+    elif layout == "stacked_three" and count >= 3:
+        boxes = [
+            (0, 0, RESOLVE_WIDTH, 709),
+            (0, 725, RESOLVE_WIDTH, 1435),
+            (0, 1451, RESOLVE_WIDTH, RESOLVE_HEIGHT),
+        ]
+        count = 3
+    elif count == 2:
         boxes = [(0, 0, 1912, RESOLVE_HEIGHT), (1928, 0, RESOLVE_WIDTH, RESOLVE_HEIGHT)]
     else:
         boxes = [
@@ -208,7 +220,7 @@ def _semantic_composite_candidates(root: Path | None, images: list[dict]) -> lis
     for item in images:
         group = str(item.get("coverage_group") or "").strip()
         layout = str(item.get("layout_hint") or "single")
-        if not group or layout not in {"two_up", "three_up", "person_plus_title", "collage"}:
+        if not group or layout not in {"two_up", "three_up", "stacked_two", "stacked_three", "person_plus_title", "collage"}:
             continue
         grouped.setdefault(group, []).append(item)
 
