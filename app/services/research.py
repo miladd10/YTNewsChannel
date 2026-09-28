@@ -558,6 +558,9 @@ def cluster_articles(
             "news_hook_date": "",
             "familiarity_needed": False,
             "familiarity_anchor": "",
+            "search_subject": "",
+            "spice_angles": [],
+            "spice_source_ids": [],
             "temporal_gate": "pass" if evidence["freshness"] == "current" else ("fail" if evidence["freshness"] == "stale" else "warning"),
             "verification_gate": "pass" if evidence["verification_status"] in {"verified", "reported"} else "fail",
             **evidence,
@@ -620,7 +623,7 @@ def ai_rank_stories(stories: list[dict], project: dict, provider: str, model: st
 You receive strict SECTION CONTRACTS and discovered stories. Classify each story by MEANING, not by the query that happened to find it.
 
 Return ONLY valid JSON: one object per supplied story using exactly these keys:
-id, category, section_fit, attention, importance, freshness, news_hook, news_hook_date, verification_status, verification_notes, familiarity_needed, familiarity_anchor, confidence, visual_potential, uniqueness, score, decision, rationale.
+id, category, section_fit, attention, importance, freshness, news_hook, news_hook_date, verification_status, verification_notes, search_subject, familiarity_needed, familiarity_anchor, confidence, visual_potential, uniqueness, score, decision, rationale.
 
 Rules:
 - category must be one of the supplied researchable section keys.
@@ -633,6 +636,7 @@ Rules:
 - news_hook_date should be YYYY-MM-DD only when the supplied evidence supports that date; otherwise return an empty string.
 - verification_status is verified|reported|needs_verification|rejected.
 - verification_notes briefly explain which evidence verifies the hook and any remaining limitation.
+- search_subject is a concise searchable subject for the story (movie title, person, company/deal, series title, etc.), not the whole headline. Use only names/titles supported by the supplied evidence.
 - familiarity_needed is true|false. Set true only when a central director/actor/creator/company is important to the story but a casual movie audience may not immediately recognize the name.
 - familiarity_anchor is ONE very short recognition cue supported by supplied current/background evidence, ideally a single famous work or clear identity (for example: "director of The Incredibles"). Leave it empty for household names, obvious companies/platforms, or when the supplied evidence does not support a safe anchor.
 - Never invent a filmography credit or company association to fill familiarity_anchor.
@@ -684,7 +688,7 @@ Rules:
             value = item.get(key)
             if isinstance(value, str) and value.strip():
                 story[key] = value.strip().lower()
-        for key in ("rationale", "news_hook", "news_hook_date", "verification_notes", "familiarity_anchor"):
+        for key in ("rationale", "news_hook", "news_hook_date", "verification_notes", "search_subject", "familiarity_anchor"):
             value = item.get(key)
             if isinstance(value, str):
                 story[key] = value.strip()
@@ -704,6 +708,267 @@ Rules:
             pass
         _apply_story_quality_gates(story, project)
     stories.sort(key=lambda x: x["score"], reverse=True)
+    return stories, actual_provider, actual_model
+
+
+
+SPICE_TYPES = {
+    "rumor",
+    "controversy",
+    "critic_reaction",
+    "social_buzz",
+    "cool_fact",
+    "surprising_comparison",
+    "production_context",
+}
+
+
+def _story_context_subject(story: dict) -> str:
+    subject = str(story.get("search_subject") or "").strip()
+    if subject:
+        return subject[:140]
+    title = str(story.get("canonical_title") or "").strip()
+    title = re.sub(r"\s+-\s+[^-]{2,80}$", "", title).strip()
+    return title[:140]
+
+
+def _spice_queries(story: dict, date_start: str, date_end: str) -> list[tuple[str, str]]:
+    subject = _story_context_subject(story)
+    if not subject:
+        return []
+    quoted = f'"{subject}"'
+    date_bits = ""
+    if date_start:
+        date_bits += f" after:{_search_after_date_for_inclusive_start(date_start)}"
+    if date_end:
+        date_bits += f" before:{date_end}"
+    return [
+        ("rumor_drama", f"{quoted} rumor controversy backlash dispute drama{date_bits}"),
+        ("critics", f"{quoted} critics review reaction Rotten Tomatoes Metacritic{date_bits}"),
+        ("social_reddit", f"site:reddit.com {quoted} reaction discussion{date_bits}"),
+        ("social_public", f"(site:x.com OR site:twitter.com OR site:tiktok.com) {quoted} reaction{date_bits}"),
+        ("cool_context", f"{quoted} interview behind the scenes production fact director cast{date_bits}"),
+    ]
+
+
+def fetch_story_spice_sources(
+    stories: list[dict],
+    date_start: str,
+    date_end: str,
+    *,
+    max_stories: int = 18,
+    per_query_limit: int = 4,
+) -> tuple[list[dict], dict[str, list[dict]], list[dict]]:
+    """Search around strong current stories for optional narrative angles.
+
+    These results do NOT change the story's verification/freshness gate.
+    They are optional context that must be separately validated before narration.
+    """
+    candidates = [
+        story for story in stories
+        if str(story.get("freshness") or "") in {"current", "followup"}
+        and str(story.get("verification_gate") or "") == "pass"
+        and str(story.get("section_fit") or "medium") != "low"
+        and float(story.get("score") or 0) >= 5.0
+    ][:max_stories]
+
+    all_articles: list[dict] = []
+    by_story: dict[str, list[dict]] = defaultdict(list)
+    diagnostics: list[dict] = []
+
+    for story in candidates:
+        story_id = str(story["id"])
+        seen_urls: set[str] = set()
+        for context_kind, query in _spice_queries(story, date_start, date_end):
+            found = 0
+            try:
+                results = list(DDGS().text(query, max_results=per_query_limit) or [])
+                for result in results:
+                    url = str(result.get("href") or result.get("url") or "").strip()
+                    if not url or url.casefold() in seen_urls:
+                        continue
+                    title = _plain(str(result.get("title") or ""))
+                    body = _plain(str(result.get("body") or result.get("snippet") or ""))
+                    if not title and not body:
+                        continue
+                    seen_urls.add(url.casefold())
+                    platform = _social_platform_for_url(url)
+                    raw_date = str(result.get("date") or result.get("published") or "")
+                    article = annotate_source_window({
+                        "id": str(uuid.uuid4()),
+                        "title": title or body[:180],
+                        "url": url,
+                        "source": _social_source_label(platform) if platform else _plain(str(result.get("source") or "")) or (urlparse(url).hostname or "Web"),
+                        "published_at": raw_date,
+                        "category": str(story.get("category") or ""),
+                        "snippet": body[:1200],
+                        "query_key": query,
+                        "raw": {
+                            "source_kind": "social" if platform else "story_context",
+                            "platform": platform,
+                            "context_kind": context_kind,
+                            "context_story_id": story_id,
+                            "trust_role": (
+                                "community_signal" if platform == "reddit"
+                                else "primary_post_candidate" if platform in {"x", "tiktok"}
+                                else "context_candidate"
+                            ),
+                        },
+                    }, date_start, date_end)
+                    all_articles.append(article)
+                    by_story[story_id].append(article)
+                    found += 1
+                diagnostics.append({
+                    "story_id": story_id,
+                    "context_kind": context_kind,
+                    "query": query,
+                    "count": found,
+                    "ok": True,
+                    "source_kind": "story_context",
+                })
+            except Exception as exc:
+                diagnostics.append({
+                    "story_id": story_id,
+                    "context_kind": context_kind,
+                    "query": query,
+                    "count": 0,
+                    "ok": False,
+                    "error": str(exc),
+                    "source_kind": "story_context",
+                })
+    return all_articles, by_story, diagnostics
+
+
+def _validated_spice_angles(raw_angles: object, sources: list[dict]) -> list[dict]:
+    if not isinstance(raw_angles, list):
+        return []
+    source_by_url = {
+        str(source.get("url") or "").strip(): source
+        for source in sources
+        if str(source.get("url") or "").strip()
+    }
+    cleaned: list[dict] = []
+    for angle in raw_angles[:6]:
+        if not isinstance(angle, dict):
+            continue
+        kind = str(angle.get("type") or "").strip().lower()
+        text = str(angle.get("text") or "").strip()
+        if kind not in SPICE_TYPES or not text:
+            continue
+        urls = [
+            str(url).strip() for url in (angle.get("source_urls") or [])
+            if str(url).strip() in source_by_url
+        ]
+        # No evidence URL from the supplied search packet = not narratable.
+        if not urls:
+            continue
+        evidence_status = str(angle.get("evidence_status") or "weak").strip().lower()
+        if evidence_status not in {"strong", "supported", "weak", "social_only"}:
+            evidence_status = "weak"
+        safe = bool(angle.get("safe_to_narrate"))
+        if evidence_status in {"weak"}:
+            safe = False
+        if kind == "rumor" and evidence_status == "social_only":
+            # Reddit/X chatter alone is not promoted into a factual "rumor says..."
+            # line. It may remain visible as social_buzz instead.
+            safe = False
+        cleaned.append({
+            "type": kind,
+            "text": text,
+            "evidence_status": evidence_status,
+            "safe_to_narrate": safe,
+            "source_urls": urls[:4],
+            "source_labels": [
+                str(source_by_url[url].get("source") or "") for url in urls[:4]
+            ],
+            "usage_note": str(angle.get("usage_note") or "").strip()[:500],
+        })
+    # Put usable angles first without inventing an ordering score.
+    cleaned.sort(key=lambda item: (not item["safe_to_narrate"], item["type"]))
+    return cleaned
+
+
+def ai_enrich_story_spice(
+    stories: list[dict],
+    sources_by_story: dict[str, list[dict]],
+    project: dict,
+    provider: str,
+    model: str,
+) -> tuple[list[dict], str, str]:
+    packets = []
+    for story in stories:
+        sources = sources_by_story.get(str(story.get("id"))) or []
+        if not sources:
+            continue
+        packets.append({
+            "id": story["id"],
+            "title": story.get("canonical_title") or "",
+            "search_subject": _story_context_subject(story),
+            "category": story.get("category") or "",
+            "news_hook": story.get("news_hook") or "",
+            "news_hook_date": story.get("news_hook_date") or "",
+            "familiarity_anchor": story.get("familiarity_anchor") or "",
+            "sources": [
+                {
+                    "title": source.get("title") or "",
+                    "url": source.get("url") or "",
+                    "source": source.get("source") or "",
+                    "published_at": source.get("published_at") or "",
+                    "temporal_role": str((source.get("raw") or {}).get("temporal_role") or ""),
+                    "source_kind": str((source.get("raw") or {}).get("source_kind") or ""),
+                    "platform": str((source.get("raw") or {}).get("platform") or ""),
+                    "context_kind": str((source.get("raw") or {}).get("context_kind") or ""),
+                    "snippet": str(source.get("snippet") or "")[:900],
+                }
+                for source in sources[:20]
+            ],
+        })
+    if not packets:
+        return stories, provider, model
+
+    system = """You are the related-context editor for a weekly cinema news show.
+For each CURRENT verified story, inspect ONLY the supplied related search evidence and extract OPTIONAL angles that can make narration richer.
+
+Return ONLY JSON: an array of objects:
+{"id":"...", "spice_angles":[
+  {"type":"rumor|controversy|critic_reaction|social_buzz|cool_fact|surprising_comparison|production_context",
+   "text":"concise factual angle",
+   "evidence_status":"strong|supported|weak|social_only",
+   "safe_to_narrate":true|false,
+   "source_urls":["exact supplied URL"],
+   "usage_note":"how to frame it without overstating"}
+]}
+
+STRICT RULES:
+- It is perfectly valid to return an empty spice_angles array. NEVER manufacture spice.
+- RUMOR: only create type=rumor when a supplied source explicitly reports/describes a rumor, report, speculation, or unconfirmed claim. Never infer a rumor because something would be dramatic. Keep it explicitly labeled as rumor/unconfirmed in text and usage_note.
+- A rumor is safe_to_narrate only when a reputable report/direct named source supports that the rumor exists. Reddit-only or random social speculation is NOT enough to say "there is a rumor"; keep that unsafe or classify genuinely notable discussion as social_buzz.
+- CONTROVERSY: needs a concrete dispute/backlash/legal/creative conflict supported by evidence. Ordinary disagreement is not automatically controversy.
+- CRITIC_REACTION: use actual critic/review evidence. Do not turn fan comments into critics.
+- SOCIAL_BUZZ: summarize only a pattern actually visible in the supplied evidence. One isolated comment/post is not "people are saying". State the platform when useful and do not imply statistical consensus.
+- COOL_FACT / PRODUCTION_CONTEXT: may use older/background evidence if directly relevant and well supported, but clearly treat it as context rather than this week's event.
+- SURPRISING_COMPARISON: only when the supplied evidence gives the numbers/facts needed for the comparison.
+- Do not diagnose health, infer private life, repeat abusive claims, or convert anonymous gossip into fact.
+- Do not use outside knowledge or memory.
+- source_urls MUST be copied exactly from the supplied source list.
+- Prefer 0-3 strong angles over many weak ones.
+"""
+    user = json.dumps({
+        "project_window": {
+            "date_start": project.get("date_start"),
+            "date_end_exclusive": project.get("date_end"),
+        },
+        "stories": packets,
+    }, ensure_ascii=False)
+    text, actual_provider, actual_model = generate_text(provider, model, system, user)
+    parsed = _parse_json_array(text)
+    by_id = {str(item.get("id") or ""): item for item in parsed if isinstance(item, dict)}
+    for story in stories:
+        story_id = str(story.get("id") or "")
+        item = by_id.get(story_id) or {}
+        sources = sources_by_story.get(story_id) or []
+        story["spice_angles"] = _validated_spice_angles(item.get("spice_angles"), sources)
+        story["spice_source_ids"] = [str(source.get("id")) for source in sources if source.get("id")]
     return stories, actual_provider, actual_model
 
 
