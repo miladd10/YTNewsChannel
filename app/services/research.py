@@ -579,6 +579,100 @@ def cluster_articles(
     return stories
 
 
+_SUBJECT_GENERIC_TOKENS = {
+    "the", "a", "an", "box", "office", "global", "worldwide", "domestic", "international",
+    "movie", "film", "trailer", "official", "news", "update", "latest",
+}
+_DECISION_RANK = {"include": 2, "maybe": 1, "skip": 0}
+_VERIFICATION_RANK = {"verified": 3, "reported": 2, "needs_verification": 1, "rejected": 0}
+
+
+def story_subject_key(subject: str) -> str:
+    """Normalize a story's search_subject so coverage of the same event groups.
+
+    Punctuation, case, 4-digit years and generic news words are ignored;
+    everything else (including season/part numbers) must match exactly.
+    """
+    text = re.sub(r"[^\w\s]", " ", str(subject or "").casefold())
+    tokens = [token for token in text.split()
+              if token not in _SUBJECT_GENERIC_TOKENS and not re.fullmatch(r"(?:19|20)\d{2}", token)]
+    return " ".join(tokens)
+
+
+def merge_duplicate_stories(stories: list[dict], articles: list[dict], project: dict) -> list[dict]:
+    """Merge stories the ranker gave the same subject into one story.
+
+    Clustering by headline similarity misses differently-worded coverage of one
+    event, which splits its sources across stories (and the claim ledger ties a
+    fact to one story's sources). The merged story keeps the best-judged
+    member's hook, decision and category, unions the articles, recomputes the
+    evidence counts from them and re-runs the quality gates.
+    """
+    date_start = str(project.get("date_start") or "")
+    date_end = str(project.get("date_end") or "")
+    by_id = {str(article.get("id")): article for article in articles}
+    groups: dict[str, list[dict]] = defaultdict(list)
+    order: list[object] = []
+    for story in stories:
+        key = story_subject_key(story.get("search_subject") or "")
+        if not key:
+            order.append(story)
+            continue
+        if key not in groups:
+            order.append(key)
+        groups[key].append(story)
+
+    merged_output: list[dict] = []
+    for entry in order:
+        if isinstance(entry, dict):
+            merged_output.append(entry)
+            continue
+        members = groups[entry]
+        if len(members) == 1:
+            merged_output.append(members[0])
+            continue
+        members = sorted(
+            members,
+            key=lambda item: (_DECISION_RANK.get(str(item.get("decision") or ""), 0),
+                              float(item.get("score") or 0), int(item.get("source_count") or 0)),
+            reverse=True,
+        )
+        primary = dict(members[0])
+        article_ids = list(dict.fromkeys(aid for member in members for aid in member.get("article_ids") or []))
+        cluster = [annotate_source_window(by_id[aid], date_start, date_end) for aid in article_ids if aid in by_id]
+        evidence = _evidence_metrics(cluster) if cluster else {}
+        best_ai_verification = max(
+            (str(member.get("verification_status") or "needs_verification") for member in members),
+            key=lambda value: _VERIFICATION_RANK.get(value, 0),
+        )
+        identities = {_source_identity(item) for item in cluster if _source_identity(item)}
+        primary.update({
+            **{key: value for key, value in evidence.items() if key != "verification_status"},
+            "verification_status": best_ai_verification,
+            "article_ids": article_ids,
+            "source_count": max(len(identities), int(primary.get("source_count") or 0)),
+            "source_platforms": sorted({p for m in members for p in m.get("source_platforms") or []}),
+            "source_kinds": sorted({k for m in members for k in m.get("source_kinds") or []}),
+            "reddit_only": all(bool(m.get("reddit_only")) for m in members),
+            "primary_social_count": sum(int(m.get("primary_social_count") or 0) for m in members),
+            "spice_source_ids": list(dict.fromkeys(x for m in members for x in m.get("spice_source_ids") or [])),
+            "score": max(float(m.get("score") or 0) for m in members),
+            "decision": primary.get("decision"),
+            "merged_story_count": len(members),
+            "merged_titles": [str(m.get("canonical_title") or "") for m in members[1:]],
+        })
+        if not primary.get("familiarity_anchor"):
+            donor = next((m for m in members if m.get("familiarity_anchor")), None)
+            if donor:
+                primary["familiarity_needed"] = donor.get("familiarity_needed")
+                primary["familiarity_anchor"] = donor.get("familiarity_anchor")
+        primary["rationale"] = (str(primary.get("rationale") or "").strip()
+                                + f" Merged {len(members)} stories covering the same subject.").strip()
+        merged_output.append(_apply_story_quality_gates(primary, project))
+    merged_output.sort(key=lambda item: (float(item.get("score") or 0), int(item.get("source_count") or 0)), reverse=True)
+    return merged_output
+
+
 def heuristic_score(cluster: list[dict], source_count: int) -> float:
     category_weight = {
         "trend": 2.5,

@@ -57,6 +57,7 @@ from .services.research import (
     annotate_source_window,
     cluster_articles,
     fetch_google_news,
+    merge_duplicate_stories,
     fetch_social_sources,
     fetch_story_spice_sources,
     fetch_narration_fact_check_sources,
@@ -718,6 +719,7 @@ def run_research(project_id: str, body: ResearchBody):
             stories, actual_provider, actual_model = ai_rank_stories(stories, project, provider, model)
         except Exception as exc:
             ai_error = str(exc)
+    stories = merge_duplicate_stories(stories, articles, project)
 
     run_id = str(uuid.uuid4())
     stamp = now()
