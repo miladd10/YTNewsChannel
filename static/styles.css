@@ -108,3 +108,6 @@
 .resolve-missing-item strong{display:block;margin-bottom:4px}
 .resolve-missing-item small{display:block;color:#d8b46b}
 .resolve-missing-item p{margin:7px 0 0;color:var(--muted);font-size:10px;line-height:1.5}
+
+.quality-badge.image-best{border-color:#2f7a56}
+.quality-badge.image-warning{border-color:#7a4b2f}
