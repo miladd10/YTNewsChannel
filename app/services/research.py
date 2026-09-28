@@ -15,24 +15,10 @@ import xml.etree.ElementTree as ET
 import httpx
 
 from .ai import generate_text
+from .cinema_format import FORMAT_BY_KEY, research_query_groups, section_label
 
-CINEMA_QUERY_GROUPS = [
-    ("trend", "movie film box office opening weekend trailer"),
-    ("industry", "Hollywood studio streaming merger acquisition lawsuit cinema business"),
-    ("upcoming_films", "upcoming movie casting director release date first look trailer"),
-    ("tv_series", "TV series streaming renewal cancellation HBO Netflix Apple TV Disney Marvel"),
-    ("celebrities", "actor actress director filmmaker interview award cinema celebrity"),
-    ("ai_tech", "AI artificial intelligence film movie actor VFX Hollywood"),
-]
-
-CATEGORY_LABELS = {
-    "trend": "Trends",
-    "industry": "Industry & Business",
-    "upcoming_films": "Upcoming Films",
-    "tv_series": "TV Series",
-    "celebrities": "Celebrities",
-    "ai_tech": "AI & Tech",
-}
+CINEMA_QUERY_GROUPS = research_query_groups()
+CATEGORY_LABELS = {key: section_label(key) for key in FORMAT_BY_KEY}
 
 
 def _now_iso() -> str:
@@ -185,6 +171,10 @@ def heuristic_score(cluster: list[dict], source_count: int) -> float:
         "tv_series": 1.8,
         "celebrities": 1.5,
         "ai_tech": 1.6,
+        "viral_images": 1.4,
+        "box_office": 2.3,
+        "now_available": 1.3,
+        "toxic_news": 1.1,
     }.get(cluster[0].get("category", ""), 1.0)
     source_signal = min(4.5, 1.4 * math.log2(max(1, source_count) + 1))
     title = cluster[0].get("title", "").lower()
@@ -213,7 +203,7 @@ def ai_rank_stories(stories: list[dict], project: dict, provider: str, model: st
         }
         for s in stories[:80]
     ]
-    system = """You are the research editor for a weekly cinema-news YouTube show. Evaluate only the supplied stories. Do not invent facts. Return ONLY valid JSON: an array with one object per supplied story using exactly these keys: id, attention, importance, freshness, confidence, visual_potential, uniqueness, score, decision, rationale. Allowed signal values are low|medium|high except confidence is rumor|reported|confirmed and freshness is current|followup|stale. score is 0-10. decision is include|maybe|skip. Favor stories that are genuinely important, widely discussed, fresh in the selected week, well-supported, and visually useful. A rumor can still be included only when it is itself newsworthy and clearly labelled as rumor. Avoid filling categories for the sake of a template."""
+    system = """You are the research editor for a section-driven weekly cinema-news YouTube show. Evaluate only the supplied stories and keep each story in its supplied format section/category. Do not invent facts. Return ONLY valid JSON: an array with one object per supplied story using exactly these keys: id, attention, importance, freshness, confidence, visual_potential, uniqueness, score, decision, rationale. Allowed signal values are low|medium|high except confidence is rumor|reported|confirmed and freshness is current|followup|stale. score is 0-10. decision is include|maybe|skip. Favor stories that are genuinely important, fresh in the selected week, well-supported, visually useful, and a strong fit for their section. A rumor can still be included only when it is itself newsworthy and clearly labelled as rumor. Do not fill a section with weak material merely because the format contains that section."""
     user = json.dumps({
         "project": {
             "channel": project.get("channel"),
