@@ -304,14 +304,17 @@ def _alignment_visual_beat_offsets(segment: dict, usable_duration: float | None 
 
 
 def _next_visual_beat_duration(window: dict, cursor: float, end: float) -> float:
+    remaining = max(0.0, end - cursor)
     boundaries = [
         float(value)
         for value in (window.get("visual_boundaries") or [])
         if cursor + 0.08 < float(value) < end - 0.02
     ]
     if boundaries:
-        return max(0.5, min(end - cursor, boundaries[0] - cursor))
-    return min(end - cursor, DEFAULT_VIDEO_CUT)
+        return max(0.5, min(remaining, boundaries[0] - cursor))
+    if remaining <= MAX_NARRATION_BEAT + 0.45:
+        return remaining
+    return min(remaining, DEFAULT_VIDEO_CUT)
 
 
 def story_windows(voice: list[dict]) -> list[dict]:
