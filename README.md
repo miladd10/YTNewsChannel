@@ -59,6 +59,7 @@ Cinema Weekly — Sep 21–27/
 │   ├── raw/
 │   └── stories/
 ├── narration/
+│   └── reviews/
 ├── audio/
 │   └── narration/
 ├── timing/
@@ -150,3 +151,16 @@ The local SQLite index lives in `data/ytnews.db` and is intentionally ignored by
 - Final narration beats are kept intact so the planner does not create tiny cleanup/flash cuts at the end of a sentence.
 - Step 7 now warns when the selected downloaded moving footage is shorter than the narration window, making cases such as an 11-second title announcement for an 18-second story explicit before export.
 - Scene selection still uses cached keyframe/scene analysis and never deliberately repeats the same source frames.
+
+
+### v0.3.29 Cinema format writer/reviewer loop
+- Cinema weekly research is now driven by a reusable 13-section format blueprint: Intro, Trends, Industry & Business, Upcoming Films, TV Series, Celebrities, AI & Tech, Viral Images, Box Office, Channel Polls, Now Available in HD, Toxic News, and Outro.
+- Step 1 runs section-specific research intents instead of one generic cinema-news search. Intro, Outro, and Channel Polls are not fabricated from web research; polls require supplied channel data.
+- Step 2 groups research by format section so the editor selects the news that belongs inside each part before narration writing.
+- Step 3 is now a versioned Narration Writer workspace with a reusable cinema style-transcript library. Filmbaz transcripts are treated only as style/craft references for tone, pacing, section rhythm, transitions, density, and storytelling behavior; they are explicitly forbidden as factual authority for the current week.
+- The narration workflow mirrors the Story Draft architecture in video-studio: Generate Fresh Draft → independent Reviewer → structured review gate → targeted revision → review again → explicit approval.
+- Reviewer audits Format, Style, Factual/Source fidelity, and Storytelling. Drafts with blocking/major issues or any failed audit cannot be approved.
+- Revisions use the reviewer feedback as the change list and preserve already-correct material instead of broadly restarting the draft.
+- Only an approved narration is eligible for Voice preparation. Approved narration is preferred over newer unapproved experiments.
+- Narration review files are stored under narration/reviews and review metadata is persisted in project.json.
+- The format/style architecture is data-driven so Games and Music can later add their own section blueprints and transcript libraries without replacing the Writer/Reviewer engine.
