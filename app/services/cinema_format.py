@@ -620,6 +620,9 @@ STRICT RULES:
 - In fresh_verification_sources, prefer trust_tier=preferred over supplemental search results when they conflict. Supplemental results can corroborate/discover, but should not override a preferred official/data/trade/major-news source.
 - deterministic_red_flags are backend-detected high-confidence contradictions. You MUST address every listed red flag explicitly in issues and correct the narration when the supplied fresh evidence supports the correction. Never return pass while a deterministic_red_flag remains unresolved.
 - Distinguish weekend rank from daily rank and domestic rank from worldwide rank.
+- Also distinguish WEEKLY domestic chart from WEEKEND domestic chart. A title can be absent from the latest completed weekly chart yet rank #1 on a later weekend that falls inside the project window.
+- Never let vague wording such as "this week topped the chart", "went straight to #1", "صدر جدول این هفته", or "رتبه اول" survive unless the exact chart scope is clear from the sentence: daily / weekend / weekly, domestic / worldwide, and the relevant date window when needed.
+- fresh_verification_sources include query_scope. For ranking claims, compare like with like: weekly_domestic evidence cannot directly prove weekend_domestic rank and vice versa.
 - RELEASE SCOPE matters. "Limited 70mm theatrical run" is not the same as a general/wide theatrical release.
 - DEAL VALUES can use different valuation conventions. If supplied reputable sources conflict (for example equity value vs enterprise/transaction value), keep attribution and do not flatten them into one unqualified number.
 - If two supplied sources conflict and the difference cannot be reconciled from the packet, do not guess. Qualify the claim or mark needs_human_check.
@@ -644,6 +647,8 @@ Hard factual rules:
 - Every story must be about its stored news_hook. Older background facts may explain context, but do not present them as this week's development.
 - Numeric/status scope is part of the fact. Never rewrite "opened to $108.3M worldwide" as "has reached $108.3M worldwide" if the packet is already in a later weekend. Keep opening-weekend figures explicitly labeled as opening-weekend figures.
 - For box office, distinguish current cumulative total from this weekend's gross, opening weekend, domestic total, international total, and worldwide total. Prefer the latest reliable in-window figure when saying "now", "currently", "has reached", or equivalent Persian wording like "رسیده".
+- Never write an unqualified box-office ranking. Instead of "این هفته رفت صدر جدول", say the supported scope explicitly, e.g. "در جدول آخرهفتهٔ آمریکای شمالی ۲۵ تا ۲۷ سپتامبر رتبهٔ اول را گرفت" or "در جدول هفتگی ۱۸ تا ۲۴ سپتامبر..." when that is what the evidence says.
+- Weekly, weekend, and daily charts are different datasets. Do not infer one from another.
 - A fresh article can quote an old number. Publication this week does NOT make every number in that article current.
 - Preserve release scope: a limited 70mm/special theatrical engagement must not become a generic or wide theatrical release.
 - Each approved story may include spice_angles researched specifically around that story. Use ONLY angles with safe_to_narrate=true. The spice layer is optional evidence, not a quota.
@@ -707,6 +712,7 @@ The style corpus is never factual authority. Never ask the writer to copy old wo
 Check:
 - unsupported or invented facts;
 - CLAIM-SCOPE ERRORS: check every number/date/status for opening-vs-cumulative, weekend-vs-total, domestic-vs-worldwide, estimate-vs-final, limited-vs-wide, and historical-vs-current wording;
+- RANKING-SCOPE ERRORS: flag any "top/#1/صدر جدول" claim that does not specify whether it is daily, weekend, or weekly and whether it is domestic/worldwide. Explicitly compare the draft's ranking scope to the supplied source scope/date window;
 - STALE VOLATILE VALUES: if later supplied evidence supersedes an older box-office total/rank/milestone, flag the older value when the draft phrases it as current. Example: an opening-weekend worldwide number cannot be narrated as the film's current worldwide total after a later weekend;
 - SOURCE-DATE CONFUSION: a source published inside the selected window can still describe an event/number from before the window. Flag any draft that treats the article publication date as proof that the underlying metric is current;
 - MILESTONE DRIFT: flag "approaching/close to" when later supplied evidence says the threshold was already crossed;
