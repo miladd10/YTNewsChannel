@@ -1,7 +1,7 @@
 import app.services.resolve_plan as resolve_plan_module
 import json
 
-from app.services.resolve_plan import _clamp_video_source_in, build_edit_plan, crop_instruction, story_windows, voice_timeline, write_resolve_package
+from app.services.resolve_plan import _assign_transitions, _clamp_video_source_in, _visual_slices, build_edit_plan, crop_instruction, story_windows, voice_timeline, write_resolve_package
 
 
 def test_crop_instruction_for_portrait_image():
@@ -274,3 +274,84 @@ def test_resolve_stage_uses_actual_download_duration_not_candidate_metadata(tmp_
     assert clip["adjusted_source_in"] == 5.0
     assert clip["source_in"] == 0.0
     assert clip["resolve_frame_count"] == 210
+
+
+
+def test_image_only_story_changes_image_about_every_five_seconds():
+    window = {"story_id": "story", "start": 0.0, "end": 12.0, "duration": 12.0}
+    images = [
+        {"id": "i1", "media_type": "image", "title": "A", "stored_path": "a.jpg", "width": 1920, "height": 1080},
+        {"id": "i2", "media_type": "image", "title": "B", "stored_path": "b.jpg", "width": 1920, "height": 1080},
+        {"id": "i3", "media_type": "image", "title": "C", "stored_path": "c.jpg", "width": 1920, "height": 1080},
+    ]
+    clips = _visual_slices(window, images)
+    assert [round(x["timeline_duration"], 1) for x in clips] == [5.0, 5.0, 2.0]
+    assert [x["candidate_id"] for x in clips] == ["i1", "i2", "i3"]
+
+
+def test_same_trailer_scene_changes_use_hard_cuts_but_image_change_dissolves():
+    video_a = {
+        "story_id": "s", "candidate_id": "v", "media_type": "video",
+        "timeline_start": 0.0, "timeline_end": 4.0, "timeline_duration": 4.0,
+    }
+    video_b = {
+        "story_id": "s", "candidate_id": "v", "media_type": "video",
+        "timeline_start": 4.0, "timeline_end": 8.0, "timeline_duration": 4.0,
+    }
+    image = {
+        "story_id": "s", "candidate_id": "i", "media_type": "image",
+        "timeline_start": 8.0, "timeline_end": 13.0, "timeline_duration": 5.0,
+    }
+    clips = [video_a, video_b, image]
+    _assign_transitions(clips, 30)
+    assert clips[0]["transition_out_frames"] == 0
+    assert clips[1]["transition_in_frames"] == 0
+    assert clips[1]["transition_out_frames"] > 0
+    assert clips[2]["transition_in_frames"] > 0
+
+
+def test_otio_contains_dissolve_with_real_still_handles(tmp_path, monkeypatch):
+    (tmp_path / "audio/narration").mkdir(parents=True)
+    (tmp_path / "media/selected/story").mkdir(parents=True)
+    (tmp_path / "audio/narration/1.mp3").write_bytes(b"audio")
+    (tmp_path / "media/selected/story/a.jpg").write_bytes(b"a")
+    (tmp_path / "media/selected/story/b.jpg").write_bytes(b"b")
+
+    def fake_stage_image_hold(source, target, *, duration, fps):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"hold")
+        return {
+            "frame_count": int(round(duration * fps)),
+            "staged_duration": duration,
+            "measured_duration": duration,
+        }
+
+    monkeypatch.setattr(resolve_plan_module, "_stage_resolve_image_hold", fake_stage_image_hold)
+
+    project = {"id": "p", "name": "Transitions"}
+    voice_rows = [{
+        "id": "v1", "segment_index": 1, "story_id": "story",
+        "duration_seconds": 10.0, "audio_path": "audio/narration/1.mp3",
+        "alignment_json": "{}",
+    }]
+    media = [
+        {"id": "i1", "story_id": "story", "selected": 1, "download_status": "downloaded",
+         "stored_path": "media/selected/story/a.jpg", "media_type": "image",
+         "title": "A", "source": "Studio", "page_url": "https://x/a", "width": 1920, "height": 1080},
+        {"id": "i2", "story_id": "story", "selected": 1, "download_status": "downloaded",
+         "stored_path": "media/selected/story/b.jpg", "media_type": "image",
+         "title": "B", "source": "Studio", "page_url": "https://x/b", "width": 1920, "height": 1080},
+    ]
+
+    plan = build_edit_plan(project, voice_rows, media, fps=30)
+    write_resolve_package(tmp_path, plan)
+    otio = json.loads((tmp_path / "resolve/news_timeline.otio").read_text())
+    track = otio["tracks"]["children"][0]
+    transitions = [x for x in track["children"] if x["OTIO_SCHEMA"] == "Transition.1"]
+    assert len(transitions) == 1
+    assert transitions[0]["transition_type"] == "SMPTE_Dissolve"
+
+    saved = json.loads((tmp_path / "timing/resolve_plan.json").read_text())
+    left, right = saved["visual_clips"]
+    assert left["source_media_duration"] > left["timeline_duration"]
+    assert right["source_in"] > 0
