@@ -7,3 +7,4 @@ anthropic>=0.49
 keyring>=25.0
 ddgs>=9.15.0
 yt-dlp>=2026.8.19
+Pillow>=10.4
