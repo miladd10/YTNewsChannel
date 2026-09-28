@@ -761,8 +761,11 @@ def _spice_queries(story: dict, date_start: str, date_end: str) -> list[tuple[st
         ("social_tiktok", f"site:tiktok.com {quoted} reaction discussion{date_bits}"),
         ("social_instagram", f"site:instagram.com {quoted} post reaction{date_bits}"),
         ("youtube", f"site:youtube.com {quoted} interview press conference behind the scenes official{date_bits}"),
-        ("cool_context", f"{quoted} interview behind the scenes production fact director cast history{date_bits}"),
-        ("comparison", f"{quoted} box office budget record comparison previous film franchise{date_bits}"),
+        # These two are intentionally broader than the news window: an older
+        # production fact or comparison can be useful context as long as the
+        # enrichment AI labels it as background rather than this week's event.
+        ("cool_context", f"{quoted} interview behind the scenes production fact director cast history"),
+        ("comparison", f"{quoted} box office budget record comparison previous film franchise"),
     ]
 
 
