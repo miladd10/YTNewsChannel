@@ -51,6 +51,35 @@ def _cache_key(path: Path) -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:20]
 
 
+def _keyframe_boundaries(path: Path, duration: float) -> list[float]:
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return []
+    result = _run([
+        ffprobe, "-v", "error",
+        "-skip_frame", "nokey",
+        "-select_streams", "v:0",
+        "-show_entries", "frame=best_effort_timestamp_time",
+        "-of", "csv=p=0",
+        str(path),
+    ])
+    if result.returncode != 0:
+        return []
+    values: list[float] = []
+    for line in (result.stdout or "").splitlines():
+        try:
+            value = float(line.strip().split(",")[0])
+        except (TypeError, ValueError):
+            continue
+        if 0.05 < value < duration - 0.05:
+            values.append(value)
+    out: list[float] = []
+    for value in sorted(values):
+        if not out or value - out[-1] > 0.45:
+            out.append(value)
+    return out
+
+
 def _scene_boundaries(path: Path, duration: float, threshold: float) -> list[float]:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
@@ -139,12 +168,21 @@ def analyze_video_shots(
         if cache_path.exists():
             try:
                 data = json.loads(cache_path.read_text(encoding="utf-8"))
-                if data.get("version") == 1:
+                if data.get("version") == 2:
                     return data
             except Exception:
                 pass
 
-    boundaries = _scene_boundaries(path, duration, threshold)
+    keyframes = _keyframe_boundaries(path, duration)
+    # Most web trailers encode scene changes as keyframes, and reading only
+    # keyframes is dramatically faster than decoding every 4K frame. Use full
+    # scene scoring only when the file exposes too few usable keyframes.
+    if len(keyframes) >= 4:
+        boundaries = keyframes
+        analysis_mode = "keyframe_scene_candidates"
+    else:
+        boundaries = _scene_boundaries(path, duration, threshold)
+        analysis_mode = "scene_detection" if boundaries else "fallback_windows"
     points = [0.0, *boundaries, duration]
     raw_ranges: list[tuple[float, float]] = []
     for left, right in zip(points, points[1:]):
@@ -178,11 +216,12 @@ def analyze_video_shots(
     shots.sort(key=lambda x: (-float(x["score"]), float(x["start"])))
 
     data = {
-        "version": 1,
+        "version": 2,
         "duration": round(duration, 6),
         "threshold": threshold,
-        "mode": "scene_detection" if boundaries else "fallback_windows",
+        "mode": analysis_mode,
         "boundary_count": len(boundaries),
+        "keyframe_count": len(keyframes),
         "shots": shots,
     }
     if cache_path is not None:
