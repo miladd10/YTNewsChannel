@@ -1558,6 +1558,14 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
             project.get("content_type") or "weekly_news",
         )
 
+    style_profile = _ensure_style_profile(
+        project.get("channel") or "cinema",
+        project.get("content_type") or "weekly_news",
+        styles,
+        provider,
+        model,
+    )
+
     user = "\n".join([
         "<current_week_authoritative_packet>",
         json.dumps({
@@ -1571,7 +1579,11 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         }, ensure_ascii=False),
         "</current_week_authoritative_packet>",
         "",
-        build_style_packet(styles),
+        "<style_blueprint>",
+        style_profile.get("profile_text") or "",
+        "</style_blueprint>",
+        "",
+        build_style_packet(styles, max_chars=80000),
         "",
         "<existing_first_draft>",
         draft["content"],
@@ -1638,6 +1650,14 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
         stories = selected_story_packet(conn, project_id)
         styles = _style_transcripts(conn, project.get("channel") or "cinema", project.get("content_type") or "weekly_news")
 
+    style_profile = _ensure_style_profile(
+        project.get("channel") or "cinema",
+        project.get("content_type") or "weekly_news",
+        styles,
+        provider,
+        model,
+    )
+
     user = "\n".join([
         "<current_week_authoritative_packet>",
         json.dumps({
@@ -1652,7 +1672,11 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
         }, ensure_ascii=False),
         "</current_week_authoritative_packet>",
         "",
-        build_style_packet(styles),
+        "<style_blueprint>",
+        style_profile.get("profile_text") or "",
+        "</style_blueprint>",
+        "",
+        build_style_packet(styles, max_chars=80000),
         "",
         "<draft_to_review>",
         draft["content"],
@@ -1721,6 +1745,19 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         if not review:
             raise HTTPException(400, "Run a reviewer pass on this draft first.")
         stories = selected_story_packet(conn, project_id)
+        styles = _style_transcripts(
+            conn,
+            project.get("channel") or "cinema",
+            project.get("content_type") or "weekly_news",
+        )
+
+    style_profile = _ensure_style_profile(
+        project.get("channel") or "cinema",
+        project.get("content_type") or "weekly_news",
+        styles,
+        provider,
+        model,
+    )
 
     user = "\n".join([
         "<current_week_authoritative_packet>",
@@ -1729,6 +1766,12 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
             "approved_sections": _sectioned_story_packet(stories),
         }, ensure_ascii=False),
         "</current_week_authoritative_packet>",
+        "",
+        "<style_blueprint>",
+        style_profile.get("profile_text") or "",
+        "</style_blueprint>",
+        "",
+        build_style_packet(styles, max_chars=70000),
         "",
         "<existing_narration>",
         draft["content"],
