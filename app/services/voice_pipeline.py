@@ -12,6 +12,24 @@ NARRATION_CONTINUITY_TARGET_CHARS = 1800
 STORY_MARKER_RE = re.compile(r"<!--\s*STORY:([^>]+?)\s*-->", re.IGNORECASE)
 
 
+def _normalized_heading(value: str) -> str:
+    value = re.sub(r"[*_\`]+", "", value or "")
+    value = re.sub(r"[^\w\u0600-\u06ff]+", " ", value, flags=re.UNICODE)
+    return " ".join(value.casefold().split())
+
+
+def reserved_heading_kind(line: str) -> str:
+    match = HEADING_RE.match((line or "").strip())
+    if not match:
+        return ""
+    heading = _normalized_heading(match.group(1))
+    if heading in RESERVED_INTRO_HEADINGS:
+        return "intro"
+    if heading in RESERVED_OUTRO_HEADINGS:
+        return "outro"
+    return ""
+
+
 def _plain_markdown_line(line: str) -> str:
     value = line.strip()
     if not value or value.startswith("#") or value.startswith("<!--"):
@@ -74,6 +92,11 @@ def extract_narration_segments(content: str, target_chars: int = NARRATION_CONTI
         current_lines = []
 
     for raw in lines:
+        reserved_kind = reserved_heading_kind(raw)
+        if reserved_kind:
+            flush_block()
+            current_story = ""
+            continue
         marker = STORY_MARKER_RE.search(raw)
         if marker:
             flush_block()
