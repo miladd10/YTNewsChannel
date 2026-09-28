@@ -85,12 +85,17 @@ def test_resolve_package_writes_importable_otio_with_source_in(tmp_path, monkeyp
             "measured_duration": duration,
         }
 
-    def fake_stage_image(source, target):
+    def fake_stage_image_hold(source, target, *, duration, fps):
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"resolve-safe-image")
+        target.write_bytes(b"resolve-safe-image-hold")
+        return {
+            "frame_count": int(round(duration * fps)),
+            "staged_duration": duration,
+            "measured_duration": duration,
+        }
 
     monkeypatch.setattr(resolve_plan_module, "_stage_resolve_video_cut", fake_stage_video)
-    monkeypatch.setattr(resolve_plan_module, "_stage_resolve_image", fake_stage_image)
+    monkeypatch.setattr(resolve_plan_module, "_stage_resolve_image_hold", fake_stage_image_hold)
     monkeypatch.setattr(resolve_plan_module, "_probe_media_duration", lambda path: 120.0)
 
     project = {"id": "p", "name": "Test News"}
@@ -145,7 +150,7 @@ def test_resolve_package_writes_importable_otio_with_source_in(tmp_path, monkeyp
 
 
 
-def test_resolve_package_normalizes_stills_to_png(tmp_path, monkeypatch):
+def test_resolve_package_renders_stills_as_exact_duration_mp4_holds(tmp_path, monkeypatch):
     (tmp_path / "audio/narration").mkdir(parents=True)
     (tmp_path / "media/selected/story").mkdir(parents=True)
     (tmp_path / "audio/narration/1.mp3").write_bytes(b"fake-audio")
@@ -163,12 +168,17 @@ def test_resolve_package_normalizes_stills_to_png(tmp_path, monkeypatch):
             "measured_duration": duration,
         }
 
-    def fake_stage_image(source, target):
+    def fake_stage_image_hold(source, target, *, duration, fps):
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"png-bytes")
+        target.write_bytes(b"still-hold-video")
+        return {
+            "frame_count": int(round(duration * fps)),
+            "staged_duration": duration,
+            "measured_duration": duration,
+        }
 
     monkeypatch.setattr(resolve_plan_module, "_stage_resolve_video_cut", fake_stage_video)
-    monkeypatch.setattr(resolve_plan_module, "_stage_resolve_image", fake_stage_image)
+    monkeypatch.setattr(resolve_plan_module, "_stage_resolve_image_hold", fake_stage_image_hold)
 
     project = {"id": "p", "name": "Still Test"}
     voice_rows = [{
@@ -188,9 +198,14 @@ def test_resolve_package_normalizes_stills_to_png(tmp_path, monkeypatch):
     write_resolve_package(tmp_path, plan)
     saved_plan = json.loads((tmp_path / "timing/resolve_plan.json").read_text())
     staged_path = saved_plan["visual_clips"][0]["stored_path"]
-    assert staged_path.endswith(".png")
+    assert staged_path.endswith(".mp4")
     assert (tmp_path / staged_path).exists()
-    assert saved_plan["visual_clips"][0]["resolve_media_format"] == "PNG still"
+    clip = saved_plan["visual_clips"][0]
+    assert clip["source_in"] == 0.0
+    assert clip["source_out"] == 5.0
+    assert clip["source_media_duration"] == 5.0
+    assert clip["resolve_frame_count"] == 150
+    assert clip["resolve_media_format"].startswith("H.264 MP4 still hold")
 
 
 
