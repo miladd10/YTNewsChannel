@@ -465,7 +465,7 @@ Writing rules:
 - Make the narration interesting because the FACTS are interesting: lead with the strongest concrete hook, useful comparison, odd detail, consequence, or contrast that is actually supported. Do not manufacture drama, fake excitement, rhetorical questions, or empty hype.
 - STORY SPICE RULE: before writing each story, inspect its safe_to_narrate spice_angles. If there is a genuinely useful rumor, controversy, critic reaction, social reaction, cool fact, production context, or surprising comparison, weave the strongest 1 angle naturally into a quick item and up to 2-3 into a deep Trends story. If there are no strong supported angles, do not pretend there are.
 - RUMORS: use them ONLY when the story packet contains a safe_to_narrate angle with type=rumor. Always frame it explicitly as unconfirmed/reporting/speculation ("فعلاً در حد شایعه‌ست...", "گزارش‌ها می‌گن...") and never let the rumor overwrite the verified news hook.
-- SOCIAL REACTION: never say "همه دارن می‌گن" or imply consensus from thin evidence. Attribute the platform/scale honestly ("بین بعضی از طرفدارها در ردیت...", "یکی از بحث‌هایی که بعد از تریلر راه افتاده...") according to the supplied angle.
+- SOCIAL REACTION: never say "همه دارن می‌گن" or imply consensus from thin evidence. Name the actual platform whenever evidence is platform-specific: "توی ردیت بعضی از کاربرا...", "توی X یکی از بحث‌ها...", "توی تیک‌تاک...". Avoid generic "مردم توی شبکه‌های اجتماعی دارن می‌گن" unless multiple named platforms genuinely support the same pattern.
 - CRITICS: only call something critic reaction when the supplied angle is type=critic_reaction. Do not turn audience/social comments into critic consensus.
 - COOL FACTS / BACKGROUND: use a surprising supported detail when it helps a casual viewer care, but keep it short and clearly contextual.
 - Avoid generic AI/news-presenter filler such as long "this may seem small but..." setups, repeated "the interesting thing is...", repeated "this means...", ceremonial section intros, or commentary that adds no information.
@@ -512,6 +512,7 @@ Check:
 - whether the writer ignored a strong safe_to_narrate spice angle that would materially improve an otherwise flat story;
 - whether any rumor was added without an explicit safe type=rumor angle, or was phrased as fact instead of clearly unconfirmed;
 - whether critic reaction, social buzz, controversy, or "people are talking about..." claims actually match the supplied spice evidence and its scale;
+- whether social discussion is attributed to the actual platform. Flag vague "مردم توی شبکه‌های اجتماعی..." wording when the evidence is specifically Reddit, X/Twitter, TikTok, Instagram, or YouTube;
 - whether the draft overuses spice: quick stories usually need at most one strong extra angle, not every available fact/reaction;
 - repetitive one-story-per-paragraph structure when several selected IDs belong to the same film/event and should read as one spoken item;
 - empty endings such as "حالا باید دید..." / "باید زیر نظرش داشت" that could be replaced by a concrete supported hook or simply removed;
