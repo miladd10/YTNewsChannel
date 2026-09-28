@@ -26,6 +26,7 @@ Return ONLY JSON:
 HARD RULES:
 - Every claim is atomic. Split different numbers/scopes into separate claims.
 - Use only supplied evidence. Never use memory.
+- Read each article's title, snippet, description and excerpt. Extract every useful checkable fact the excerpts support (premise, credits, dates, formats, figures, context), not only the headline fact.
 - source_urls must be exact supplied URLs for that same story. No source means blocked.
 - Numeric meaning is inseparable from scope.
 - BOX OFFICE: distinguish daily/weekend/weekly; opening weekend vs cumulative; domestic/international/worldwide; estimate vs actual; and exact date range/as-of date.
@@ -241,6 +242,8 @@ def _ledger_input(stories: list[dict], fresh_sources: dict[str, list[dict]], pro
                 "title": source.get("title"), "url": source.get("url"), "source": source.get("source"),
                 "published_at": source.get("published_at"), "temporal_role": source.get("temporal_role"),
                 "snippet": source.get("snippet"),
+                "description": source.get("description") or "",
+                "excerpt": source.get("excerpt") or "",
             } for source in story.get("articles") or []],
             "context_sources": [{
                 "title": source.get("title"), "url": source.get("url"), "source": source.get("source"),

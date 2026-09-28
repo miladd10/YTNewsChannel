@@ -1327,7 +1327,7 @@ def selected_story_packet(conn, project_id: str) -> list[dict]:
         if article_ids:
             placeholders = ",".join("?" for _ in article_ids)
             article_rows = conn.execute(
-                f"""SELECT title,url,source,published_at,snippet,category,query_key,raw_json
+                f"""SELECT id,title,url,source,published_at,snippet,category,query_key,raw_json
                     FROM research_articles WHERE id IN ({placeholders})""", article_ids
             ).fetchall()
             for article_row in article_rows:
@@ -1340,6 +1340,9 @@ def selected_story_packet(conn, project_id: str) -> list[dict]:
                 article["platform"] = str(raw.get("platform") or "")
                 article["trust_role"] = str(raw.get("trust_role") or "")
                 article["temporal_role"] = str(raw.get("temporal_role") or "")
+                article["description"] = str(raw.get("description") or "")
+                article["excerpt"] = str(raw.get("excerpt") or "")
+                article["_excerpt_fetched"] = bool(raw.get("excerpt_fetched_at"))
                 articles.append(article)
         item["articles"] = articles
         stories.append(item)
@@ -1641,6 +1644,7 @@ def _run_narration_fact_check(
     preferred_provider = settings.get("reviewer_provider") or writer_provider
     preferred_model = settings.get("reviewer_model") or writer_model
 
+    _ensure_article_excerpts(stories)
     if fresh_sources is None:
         fresh_sources = fetch_narration_fact_check_sources(
             stories,
@@ -1749,6 +1753,73 @@ def _run_narration_fact_check(
         "error": last_error,
     }, preferred_provider, preferred_model
 
+
+
+ARTICLE_EXCERPTS_PER_STORY = 3
+
+
+def _fetch_one_excerpt(article: dict) -> dict:
+    import httpx
+
+    from .services.article_text import extract_article_text
+    from .services.media import _resolve_reference_article_url
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.8",
+    }
+    try:
+        with httpx.Client(timeout=12, follow_redirects=True, headers=headers) as client:
+            final_url, page_html = _resolve_reference_article_url(article, client)
+    except Exception:
+        final_url, page_html = "", ""
+    extracted = extract_article_text(page_html) if page_html else {"description": "", "excerpt": "", "published_time": ""}
+    return {"resolved_url": final_url, **extracted}
+
+
+def _ensure_article_excerpts(stories: list[dict]) -> None:
+    """Fetch description + opening paragraphs for approved stories' articles.
+
+    Results are cached in research_articles.raw_json so each article is fetched
+    once. Failures are cached too (empty excerpt) and never block writing.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    pending: list[dict] = []
+    for story in stories:
+        articles = [a for a in story.get("articles") or [] if a.get("id")]
+        ranked = sorted(articles, key=lambda a: (str(a.get("temporal_role") or "") != "current",
+                                                 str(a.get("source_kind") or "news") != "news"))
+        for article in ranked[:ARTICLE_EXCERPTS_PER_STORY]:
+            if not article.get("_excerpt_fetched"):
+                pending.append(article)
+    if not pending:
+        return
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(_fetch_one_excerpt, pending))
+    stamp = now()
+    with db() as conn:
+        for article, result in zip(pending, results):
+            row = conn.execute("SELECT raw_json FROM research_articles WHERE id=?", (article["id"],)).fetchone()
+            if not row:
+                continue
+            try:
+                raw = json.loads(row["raw_json"] or "{}")
+            except Exception:
+                raw = {}
+            raw.update({
+                "description": result.get("description") or "",
+                "excerpt": result.get("excerpt") or "",
+                "resolved_url": result.get("resolved_url") or "",
+                "page_published_time": result.get("published_time") or "",
+                "excerpt_fetched_at": stamp,
+            })
+            conn.execute("UPDATE research_articles SET raw_json=? WHERE id=?",
+                         (json.dumps(raw, ensure_ascii=False), article["id"]))
+            article["description"] = raw["description"]
+            article["excerpt"] = raw["excerpt"]
+            article["_excerpt_fetched"] = True
 
 
 def _build_verified_claim_ledger(

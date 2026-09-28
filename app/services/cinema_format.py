@@ -610,6 +610,7 @@ Return ONLY valid JSON:
 
 Rules:
 - Extract as many genuinely useful supported beats as the packet provides. Do not compress a rich source packet into two facts.
+- Each article may carry description and excerpt (the publisher's own summary and opening paragraphs). These are the richest source of setup, premise, context and detail beats; a headline alone is thin.
 - The supplied verified_claim_ledger is the mandatory source for all externally checkable facts. The story/article packet provides context, but do not plan a factual beat that has no verified/verified_with_attribution ledger entry.
 - Never plan from a ledger entry with verification_status=blocked.
 - When a ledger entry has attribution_required=true, preserve that requirement in the planned wording.
