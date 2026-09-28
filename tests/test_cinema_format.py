@@ -178,6 +178,8 @@ def test_social_platform_detection_does_not_confuse_news_domains():
     assert _social_platform_for_url("https://x.com/example/status/1") == "x"
     assert _social_platform_for_url("https://www.tiktok.com/@example/video/1") == "tiktok"
     assert _social_platform_for_url("https://www.reddit.com/r/movies/comments/abc") == "reddit"
+    assert _social_platform_for_url("https://www.instagram.com/p/abc") == "instagram"
+    assert _social_platform_for_url("https://www.youtube.com/watch?v=abc") == "youtube"
     assert _social_platform_for_url("https://www.netflix.com/title/123") == ""
 
 
@@ -345,10 +347,17 @@ def test_story_spice_queries_cover_drama_critics_social_and_context():
     }
     rows = _spice_queries(story, "2026-09-21", "2026-09-28")
     kinds = {kind for kind, _ in rows}
-    assert kinds == {"rumor_drama", "critics", "social_reddit", "social_public", "cool_context"}
+    assert kinds == {
+        "web_news", "rumor_drama", "critics", "social_reddit", "social_x",
+        "social_tiktok", "social_instagram", "youtube", "cool_context", "comparison",
+    }
     assert any("rumor controversy" in query for _, query in rows)
     assert any("critics review reaction" in query for _, query in rows)
     assert any("site:reddit.com" in query for _, query in rows)
+    assert any("site:x.com" in query for _, query in rows)
+    assert any("site:tiktok.com" in query for _, query in rows)
+    assert any("site:instagram.com" in query for _, query in rows)
+    assert any("site:youtube.com" in query for _, query in rows)
 
 
 def test_spice_validation_rejects_hallucinated_source_urls_and_weak_claims():
