@@ -920,6 +920,9 @@ def _fact_check_queries(story: dict, date_start: str, date_end: str) -> list[str
             token in story_text for token in ("box office", "gross", "opening", "million", "billion", "گیشه")
         ):
             queries.extend([
+                f"{quoted} domestic box office weekend rank weekend gross{date_bits}",
+                f"{quoted} domestic box office weekly chart weekly gross{date_bits}",
+                f"{quoted} domestic box office daily rank daily gross{date_bits}",
                 f"{quoted} latest box office worldwide total domestic international weekend{date_bits}",
                 f"{quoted} latest worldwide cumulative box office total{date_bits}",
                 f"{quoted} crossed passed reached milestone million worldwide box office{date_bits}",
@@ -949,6 +952,23 @@ def _fact_check_queries(story: dict, date_start: str, date_end: str) -> list[str
 def _fact_check_date_rank(value: str) -> float:
     parsed = _parse_source_datetime(value)
     return parsed.timestamp() if parsed is not None else 0.0
+
+
+def _fact_check_query_scope(query: str) -> str:
+    value = (query or "").casefold()
+    if "weekly chart" in value or "weekly gross" in value:
+        return "weekly_domestic"
+    if "weekend rank" in value or "weekend gross" in value:
+        return "weekend_domestic"
+    if "daily rank" in value or "daily gross" in value:
+        return "daily_domestic"
+    if "worldwide cumulative" in value:
+        return "worldwide_cumulative"
+    if "milestone" in value:
+        return "milestone"
+    if "new movie sequel remake reboot re-release" in value:
+        return "title_identity"
+    return "general"
 
 
 def fetch_narration_fact_check_sources(
@@ -1005,6 +1025,7 @@ def fetch_narration_fact_check_sources(
                     "temporal_role": str((annotated.get("raw") or {}).get("temporal_role") or ""),
                     "snippet": annotated.get("snippet") or "",
                     "query": query,
+                    "query_scope": _fact_check_query_scope(query),
                     "trust_tier": _fact_check_trust_tier(url),
                 })
                 # Limit each query independently. Do not let the first generic
