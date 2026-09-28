@@ -216,3 +216,17 @@
 .style-profile-card details{margin-top:9px}
 .style-profile-card summary{cursor:pointer;font-size:8px;color:#c5d1dc}
 .style-profile-text{margin-top:8px;max-height:430px;overflow:auto;white-space:pre-wrap;font-size:9px;line-height:1.5}
+
+.visual-context-list{margin-top:10px;display:grid;gap:7px}
+.visual-context-item{padding:9px 10px;border:1px solid #2f3947;border-radius:9px;background:#0e141c}
+.visual-context-item>div{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.visual-context-item strong{font-size:10px}
+.visual-context-item small{display:block;margin-top:6px;color:#9aa6b6;font-size:9px}
+.visual-context-item p{margin:5px 0 0;color:#7f8a99;font-size:9px;line-height:1.45}
+.visual-plan-chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+.visual-plan-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 6px;border:1px solid #303a47;border-radius:999px;background:#111821}
+.visual-plan-chip strong{font-size:8px;color:#c9d2df}
+.visual-plan-chip small{font-size:7px;color:#798699}
+.layout-chip{padding:3px 6px;border-radius:999px;background:#211c35;border:1px solid #4e4276;color:#c8bdf5;font-size:8px}
+.coverage-cue{margin-top:7px;padding:7px 8px;border-left:2px solid #52647d;background:#101720;color:#97a4b4;font-size:8px;line-height:1.45}
+.quality-badge.image-layout-ready{background:#18251f;border-color:#3c6e55;color:#a8dfbf}
