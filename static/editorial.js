@@ -157,12 +157,12 @@ narrationHtml=async function(){
 generateNarration=async function(){
   const b=$('#generateNarrationBtn');if(b){b.disabled=true;b.textContent='Writing...'}
   const s=state.settings?.ai||{};
-  startRunStatus({title:'Writing baseline narration draft',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading selected sections','Loading style corpus','Writing baseline without post-draft enrichment','Draft saved']});
+  startRunStatus({title:'Writing baseline narration draft',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading selected sections','Checking / building Style Blueprint','Extracting fact-locked story beats','Writing spoken draft from story micro-arcs','Draft saved']});
   try{
     const r=await api(`/api/projects/${state.project.id}/narration`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:s.writer_provider,model:s.writer_model})});
     state.narrationDraftId=r.id;state.lastNarrationReview=null;state.project=await api(`/api/projects/${state.project.id}`);await renderStage();
     finishRunStatus(true,'',`Draft V${r.version_number} generated`);
-    toast(`Draft V${r.version_number} generated - ${r.style_transcript_count} style transcript(s) used`);
+    toast(r.content_plan_error?`Draft V${r.version_number} generated, but the fact-plan pass fell back: ${r.content_plan_error}`:`Draft V${r.version_number} generated - Style Blueprint built from ${r.style_profile_transcript_count||r.style_transcript_count} reference transcript(s)`,!!r.content_plan_error);
   }catch(e){finishRunStatus(false,e.message);toast(e.message,true);if(b){b.disabled=false;b.textContent='Generate Fresh Draft'}}
 };
 async function rebuildStyleProfile(){
