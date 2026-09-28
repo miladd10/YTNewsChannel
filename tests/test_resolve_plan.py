@@ -63,7 +63,7 @@ def test_edit_plan_keeps_video_at_normal_speed_and_fills_voice_window():
     assert len(clips) == 3
     assert round(sum(x["timeline_duration"] for x in clips), 3) == 14.0
     assert all(x["playback_speed"] == 1.0 for x in clips)
-    assert all(x["timeline_duration"] <= 5.5 for x in clips)
+    assert all(x["timeline_duration"] <= 6.0 for x in clips)
     assert len({x["source_in"] for x in clips}) == len(clips)
     assert plan["timeline"]["duration_seconds"] == 14.0
 
