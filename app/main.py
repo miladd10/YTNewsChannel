@@ -717,8 +717,8 @@ def run_research(project_id: str, body: ResearchBody):
                     source_platforms_json,source_kinds_json,reddit_only,primary_social_count,
                     news_hook,news_hook_date,verification_status,verification_notes,temporal_gate,verification_gate,
                     in_window_source_count,background_source_count,undated_source_count,independent_source_count,
-                    current_non_reddit_source_count,current_primary_social_count,created_at,updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    current_non_reddit_source_count,current_primary_social_count,familiarity_needed,familiarity_anchor,created_at,updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     story["id"], project_id, run_id, story["canonical_title"], story["summary"], story["category"],
                     story["attention"], story["importance"], story["freshness"], story["confidence"],
@@ -733,6 +733,8 @@ def run_research(project_id: str, body: ResearchBody):
                     int(story.get("undated_source_count") or 0), int(story.get("independent_source_count") or 0),
                     int(story.get("current_non_reddit_source_count") or 0),
                     int(story.get("current_primary_social_count") or 0),
+                    1 if story.get("familiarity_needed") else 0,
+                    story.get("familiarity_anchor") or "",
                     stamp, stamp,
                 ),
             )
@@ -772,6 +774,7 @@ def get_stories(project_id: str):
             item["source_platforms"] = json.loads(item.pop("source_platforms_json") or "[]")
             item["source_kinds"] = json.loads(item.pop("source_kinds_json") or "[]")
             item["reddit_only"] = bool(item.get("reddit_only"))
+            item["familiarity_needed"] = bool(item.get("familiarity_needed"))
             if ids:
                 placeholders = ",".join("?" for _ in ids)
                 article_rows = conn.execute(
@@ -859,6 +862,7 @@ def selected_story_packet(conn, project_id: str) -> list[dict]:
         item["source_platforms"] = json.loads(item.pop("source_platforms_json") or "[]")
         item["source_kinds"] = json.loads(item.pop("source_kinds_json") or "[]")
         item["reddit_only"] = bool(item.get("reddit_only"))
+        item["familiarity_needed"] = bool(item.get("familiarity_needed"))
         articles = []
         if article_ids:
             placeholders = ",".join("?" for _ in article_ids)
