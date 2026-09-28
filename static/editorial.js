@@ -46,7 +46,7 @@ storyCards=function(stories){
 
 runResearch=async function(){
   const b=$('#runResearchBtn');b.disabled=true;b.textContent='Researching...';
-  startRunStatus({title:'Researching cinema format sections',meta:`${state.project.date_start} inclusive -> ${state.project.date_end} exclusive`,steps:['Searching news + public social sources','Checking publication dates','Clustering duplicate coverage','Classifying section fit','Verifying current-week news hooks','Searching story-specific rumors / critics / social reaction','Validating related context evidence','Results saved']});
+  startRunStatus({title:'Researching cinema format sections',meta:`${state.project.date_start} inclusive -> ${state.project.date_end} exclusive`,steps:['Searching current news + public social sources','Checking publication dates','Clustering duplicate coverage','Classifying section fit','Verifying current-week news hooks','Results saved']});
   try{
     const s=state.settings?.ai||{};
     const r=await api(`/api/projects/${state.project.id}/research`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:s.research_provider,model:s.research_model,ai_rank:true})});
@@ -54,7 +54,7 @@ runResearch=async function(){
     state.stories=await api(`/api/projects/${state.project.id}/stories`);
     await renderStage();
     finishRunStatus(true,'','Format research complete');
-    toast(r.ai_rank_error?`Research complete but semantic verification failed; stories remain gated: ${r.ai_rank_error}`:`Research complete: ${r.current_story_count} current/follow-up - ${r.verified_story_count} source-verified - ${r.spice_angle_count||0} supported context angle(s) - ${r.stale_story_count} stale rejected`,!!r.ai_rank_error);
+    toast(r.ai_rank_error?`Research complete but semantic verification failed; stories remain gated: ${r.ai_rank_error}`:`Research complete: ${r.current_story_count} current/follow-up - ${r.verified_story_count} source-verified - ${r.stale_story_count} stale rejected`,!!r.ai_rank_error);
   }catch(e){finishRunStatus(false,e.message);toast(e.message,true);b.disabled=false;b.textContent='Run Format Research'}
 };
 
@@ -80,7 +80,7 @@ function reviewAuditBadges(review){
 }
 function reviewFeedbackHtml(review){
   if(!review){
-    return `<section id="reviewFeedbackPanel" class="review-feedback-panel empty"><div><div class="eyebrow">REVIEW FEEDBACK</div><h3>No review yet</h3><p>Run Reviewer to get a visible format, style, factual, freshness and storytelling audit for this exact draft.</p></div></section>`;
+    return `<section id="reviewFeedbackPanel" class="review-feedback-panel empty"><div><div class="eyebrow">REVIEW FEEDBACK</div><h3>No review yet</h3><p>Run Reviewer to get a visible format, style, factual, freshness, context/spice and storytelling audit for this exact draft.</p></div></section>`;
   }
   return `<section id="reviewFeedbackPanel" class="review-feedback-panel"><div class="review-feedback-head"><div><div class="eyebrow">REVIEW FEEDBACK · R${Number(review.review_number||1)}</div><h3>${esc(String(review.gate_status||'revision_required').replaceAll('_',' '))}</h3></div><div class="review-counts"><span>Blocking ${Number(review.blocking_count||0)}</span><span>Major ${Number(review.major_count||0)}</span><span>Minor ${Number(review.minor_count||0)}</span></div></div><div class="review-audits">${reviewAuditBadges(review)}</div><pre class="editor review-editor review-feedback-text">${esc(review.content||'')}</pre></section>`;
 }
