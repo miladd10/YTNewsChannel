@@ -6,7 +6,7 @@ import re
 import subprocess
 from pathlib import Path
 
-PROJECT_SCHEMA_VERSION = 10
+PROJECT_SCHEMA_VERSION = 11
 PROJECT_DIRS = [
     "research/raw",
     "research/stories",
@@ -18,6 +18,7 @@ PROJECT_DIRS = [
     "media-plan",
     "media/candidates",
     "media/selected",
+    "media/composites",
     "resolve",
     "exports",
 ]
