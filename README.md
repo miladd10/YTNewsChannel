@@ -264,3 +264,14 @@ The local SQLite index lives in `data/ytnews.db` and is intentionally ignored by
 - Step 5 visibly lists **Fun-fact / visual-context sources**, narration cues, semantic coverage type and the intended layout for each candidate.
 - Resolve orders semantic media near its narration cue when possible. Selected grouped stills can be precomposed into real 3840×2160 two-up, three-up, stacked-two, stacked-three, person+title or collage images before OTIO staging.
 - Semantic coverage and layout metadata are exported in OTIO and media_timing.csv, and changes invalidate older Resolve packages.
+
+
+### v0.3.37 Automatic Fresh-Fact Audit
+- Every baseline, enriched and reviewer-revised narration now gets an automatic post-write fact-check before it can be approved.
+- The fact checker runs fresh, story-specific verification searches for volatile claims such as box-office totals/rankings, release dates/scope and deal values, while still using the approved research packet as the factual boundary.
+- Box-office scope is checked explicitly: opening weekend vs cumulative total, weekend gross vs total gross, domestic vs international/worldwide and estimate vs final.
+- A current-week article can no longer make an older subtotal look current merely because the article itself was published this week. Later reliable in-window evidence supersedes stale "has reached", "approaching" and ranking language.
+- Release scope is checked too: limited/special theatrical engagements cannot be rewritten as general/wide theatrical releases.
+- Preferred sources (official studio/platform, AP/Reuters, major trades/business press, Box Office Mojo/The Numbers, etc.) outrank supplemental search results during conflicts.
+- Step 3 shows the fact-check status and issue list. A narration with status `needs_human_check` cannot be approved for Voice.
+- Fact-check reports are saved under `narration/fact-checks/` in each project.
