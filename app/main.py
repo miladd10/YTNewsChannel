@@ -1254,6 +1254,14 @@ def _sectioned_story_packet(stories: list[dict]) -> list[dict]:
         result.append({
             "section": section["key"],
             "label": section["label"],
+            "spoken_label_fa": next(
+                (
+                    item.get("spoken_label_fa")
+                    for item in format_packet()
+                    if item.get("key") == section["key"]
+                ),
+                section["label"],
+            ),
             "writer_role": section.get("writer_role") or "",
             "mission": section.get("mission") or "",
             "verification_policy": section.get("verification_policy") or {},
