@@ -1,5 +1,5 @@
 import app.services.media as media_module
-from app.services.media import _contextual_fallback_stories, _dedupe_quality_first_results, _extract_reference_image_urls, _extract_reference_video_urls, _image_candidate_score, _matches_actual_story_subject, _reference_resolution_queries, _result_quality_rank, _story_subjects, _youtube_search_queries, search_story_media, story_allows_interview_or_podcast, story_media_key, story_visual_plan, suggested_clip_range, video_is_usable_broll
+from app.services.media import _contextual_fallback_stories, _dedupe_quality_first_results, _extract_reference_image_urls, _extract_reference_video_urls, _image_candidate_score, _matches_actual_story_subject, _reference_resolution_queries, _result_quality_rank, _story_reference_sources, _story_subjects, _youtube_search_queries, search_story_media, story_allows_interview_or_podcast, story_media_key, story_visual_plan, suggested_clip_range, video_is_usable_broll
 
 
 def normal_story():
@@ -759,3 +759,21 @@ def test_movie_story_does_not_treat_series_season_as_current_footage():
         "_search_query": "Lord of the Rings 2026 official trailer",
     }
     assert not _matches_actual_story_subject(item, story)
+
+
+
+def test_media_reference_sources_include_post_draft_enrichment_sources():
+    story = {
+        "articles": [
+            {"url": "https://example.com/news", "title": "Core story"},
+        ],
+        "spice_sources": [
+            {"url": "https://example.com/context", "title": "Behind the scenes"},
+            {"url": "https://example.com/news", "title": "Duplicate core"},
+        ],
+    }
+    refs = _story_reference_sources(story)
+    assert [item["url"] for item in refs] == [
+        "https://example.com/news",
+        "https://example.com/context",
+    ]
