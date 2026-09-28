@@ -111,3 +111,33 @@
 
 .quality-badge.image-best{border-color:#2f7a56}
 .quality-badge.image-warning{border-color:#7a4b2f}
+
+.format-coverage{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:12px 0 16px}
+.format-chip{display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid #28313c;border-radius:10px;background:#10161d;color:#9ba7b7;font-size:9px}
+.format-chip strong{font-size:14px;color:#dbe3ec}
+.format-chip.has-results{border-color:#36536b}
+.section-selection{margin:0 0 18px}
+.section-selection-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:0 0 8px}
+.section-selection-head h3{margin:2px 0 0}
+.writer-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0}
+.writer-panel{padding:14px}
+.writer-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
+.writer-panel-head h3{margin:2px 0 4px}
+.writer-panel-head p{margin:0;color:var(--muted);font-size:9px}
+.writer-section-row{display:grid;grid-template-columns:minmax(130px,.7fr) auto 1.6fr;gap:10px;align-items:start;padding:9px 0;border-top:1px solid #252e38}
+.writer-section-row:first-child{border-top:0}
+.writer-section-row span{font-size:9px;color:#c5d0db}
+.writer-section-row small{font-size:8px;line-height:1.45;color:var(--muted)}
+.style-transcript-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid #252e38}
+.style-transcript-row:first-child{border-top:0}
+.style-transcript-row>div:first-child{display:flex;flex-direction:column;gap:3px;min-width:0}
+.style-transcript-row strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.style-transcript-row span{font-size:8px;color:var(--muted)}
+.narration-workbench{padding:14px;margin-top:12px}
+.narration-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.narration-toolbar select{min-width:240px;max-width:440px}
+.writer-review-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.narration-editor,.review-editor{max-height:680px;overflow:auto;white-space:pre-wrap}
+.review-counts{display:flex;gap:6px;margin:7px 0}
+.review-counts span{font-size:8px;padding:4px 7px;border-radius:999px;border:1px solid #303a45;color:#b8c4d0}
+@media(max-width:980px){.writer-grid,.writer-review-grid{grid-template-columns:1fr}.writer-section-row{grid-template-columns:1fr auto}.writer-section-row small{grid-column:1/-1}.narration-toolbar{align-items:stretch;flex-direction:column}.narration-toolbar select{max-width:none;width:100%}}
