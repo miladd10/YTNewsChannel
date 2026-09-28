@@ -1625,6 +1625,7 @@ def _run_narration_fact_check(
     writer_provider: str,
     writer_model: str,
     fresh_sources: dict[str, list[dict]] | None = None,
+    claim_ledger: list[dict] | None = None,
 ) -> tuple[str, dict, str, str]:
     settings = masked_status()
     preferred_provider = settings.get("reviewer_provider") or writer_provider
@@ -1646,6 +1647,7 @@ def _run_narration_fact_check(
         },
         "approved_sections": _sectioned_story_packet(stories),
         "fresh_verification_sources": fresh_sources,
+        "verified_claim_ledger": ledger_for_writer(claim_ledger or []),
         "deterministic_red_flags": deterministic_red_flags,
         "draft": draft_text,
     }
@@ -1986,6 +1988,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         actual_provider,
         actual_model,
         fresh_sources=fresh_claim_sources,
+        claim_ledger=claim_ledger,
     )
     audit_provider = settings.get("reviewer_provider") or actual_provider
     audit_model = settings.get("reviewer_model") or actual_model
@@ -2276,6 +2279,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         actual_provider,
         actual_model,
         fresh_sources=fresh_claim_sources,
+        claim_ledger=claim_ledger,
     )
     claim_audit, _, _ = audit_narration_claims(
         rewritten_text,
@@ -2577,6 +2581,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         actual_provider,
         actual_model,
         fresh_sources=fresh_claim_sources,
+        claim_ledger=claim_ledger,
     )
     claim_audit, _, _ = audit_narration_claims(
         revised_text,
