@@ -154,6 +154,9 @@ def init_db() -> None:
                 story_ids_json TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL,
                 approved INTEGER NOT NULL DEFAULT 0,
+                fact_check_status TEXT NOT NULL DEFAULT 'not_run',
+                fact_check_issue_count INTEGER NOT NULL DEFAULT 0,
+                fact_check_json TEXT NOT NULL DEFAULT '{}',
                 UNIQUE(project_id, version_number),
                 FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
@@ -356,6 +359,12 @@ def init_db() -> None:
             conn.execute("ALTER TABLE stories ADD COLUMN reddit_only INTEGER NOT NULL DEFAULT 0")
         if not _column_exists(conn, "stories", "primary_social_count"):
             conn.execute("ALTER TABLE stories ADD COLUMN primary_social_count INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists(conn, "narrations", "fact_check_status"):
+            conn.execute("ALTER TABLE narrations ADD COLUMN fact_check_status TEXT NOT NULL DEFAULT 'not_run'")
+        if not _column_exists(conn, "narrations", "fact_check_issue_count"):
+            conn.execute("ALTER TABLE narrations ADD COLUMN fact_check_issue_count INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists(conn, "narrations", "fact_check_json"):
+            conn.execute("ALTER TABLE narrations ADD COLUMN fact_check_json TEXT NOT NULL DEFAULT '{}'")
         if not _column_exists(conn, "narrations", "parent_narration_id"):
             conn.execute("ALTER TABLE narrations ADD COLUMN parent_narration_id TEXT NOT NULL DEFAULT ''")
         if not _column_exists(conn, "narrations", "revision_review_id"):
