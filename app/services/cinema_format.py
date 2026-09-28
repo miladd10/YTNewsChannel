@@ -152,6 +152,22 @@ CINEMA_WEEKLY_FORMAT = [
     },
 ]
 
+PERSIAN_SECTION_LABELS = {
+    "intro": "مقدمه",
+    "trend": "ترندها",
+    "industry": "صنعت سینما",
+    "upcoming_films": "فیلم‌های جدید",
+    "tv_series": "سریال‌ها",
+    "celebrities": "سلبریتی‌ها",
+    "ai_tech": "هوش مصنوعی و تکنولوژی",
+    "viral_images": "تصاویر وایرال",
+    "box_office": "گیشه",
+    "channel_polls": "نظرسنجی‌ها",
+    "now_available": "کیفیت خوب",
+    "toxic_news": "خبرای سمی",
+    "outro": "پایان",
+}
+
 SECTION_CONTRACTS = {
     "intro": {
         "mission": "Open the episode, establish the week, and tease the strongest current stories.",
@@ -364,6 +380,7 @@ def format_packet() -> list[dict]:
         {
             "key": item["key"],
             "label": item["label"],
+            "spoken_label_fa": PERSIAN_SECTION_LABELS.get(item["key"], item["label"]),
             "research": bool(item.get("research")),
             "min_items": int(item.get("min_items") or 0),
             "max_items": int(item.get("max_items") or 0),
@@ -597,7 +614,7 @@ Writing rules:
 - Humor should normally come from an actual contrast or odd fact in the packet, not an adjective like "عجیب", "خفن", "سنگین" or "کنجکاوی‌برانگیز" with nothing underneath it.
 - Do NOT write generic abstract sentences such as "برای مخاطب مهمه چون می‌تونه روی آینده فیلم‌ها اثر بذاره" unless the approved evidence gives a concrete consequence you can name. If the evidence is thin, keep the item short instead of adding analysis-shaped filler.
 - A cast list by itself is not a payoff. If the packet has a premise, production detail, history, reaction, creator context or unusual fact, use it to explain why the names are interesting.
-- Section headings are editorial metadata, not host dialogue. If headings are emitted, use the project's language/section labels; never output English headings inside an otherwise Persian narration.
+- Section headings are editorial metadata, not host dialogue. If the project language is Persian and headings are emitted, use the supplied spoken_label_fa values; never output English headings inside an otherwise Persian narration.
 - Treat the full style corpus as a behavioral reference. Notice recurring Filmbaz patterns across many episodes: how quickly the host reaches the actual news, how background is slipped in without stopping the story, how sections accelerate/decelerate, where a funny aside fits, and how transitions avoid sounding scripted.
 - Make the narration interesting because the FACTS are interesting: lead with the strongest concrete hook, useful comparison, odd detail, consequence, or contrast that is actually supported. Do not manufacture drama, fake excitement, rhetorical questions, or empty hype.
 - STORY SPICE RULE: before writing each story, inspect its safe_to_narrate spice_angles. If there is a genuinely useful rumor, controversy, critic reaction, social reaction, cool fact, production context, or surprising comparison, weave the strongest 1 angle naturally into a quick item and up to 2-3 into a deep Trends story. If there are no strong supported angles, do not pretend there are.
