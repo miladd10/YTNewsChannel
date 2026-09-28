@@ -72,7 +72,31 @@ HIGH_RISK_RE = re.compile(
     re.IGNORECASE,
 )
 
-PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩٫٬", "01234567890123456789.,")
+
+FINANCIAL_CLAIM_TYPES = {"budget", "revenue", "box_office", "deal_value"}
+
+MONEY_OR_PERCENT_RE = re.compile(
+    r"([$€£¥]|\b(?:usd|eur|gbp|dollars?|million|billion|percent)\b|%|"
+    r"دلار|یورو|پوند|میلیون|میلیارد|درصد)",
+    re.IGNORECASE,
+)
+
+
+def _has_money_or_percent(text: str) -> bool:
+    return bool(MONEY_OR_PERCENT_RE.search(str(text or "")))
+
+
+def _numbers_in_text(text: str) -> list[float]:
+    plain = str(text or "").translate(PERSIAN_DIGITS)
+    values = []
+    for raw in re.findall(r"\d+(?:[.,]\d+)*", plain):
+        cleaned = raw.replace(",", "") if re.fullmatch(r"\d{1,3}(?:,\d{3})+", raw) else raw.replace(",", ".")
+        try:
+            values.append(float(cleaned))
+        except ValueError:
+            continue
+    return values
 
 
 def _json_object(value: str) -> dict:
@@ -134,6 +158,22 @@ def _same_number(a: dict, b: dict) -> bool:
     if av is None or bv is None:
         return av is None and bv is None
     return abs(av - bv) <= max(1e-6, abs(bv) * 0.0005)
+
+
+def _number_supported(spoken: dict, ledger: dict) -> bool:
+    """A spoken number is supported by a ledger claim.
+
+    Financial ledger claims carry a structured value and are compared by value.
+    Plain facts (dates, counts, years) often have no structured value; then the
+    spoken number must literally appear in the ledger claim's own text.
+    """
+    if _float(ledger.get("numeric_value")) is not None:
+        return _same_number(spoken, ledger)
+    target = _float(spoken.get("numeric_value"))
+    if target is None:
+        return True
+    ledger_text = " ".join(str(ledger.get(key) or "") for key in ("canonical_text", "value_text", "date_start", "date_end", "as_of_date"))
+    return any(abs(value - target) < 1e-9 for value in _numbers_in_text(ledger_text))
 
 
 def _source_index(stories: list[dict], fresh_sources: dict[str, list[dict]]) -> dict[str, dict[str, dict]]:
@@ -216,14 +256,16 @@ def normalize_ledger_claims(raw_claims: object, stories: list[dict], fresh_sourc
         if not source_urls:
             status = "blocked"
             reasons.append("No supplied source URL supports this claim.")
-        high_risk_numeric = (
-            numeric_value is not None
-            or bool(re.search(r"[0-9۰-۹٠-٩$€£¥%]", canonical_text))
-            or claim_type in {"ranking", "budget", "revenue", "box_office", "deal_value"}
+        # Only money/percentage figures need a structured numeric value. Dates,
+        # years, counts ("12 states"), episode/season numbers and formats are
+        # ordinary facts; blocking them stripped release dates from scripts.
+        needs_structured_number = (
+            claim_type in FINANCIAL_CLAIM_TYPES
+            or (claim_type != "ranking" and _has_money_or_percent(canonical_text))
         )
-        if high_risk_numeric and numeric_value is None and rank is None:
+        if needs_structured_number and numeric_value is None:
             status = "blocked"
-            reasons.append("High-risk numeric/financial claim is missing a structured numeric value.")
+            reasons.append("Financial/percentage claim is missing a structured numeric value.")
         market = _clean(raw.get("market"))
         chart_type = _clean(raw.get("chart_type")).lower()
         period_type = _clean(raw.get("period_type")).lower()
@@ -319,7 +361,7 @@ def _validate_spoken_claim(raw: dict, ledger_by_id: dict[str, dict]) -> dict:
     if any(claim.get("verification_status") == "blocked" for claim in matched):
         reasons.append("Mapped ledger claim is blocked.")
     numeric_value = _float(raw.get("numeric_value"))
-    if numeric_value is not None and not any(_same_number(raw, claim) for claim in matched):
+    if numeric_value is not None and matched and not any(_number_supported(raw, claim) for claim in matched):
         reasons.append("Numeric value/unit does not match the supporting ledger claim.")
     claim_type = _clean(raw.get("claim_type")).lower() or "other"
     if matched and claim_type == "ranking":

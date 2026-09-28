@@ -194,3 +194,35 @@ def test_unextracted_high_risk_sentence_blocks_whole_audit(monkeypatch):
     assert audit["status"] == "blocked"
     assert audit["uncovered_high_risk_count"] == 1
     assert audit["blocked_count"] >= 1
+
+
+def test_dates_and_counts_are_not_auto_blocked():
+    from app.services.claim_ledger import normalize_ledger_claims
+    stories = [{"id": "s1", "articles": [{"url": "u"}]}]
+    raw = [
+        {"story_id": "s1", "claim_type": "release", "canonical_text": "Moth Kingdom opens in select theaters on March 3, 2031.",
+         "release_scope": "limited theatrical", "source_urls": ["u"], "verification_status": "verified"},
+        {"story_id": "s1", "claim_type": "company", "canonical_text": "Studio X settled with 9 regulators.",
+         "source_urls": ["u"], "verification_status": "verified"},
+    ]
+    assert [c["verification_status"] for c in normalize_ledger_claims(raw, stories, {})] == ["verified", "verified"]
+
+
+def test_money_without_structured_value_is_still_blocked():
+    from app.services.claim_ledger import normalize_ledger_claims
+    stories = [{"id": "s1", "articles": [{"url": "u"}]}]
+    raw = [{"story_id": "s1", "claim_type": "company", "canonical_text": "The deal is worth $4 billion.",
+            "source_urls": ["u"], "verification_status": "verified"}]
+    assert normalize_ledger_claims(raw, stories, {})[0]["verification_status"] == "blocked"
+
+
+def test_spoken_count_matches_ledger_text_without_structured_value():
+    from app.services.claim_ledger import _validate_spoken_claim
+    ledger = {"C001": {"id": "C001", "story_id": "s1", "claim_type": "company", "numeric_value": None,
+                       "canonical_text": "Studio X settled with 9 regulators.", "verification_status": "verified"}}
+    ok = _validate_spoken_claim({"story_id": "s1", "sentence": "با ۹ نهاد نظارتی توافق کرد.", "claim_type": "company",
+                                 "numeric_value": 9, "ledger_claim_ids": ["C001"], "semantic_match": "equivalent"}, ledger)
+    bad = _validate_spoken_claim({"story_id": "s1", "sentence": "با ۱۱ نهاد نظارتی توافق کرد.", "claim_type": "company",
+                                  "numeric_value": 11, "ledger_claim_ids": ["C001"], "semantic_match": "equivalent"}, ledger)
+    assert ok["status"] == "verified"
+    assert bad["status"] == "blocked"
