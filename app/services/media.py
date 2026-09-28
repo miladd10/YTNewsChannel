@@ -1896,6 +1896,14 @@ BANNED_IMAGE_HOST_TERMS = (
     "tiktok.com", "twitter.com", "x.com", "reddit.com", "memesita.com",
 )
 
+def _host_matches_domain(host: str, domain: str) -> bool:
+    host = (host or "").lower().strip(".")
+    domain = (domain or "").lower().strip(".")
+    if domain.endswith("."):
+        domain = domain[:-1]
+    return host == domain or host.endswith("." + domain)
+
+
 PREFERRED_IMAGE_SOURCE_TERMS = (
     "reuters", "apnews", "associated press", "getty", "deadline", "variety",
     "hollywoodreporter", "thewrap", "netflix", "warnerbros", "paramount",
@@ -1939,7 +1947,7 @@ def _image_candidate_score(item: dict, story: dict) -> int:
     host = (urlparse(page_url).hostname or "").lower()
     haystack = f"{title} {source} {host}".lower()
 
-    if any(term in host for term in BANNED_IMAGE_HOST_TERMS):
+    if any(_host_matches_domain(host, term) for term in BANNED_IMAGE_HOST_TERMS):
         return -10_000
 
     if _is_corporate_story(story):
