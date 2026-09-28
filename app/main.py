@@ -16,6 +16,12 @@ from pydantic import BaseModel, Field
 
 from .db import BASE_DIR, PIPELINE, db, init_db
 from .services.ai import generate_text
+from .services.claim_ledger import (
+    audit_narration_claims,
+    build_claim_ledger,
+    ledger_for_writer,
+    ledger_summary,
+)
 from .services.local_cli import all_statuses, launch_login
 from .services.media import _coverage_balanced_results, download_candidate, search_story_media, story_media_key, story_visual_plan, suggested_clip_range
 from .services.elevenlabs_client import ElevenLabsError, MODEL_ID as ELEVEN_MODEL_ID, forced_alignment, list_voices, mp3_duration_seconds, text_to_speech
@@ -1618,17 +1624,19 @@ def _run_narration_fact_check(
     draft_text: str,
     writer_provider: str,
     writer_model: str,
+    fresh_sources: dict[str, list[dict]] | None = None,
 ) -> tuple[str, dict, str, str]:
     settings = masked_status()
     preferred_provider = settings.get("reviewer_provider") or writer_provider
     preferred_model = settings.get("reviewer_model") or writer_model
 
-    fresh_sources = fetch_narration_fact_check_sources(
-        stories,
-        str(project.get("date_start") or ""),
-        str(project.get("date_end") or ""),
-        per_query_limit=5,
-    )
+    if fresh_sources is None:
+        fresh_sources = fetch_narration_fact_check_sources(
+            stories,
+            str(project.get("date_start") or ""),
+            str(project.get("date_end") or ""),
+            per_query_limit=5,
+        )
     deterministic_red_flags = _deterministic_fact_red_flags(draft_text, fresh_sources)
     fact_packet = {
         "project_window": {
@@ -1728,6 +1736,148 @@ def _run_narration_fact_check(
         "model": preferred_model,
         "error": last_error,
     }, preferred_provider, preferred_model
+
+
+
+def _build_verified_claim_ledger(
+    project: dict,
+    stories: list[dict],
+    provider: str,
+    model: str,
+    fresh_sources: dict[str, list[dict]] | None = None,
+) -> tuple[list[dict], dict[str, list[dict]], str, str]:
+    if fresh_sources is None:
+        fresh_sources = fetch_narration_fact_check_sources(
+            stories,
+            str(project.get("date_start") or ""),
+            str(project.get("date_end") or ""),
+            per_query_limit=5,
+        )
+    try:
+        ledger, actual_provider, actual_model = build_claim_ledger(
+            stories,
+            project,
+            fresh_sources,
+            provider,
+            model,
+        )
+    except Exception as exc:
+        raise HTTPException(400, f"Could not build verified claim ledger: {exc}") from exc
+
+    summary = ledger_summary(ledger)
+    usable = summary["verified"] + summary["attributed"]
+    if usable <= 0:
+        raise HTTPException(
+            400,
+            "Claim Ledger produced no verified claims. Refresh research/source verification before writing narration.",
+        )
+    return ledger, fresh_sources, actual_provider, actual_model
+
+
+def _persist_claim_audit(
+    conn,
+    project: dict,
+    narration_id: str,
+    version: int,
+    ledger: list[dict],
+    audit: dict,
+) -> None:
+    stamp = now()
+    conn.execute("DELETE FROM claim_ledger WHERE narration_id=?", (narration_id,))
+    conn.execute("DELETE FROM narration_claim_checks WHERE narration_id=?", (narration_id,))
+
+    for claim in ledger:
+        conn.execute(
+            """INSERT INTO claim_ledger(
+                id,project_id,narration_id,story_id,claim_type,canonical_text,
+                verification_status,attribution_required,source_urls_json,data_json,created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(uuid.uuid4()), project["id"], narration_id,
+                str(claim.get("story_id") or ""), str(claim.get("claim_type") or "other"),
+                str(claim.get("canonical_text") or ""),
+                str(claim.get("verification_status") or "blocked"),
+                1 if claim.get("attribution_required") else 0,
+                json.dumps(claim.get("source_urls") or [], ensure_ascii=False),
+                json.dumps(claim, ensure_ascii=False),
+                stamp,
+            ),
+        )
+
+    for claim in audit.get("claims") or []:
+        conn.execute(
+            """INSERT INTO narration_claim_checks(
+                id,project_id,narration_id,story_id,claim_type,sentence,status,
+                ledger_claim_ids_json,issue,data_json,created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(claim.get("id") or uuid.uuid4()), project["id"], narration_id,
+                str(claim.get("story_id") or ""), str(claim.get("claim_type") or "other"),
+                str(claim.get("sentence") or ""), str(claim.get("status") or "blocked"),
+                json.dumps(claim.get("ledger_claim_ids") or []),
+                str(claim.get("issue") or ""),
+                json.dumps(claim, ensure_ascii=False),
+                stamp,
+            ),
+        )
+
+    conn.execute(
+        """UPDATE narrations
+           SET claim_audit_status=?,claim_count=?,claim_verified_count=?,
+               claim_attributed_count=?,claim_blocked_count=?,claim_audit_json=?
+           WHERE id=?""",
+        (
+            str(audit.get("status") or "blocked"),
+            int(audit.get("claim_count") or 0),
+            int(audit.get("verified_count") or 0),
+            int(audit.get("attributed_count") or 0),
+            int(audit.get("blocked_count") or 0),
+            json.dumps(audit, ensure_ascii=False),
+            narration_id,
+        ),
+    )
+
+    root = Path(project["root_path"]) / "narration" / "claims"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / f"v{version:02d}_ledger.json").write_text(
+        json.dumps({"summary": ledger_summary(ledger), "claims": ledger}, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (root / f"v{version:02d}_audit.json").write_text(
+        json.dumps(audit, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _claim_rows_for_workspace(conn, project_id: str) -> tuple[list[dict], list[dict]]:
+    ledger_rows = []
+    for row in conn.execute(
+        "SELECT * FROM claim_ledger WHERE project_id=? ORDER BY created_at,id",
+        (project_id,),
+    ).fetchall():
+        item = dict(row)
+        try:
+            data = json.loads(item.pop("data_json") or "{}")
+        except Exception:
+            data = {}
+        data["narration_id"] = item["narration_id"]
+        data["db_id"] = item["id"]
+        ledger_rows.append(data)
+
+    check_rows = []
+    for row in conn.execute(
+        "SELECT * FROM narration_claim_checks WHERE project_id=? ORDER BY created_at,id",
+        (project_id,),
+    ).fetchall():
+        item = dict(row)
+        try:
+            data = json.loads(item.pop("data_json") or "{}")
+        except Exception:
+            data = {}
+        data["narration_id"] = item["narration_id"]
+        data["db_id"] = item["id"]
+        check_rows.append(data)
+    return ledger_rows, check_rows
 
 
 @app.post("/api/projects/{project_id}/narration")
