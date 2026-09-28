@@ -358,6 +358,8 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_media_candidates_selected ON media_candidates(project_id, selected);
             """
         )
+        if not _column_exists(conn, "stories", "news_event_date"):
+            conn.execute("ALTER TABLE stories ADD COLUMN news_event_date TEXT NOT NULL DEFAULT ''")
         if not _column_exists(conn, "stories", "visual_context_json"):
             conn.execute("ALTER TABLE stories ADD COLUMN visual_context_json TEXT NOT NULL DEFAULT '[]'")
         if not _column_exists(conn, "stories", "context_searched_at"):

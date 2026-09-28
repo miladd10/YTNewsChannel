@@ -182,6 +182,39 @@ def _evidence_metrics(cluster: list[dict]) -> dict:
     }
 
 
+_WEEKEND_RESULT_RE = re.compile(
+    r"(weekend|opening|opened|opens|debut|bow|\bww\b|worldwide|global\s+box\s+office|box\s+office\s+global|"
+    r"domestic|افتتاحیه|آخر\s*هفته)",
+    re.IGNORECASE,
+)
+
+
+def _weekend_covered_by_report(published: datetime) -> datetime:
+    """Box-office reports published Monday-Thursday describe the weekend that
+    ended the previous Sunday; Friday-Sunday reports describe that weekend."""
+    weekday = published.weekday()  # Monday=0 ... Sunday=6
+    if weekday >= 4:
+        return published
+    return published - timedelta(days=weekday + 1)
+
+
+def _reports_only_pre_window_weekend(story: dict, window_start: datetime) -> bool:
+    """True when a box-office result story's only in-window coverage reports
+    a weekend that ended before the project window started."""
+    text = " ".join(str(story.get(key) or "") for key in ("canonical_title", "news_hook", "summary"))
+    if str(story.get("category") or "") != "box_office" and not re.search(r"box\s*office|gross|گیشه", text, re.IGNORECASE):
+        return False
+    if not _WEEKEND_RESULT_RE.search(text):
+        return False
+    current = [item for item in story.get("source_evidence") or [] if str(item.get("temporal_role") or "") == "current"]
+    dates = [_parse_source_datetime(str(item.get("published_at") or "")) for item in current]
+    dates = [value for value in dates if value is not None]
+    if not dates:
+        return False
+    first_window_day = window_start.date()
+    return all(_weekend_covered_by_report(value).date() < first_window_day for value in dates)
+
+
 def _apply_story_quality_gates(story: dict, project: dict) -> dict:
     date_start = str(project.get("date_start") or "")
     date_end = str(project.get("date_end") or "")
@@ -198,13 +231,19 @@ def _apply_story_quality_gates(story: dict, project: dict) -> dict:
         deterministic_temporal = "fail" if background > 0 else "warning"
         freshness = "stale" if background > 0 else "date_unknown"
 
-    if hook_date:
-        hook_dt = _parse_source_datetime(hook_date)
-        start, end = _window_bounds(date_start, date_end)
-        if hook_dt is not None:
-            if (start is not None and hook_dt < start) or (end is not None and hook_dt >= end):
+    start, end = _window_bounds(date_start, date_end)
+    for label_date in (hook_date, str(story.get("news_event_date") or "").strip()):
+        if not label_date:
+            continue
+        label_dt = _parse_source_datetime(label_date[:10] + "T12:00:00+00:00") or _parse_source_datetime(label_date)
+        if label_dt is not None:
+            if (start is not None and label_dt < start) or (end is not None and label_dt >= end):
                 freshness = "stale"
                 deterministic_temporal = "fail"
+
+    if start is not None and _reports_only_pre_window_weekend(story, start):
+        freshness = "stale"
+        deterministic_temporal = "fail"
 
     if freshness == "stale":
         deterministic_temporal = "fail"
@@ -633,7 +672,8 @@ def merge_duplicate_stories(stories: list[dict], articles: list[dict], project: 
             continue
         members = sorted(
             members,
-            key=lambda item: (_DECISION_RANK.get(str(item.get("decision") or ""), 0),
+            key=lambda item: (str(item.get("temporal_gate") or "") == "pass",
+                              _DECISION_RANK.get(str(item.get("decision") or ""), 0),
                               float(item.get("score") or 0), int(item.get("source_count") or 0)),
             reverse=True,
         )
@@ -658,6 +698,18 @@ def merge_duplicate_stories(stories: list[dict], articles: list[dict], project: 
             "spice_source_ids": list(dict.fromkeys(x for m in members for x in m.get("spice_source_ids") or [])),
             "score": max(float(m.get("score") or 0) for m in members),
             "decision": primary.get("decision"),
+            "source_evidence": [
+                {
+                    "title": item.get("title") or "", "source": item.get("source") or "",
+                    "published_at": item.get("published_at") or "",
+                    "temporal_role": str((item.get("raw") or {}).get("temporal_role") or ""),
+                    "source_kind": str((item.get("raw") or {}).get("source_kind") or "news"),
+                    "platform": str((item.get("raw") or {}).get("platform") or ""),
+                    "trust_role": str((item.get("raw") or {}).get("trust_role") or ""),
+                    "snippet": str(item.get("snippet") or "")[:500],
+                }
+                for item in cluster[:12]
+            ] or primary.get("source_evidence") or [],
             "merged_story_count": len(members),
             "merged_titles": [str(m.get("canonical_title") or "") for m in members[1:]],
         })
@@ -727,7 +779,7 @@ def ai_rank_stories(stories: list[dict], project: dict, provider: str, model: st
 You receive strict SECTION CONTRACTS and discovered stories. Classify each story by MEANING, not by the query that happened to find it.
 
 Return ONLY valid JSON: one object per supplied story using exactly these keys:
-id, category, section_fit, attention, importance, freshness, news_hook, news_hook_date, verification_status, verification_notes, search_subject, familiarity_needed, familiarity_anchor, confidence, visual_potential, uniqueness, score, decision, rationale.
+id, category, section_fit, attention, importance, freshness, news_hook, news_hook_date, news_event_date, verification_status, verification_notes, search_subject, familiarity_needed, familiarity_anchor, confidence, visual_potential, uniqueness, score, decision, rationale.
 
 Rules:
 - category must be one of the supplied researchable section keys.
@@ -738,6 +790,8 @@ Rules:
 - freshness is current|followup|stale|date_unknown.
 - news_hook must name the SPECIFIC new development that occurred in the selected project window; do not merely restate the subject/movie.
 - news_hook_date should be YYYY-MM-DD only when the supplied evidence supports that date; otherwise return an empty string.
+- news_event_date is the date the development itself HAPPENED (YYYY-MM-DD), which is often earlier than publication. For box-office results use the last day of the period the figures cover (a Monday-Thursday report on Friday-Sunday grosses -> that Sunday). For announcements, trailers and releases use the announcement/release date. Empty when the evidence does not show it.
+- If the only in-window coverage reports an event that happened before the window, the story is stale unless the evidence shows a genuinely newer development inside the window; in that case make that newer development the news_hook.
 - verification_status is verified|reported|needs_verification|rejected.
 - verification_notes briefly explain which evidence verifies the hook and any remaining limitation.
 - search_subject is a concise searchable subject for the story (movie title, person, company/deal, series title, etc.), not the whole headline. Use only names/titles supported by the supplied evidence.
@@ -792,7 +846,7 @@ Rules:
             value = item.get(key)
             if isinstance(value, str) and value.strip():
                 story[key] = value.strip().lower()
-        for key in ("rationale", "news_hook", "news_hook_date", "verification_notes", "search_subject", "familiarity_anchor"):
+        for key in ("rationale", "news_hook", "news_hook_date", "news_event_date", "verification_notes", "search_subject", "familiarity_anchor"):
             value = item.get(key)
             if isinstance(value, str):
                 story[key] = value.strip()

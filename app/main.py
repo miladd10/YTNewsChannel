@@ -754,12 +754,12 @@ def run_research(project_id: str, body: ResearchBody):
                     id,project_id,run_id,canonical_title,summary,category,attention,importance,freshness,
                     confidence,visual_potential,uniqueness,rationale,score,decision,section_fit,article_ids_json,source_count,
                     source_platforms_json,source_kinds_json,reddit_only,primary_social_count,
-                    news_hook,news_hook_date,verification_status,verification_notes,temporal_gate,verification_gate,
+                    news_hook,news_hook_date,news_event_date,verification_status,verification_notes,temporal_gate,verification_gate,
                     in_window_source_count,background_source_count,undated_source_count,independent_source_count,
                     current_non_reddit_source_count,current_primary_social_count,familiarity_needed,familiarity_anchor,
                     search_subject,spice_json,spice_source_ids_json,context_searched_at,context_search_count,context_search_error,
                     created_at,updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     story["id"], project_id, run_id, story["canonical_title"], story["summary"], story["category"],
                     story["attention"], story["importance"], story["freshness"], story["confidence"],
@@ -767,7 +767,7 @@ def run_research(project_id: str, body: ResearchBody):
                     story.get("section_fit") or "medium", json.dumps(story["article_ids"]), story["source_count"],
                     json.dumps(story.get("source_platforms") or []), json.dumps(story.get("source_kinds") or []),
                     1 if story.get("reddit_only") else 0, int(story.get("primary_social_count") or 0),
-                    story.get("news_hook") or "", story.get("news_hook_date") or "",
+                    story.get("news_hook") or "", story.get("news_hook_date") or "", story.get("news_event_date") or "",
                     story.get("verification_status") or "needs_verification", story.get("verification_notes") or "",
                     story.get("temporal_gate") or "warning", story.get("verification_gate") or "fail",
                     int(story.get("in_window_source_count") or 0), int(story.get("background_source_count") or 0),
