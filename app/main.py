@@ -1901,6 +1901,13 @@ def generate_narration(project_id: str, body: GenerateBody):
         item["spice_sources"] = []
         baseline_stories.append(item)
 
+    claim_ledger, fresh_claim_sources, _, _ = _build_verified_claim_ledger(
+        project,
+        baseline_stories,
+        provider,
+        model,
+    )
+
     packet = {
         "project": {
             "name": project.get("name"),
@@ -1915,6 +1922,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         },
         "format_blueprint": format_packet(),
         "approved_sections": _sectioned_story_packet(baseline_stories),
+        "verified_claim_ledger": ledger_for_writer(claim_ledger),
         "additional_instructions": body.instructions,
     }
     channel = project.get("channel") or "cinema"
@@ -1956,6 +1964,10 @@ def generate_narration(project_id: str, body: GenerateBody):
         json.dumps(content_plan, ensure_ascii=False),
         "</content_plan>",
         "",
+        "<verified_claim_ledger>",
+        json.dumps(ledger_for_writer(claim_ledger), ensure_ascii=False),
+        "</verified_claim_ledger>",
+        "",
         "<style_blueprint>",
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
@@ -1973,6 +1985,15 @@ def generate_narration(project_id: str, body: GenerateBody):
         text,
         actual_provider,
         actual_model,
+        fresh_sources=fresh_claim_sources,
+    )
+    audit_provider = settings.get("reviewer_provider") or actual_provider
+    audit_model = settings.get("reviewer_model") or actual_model
+    claim_audit, _, _ = audit_narration_claims(
+        text,
+        claim_ledger,
+        audit_provider,
+        audit_model,
     )
 
     narration_id = str(uuid.uuid4())
@@ -2008,6 +2029,7 @@ def generate_narration(project_id: str, body: GenerateBody):
             json.dumps(fact_check, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+        _persist_claim_audit(conn, project, narration_id, version, claim_ledger, claim_audit)
         plan_folder = Path(project["root_path"]) / "narration" / "plans"
         plan_folder.mkdir(parents=True, exist_ok=True)
         (plan_folder / f"v{version:02d}_content_plan.json").write_text(
@@ -2029,6 +2051,12 @@ def generate_narration(project_id: str, body: GenerateBody):
         "fact_check_status": fact_check.get("status") or "needs_human_check",
         "fact_check_issue_count": int(fact_check.get("issue_count") or 0),
         "fact_check_issues": fact_check.get("issues") or [],
+        "claim_audit_status": claim_audit.get("status") or "blocked",
+        "claim_count": int(claim_audit.get("claim_count") or 0),
+        "claim_verified_count": int(claim_audit.get("verified_count") or 0),
+        "claim_attributed_count": int(claim_audit.get("attributed_count") or 0),
+        "claim_blocked_count": int(claim_audit.get("blocked_count") or 0),
+        "claim_ledger_summary": ledger_summary(claim_ledger),
     }
 
 
