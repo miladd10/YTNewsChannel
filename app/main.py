@@ -1420,6 +1420,11 @@ class StyleTranscriptToggleBody(BaseModel):
     enabled: bool
 
 
+class StyleProfileRebuildBody(BaseModel):
+    provider: str | None = None
+    model: str | None = None
+
+
 class NarrationEnrichmentRewriteBody(BaseModel):
     provider: str | None = None
     model: str | None = None
@@ -1434,6 +1439,28 @@ class NarrationRevisionBody(BaseModel):
     review_id: str = ""
     provider: str | None = None
     model: str | None = None
+
+
+@app.post("/api/projects/{project_id}/style-profile/rebuild")
+def rebuild_style_profile(project_id: str, body: StyleProfileRebuildBody):
+    settings = masked_status()
+    provider = body.provider or settings.get("writer_provider", "codex_local")
+    model = body.model or settings.get("writer_model", "default")
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        channel = project.get("channel") or "cinema"
+        content_type = project.get("content_type") or "weekly_news"
+        styles = _style_transcripts(conn, channel, content_type)
+    profile = _ensure_style_profile(channel, content_type, styles, provider, model, force=True)
+    return {
+        "id": profile.get("id") or "",
+        "current": bool(profile.get("current")),
+        "transcript_count": int(profile.get("enabled_transcript_count") or 0),
+        "profile_text": profile.get("profile_text") or "",
+        "provider": profile.get("provider") or "",
+        "model": profile.get("model") or "",
+        "updated_at": profile.get("updated_at") or "",
+    }
 
 
 @app.get("/api/style-transcripts")
@@ -1494,13 +1521,17 @@ def narration_workspace(project_id: str):
             "SELECT * FROM narration_reviews WHERE project_id=? ORDER BY created_at DESC",
             (project_id,),
         ).fetchall()]
-        styles = _style_transcripts(conn, project.get("channel") or "cinema", project.get("content_type") or "weekly_news")
+        channel = project.get("channel") or "cinema"
+        content_type = project.get("content_type") or "weekly_news"
+        styles = _style_transcripts(conn, channel, content_type)
+        style_profile = _style_profile_status(conn, channel, content_type, styles)
     return {
         "format_blueprint": format_packet(),
         "sections": _sectioned_story_packet(stories),
         "narrations": narrations,
         "reviews": reviews,
         "style_transcripts": styles,
+        "style_profile": style_profile,
     }
 
 
