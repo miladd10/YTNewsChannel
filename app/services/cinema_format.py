@@ -608,7 +608,7 @@ Writing rules:
 - This is a SPOKEN TRANSCRIPT, not polished entertainment journalism. In Persian, prefer natural colloquial syntax and contractions where the reference style does; do not "correct" the host into formal written Persian.
 - Sound like one conversational host telling the week to a friend, not like a list of article summaries.
 - The CONTENT PLAN exists so you can spend your effort on telling, not re-summarizing. Use its supported beats fully enough to make each item feel like a small story.
-- STORY MICRO-ARC: for a normal/rich item, usually move through 3-7 useful beats: concrete news hook -> just enough setup -> the most interesting specific detail/contrast -> optional explanation/familiarity -> supported aside/reaction -> practical ending fact/payoff. Quick items can be shorter. Never pad thin evidence.
+- STORY MICRO-ARC: for a normal/rich item, usually move through 3-7 useful beats: concrete news hook -> just enough setup -> the most interesting specific detail/contrast -> optional explanation/familiarity -> supported aside/reaction -> practical ending fact/payoff. Treat CONTENT PLAN depth as a pacing instruction: lead stories can breathe across roughly 6-10 supported beats, normal items roughly 4-7, quick items roughly 2-4. These are ceilings/targets only when the evidence exists; never pad thin evidence.
 - Let the host reason out loud when useful: a short "یعنی...", "برای همین...", "مشکل اینجاست...", "حالا چرا این جالبه؟" turn can make facts easier to follow. These are tools, not mandatory catchphrases; vary them naturally.
 - Rhetorical questions are allowed when they genuinely set up an explanation or punchline. Do not ban them merely because generic AI writing can overuse them.
 - Humor should normally come from an actual contrast or odd fact in the packet, not an adjective like "عجیب", "خفن", "سنگین" or "کنجکاوی‌برانگیز" with nothing underneath it.
@@ -660,7 +660,7 @@ Check:
 - missing/incorrect STORY markers;
 - weak section organization or stories placed in the wrong format section;
 - flat article-summary writing instead of conversational storytelling;
-- OVER-COMPRESSION: if a story packet contains several useful supported beats but the draft reduces it to a 1-2 sentence headline summary, flag it. The reference voice often explains the premise/context, then lands on a concrete oddity, comparison, aside, or practical detail;
+- OVER-COMPRESSION: if a story packet contains several useful supported beats but the draft reduces it to a 1-2 sentence headline summary, flag it. Compare depth to evidence: lead stories should normally exploit more supported beats than normal items, and normal items more than quick ones. The reference voice often explains the premise/context, then lands on a concrete oddity, comparison, aside, or practical detail;
 - FORMAL WRITTEN-PERSIAN DRIFT: flag prose that reads like a polished entertainment article instead of a person talking naturally. Do not require slang everywhere, but compare syntax, connectors and sentence flow against the Style Blueprint/anchors;
 - EMPTY ADJECTIVE PAYOFFS: flag lines like "ترکیب سنگینی جمع شده", "پروژه کنجکاوی‌برانگیز شده", "اتفاق بزرگیه" when the sentence does not explain the concrete reason with supported evidence;
 - ABSTRACT STAKES: flag generic "this matters to audiences / may affect the future of films" commentary unless the packet gives a concrete effect;
