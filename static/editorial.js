@@ -85,6 +85,53 @@ function reviewFeedbackHtml(review){
   return `<section id="reviewFeedbackPanel" class="review-feedback-panel"><div class="review-feedback-head"><div><div class="eyebrow">REVIEW FEEDBACK · R${Number(review.review_number||1)}</div><h3>${esc(String(review.gate_status||'revision_required').replaceAll('_',' '))}</h3></div><div class="review-counts"><span>Blocking ${Number(review.blocking_count||0)}</span><span>Major ${Number(review.major_count||0)}</span><span>Minor ${Number(review.minor_count||0)}</span></div></div><div class="review-audits">${reviewAuditBadges(review)}</div><pre class="editor review-editor review-feedback-text">${esc(review.content||'')}</pre></section>`;
 }
 
+
+function storyEnrichmentHtml(stories,draft){
+  if(!draft)return '';
+  const draftTime=Date.parse(draft.created_at||'')||0;
+  const searched=stories.filter(s=>s.context_searched_at);
+  const pending=stories.filter(s=>(Date.parse(s.context_searched_at||'')||0)>draftTime);
+  const safeCount=stories.reduce((n,s)=>n+(s.spice_angles||[]).filter(a=>a.safe_to_narrate).length,0);
+  return `<section class="card enrichment-workbench">
+    <div class="enrichment-head">
+      <div>
+        <div class="eyebrow">POST-DRAFT STORY ENRICHMENT</div>
+        <h3>Find cool stuff one story at a time</h3>
+        <p>Search the wider public web plus Reddit, X/Twitter, TikTok, Instagram and YouTube for supported rumors, controversy, critic reaction, platform-specific discussion, cool facts and comparisons. Nothing is added to the draft until you choose Rewrite with Enrichment.</p>
+      </div>
+      <div class="top-actions">
+        <span class="pill">${searched.length}/${stories.length} searched</span>
+        <span class="pill">${safeCount} usable angle${safeCount===1?'':'s'}</span>
+        <button id="rewriteEnrichedBtn" class="btn primary" ${pending.length?'':'disabled'}>Rewrite with Enrichment${pending.length?` (${pending.length} updated)`:''}</button>
+      </div>
+    </div>
+    ${pending.length?`<div class="run-note warn">New story research was added after Draft V${draft.version_number}. Rewrite with Enrichment before running Reviewer so the review evaluates the enriched draft.</div>`:''}
+    <div class="enrichment-story-list">${stories.map(s=>{
+      const angles=s.spice_angles||[];
+      const sources=s.spice_sources||[];
+      const safe=angles.filter(a=>a.safe_to_narrate);
+      const searchedAt=s.context_searched_at||'';
+      return `<article class="enrichment-story">
+        <div class="enrichment-story-head">
+          <div>
+            <strong>${esc(s.canonical_title)}</strong>
+            <div class="story-meta">
+              <span class="pill">${esc(sectionLabel(s.category))}</span>
+              ${searchedAt?`<span class="signal high">searched ${Number(s.context_search_count||1)}Ã</span>`:'<span class="signal">not searched yet</span>'}
+              <span class="signal">${safe.length} usable angle${safe.length===1?'':'s'}</span>
+              <span class="signal">${sources.length} collected source${sources.length===1?'':'s'}</span>
+            </div>
+          </div>
+          <button class="btn secondary" data-search-story-context="${s.id}">${searchedAt?'Search Again':'Find Cool Stuff'}</button>
+        </div>
+        ${angles.length?`<div class="enrichment-angle-list">${angles.map(a=>`<div class="spice-angle ${a.safe_to_narrate?'safe':'unsafe'}"><div class="spice-angle-head"><span class="spice-type ${esc(a.type||'')}">${esc(String(a.type||'').replaceAll('_',' '))}</span><span class="spice-evidence">${esc(a.evidence_status||'weak')}${a.safe_to_narrate?' Â· usable':' Â· reference only'}</span></div><div class="spice-text">${esc(a.text||'')}</div>${a.usage_note?`<small>${esc(a.usage_note)}</small>`:''}</div>`).join('')}</div>`:''}
+        ${sources.length?`<details class="enrichment-sources"><summary>Collected sources (${sources.length}) Â· also passed to Media Sources</summary>${sources.map(src=>`<a href="${esc(src.url)}" target="_blank" rel="noreferrer"><span class="source-kind-badge ${esc(src.platform||src.source_kind||'web')}">${esc(src.platform==='x'?'X/Twitter':src.platform==='reddit'?'Reddit':src.platform==='tiktok'?'TikTok':src.platform==='instagram'?'Instagram':src.platform==='youtube'?'YouTube':'Web')}</span> ${esc(src.source||'Source')} - ${esc(src.title||src.url)}</a>`).join('')}</details>`:''}
+        ${s.context_search_error?`<div class="run-note warn">${esc(s.context_search_error)}</div>`:''}
+      </article>`;
+    }).join('')}</div>
+  </section>`;
+}
+
 narrationHtml=async function(){
   const w=await loadNarrationWorkspace();
   const drafts=w.narrations||[];
