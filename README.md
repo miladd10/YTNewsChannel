@@ -131,3 +131,14 @@ The local SQLite index lives in `data/ytnews.db` and is intentionally ignored by
 - Logo/fanfare/ident/title-announcement videos are limited to one use per story so short corporate/logo footage does not repeat across the same narration.
 - Intro and outro headings are editorially reserved: they receive no automatic news B-roll. Future voice preparation creates separate blank-story intro/outro segments.
 - Existing projects created before this rule are repaired without re-generating ElevenLabs audio: forced-alignment timestamps are used to detect where an outro leaked into the final story take, and Resolve ends that story's B-roll at the aligned outro boundary.
+
+
+### v0.3.27 Smart coverage + UHD landscape media
+- Resolve now keeps selecting different non-overlapping sections from the same selected trailer/clip until the narration window is covered or the source is genuinely exhausted; this fixes cases where a long 4K trailer supplied only one short shot and left the rest black.
+- Low-variety logo/fanfare/title-announcement footage is strongly penalized after its first use, but can still contribute a different unused source range as a last-resort coverage source instead of leaving a news section empty.
+- Media ranking now values editorial usefulness as well as resolution: a real official trailer/clip outranks a slightly higher-resolution title announcement or logo, while quality still decides between copies of the same asset.
+- Image search now targets 4K/high-resolution landscape/16:9 stills and can return up to eight image candidates for stories that need still coverage. Portrait/poster imagery is strongly penalized and Step 5 displays image dimensions/orientation/4K readiness.
+- Fixed an image-domain bug where the banned domain x.com falsely matched netflix.com, which could suppress official Netflix stills.
+- Current-title validation is stricter for movie-vs-series/franchise mismatches so footage such as Rings of Power is not mislabeled as current footage for a different Lord of the Rings movie.
+- Step 7 warns when selected media is below HD, portrait/square, or contextual archive footage so weak UHD inputs are visible before Resolve export.
+- Corporate searches now try more official studio-tour/backlot/centennial sources rather than relying on one logo clip.
