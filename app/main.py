@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
+from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -77,6 +79,21 @@ def _story_url_set(story: dict) -> set[str]:
     }
 
 
+RESOLVE_TITLE_STOPWORDS = {
+    "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with",
+    "from", "new", "movie", "film", "series", "trailer", "teaser", "official",
+    "first", "look", "release", "date", "details", "news",
+}
+
+
+def _resolve_title_tokens(value: str) -> list[str]:
+    return [
+        token
+        for token in re.findall(r"[a-z0-9]+", (value or "").casefold())
+        if len(token) >= 3 and token not in RESOLVE_TITLE_STOPWORDS
+    ]
+
+
 def _resolve_story_match_score(historical: dict, current: dict) -> int:
     """Score whether an old narration story is the same current Included story."""
     if not historical or not current:
@@ -89,6 +106,18 @@ def _resolve_story_match_score(historical: dict, current: dict) -> int:
     new_title = " ".join(str(current.get("canonical_title") or "").casefold().split())
     if old_title and old_title == new_title:
         score += 500
+    elif old_title and new_title:
+        ratio = SequenceMatcher(None, old_title, new_title).ratio()
+        old_tokens = set(_resolve_title_tokens(old_title))
+        new_tokens = set(_resolve_title_tokens(new_title))
+        if old_tokens and new_tokens:
+            overlap_ratio = len(old_tokens & new_tokens) / max(1, min(len(old_tokens), len(new_tokens)))
+            if overlap_ratio >= 0.75:
+                score += int(260 * overlap_ratio)
+            elif overlap_ratio >= 0.5 and ratio >= 0.55:
+                score += int(180 * overlap_ratio)
+        if ratio >= 0.72:
+            score += int(180 * ratio)
 
     try:
         old_key = story_media_key(historical)
@@ -105,6 +134,39 @@ def _resolve_story_match_score(historical: dict, current: dict) -> int:
     if historical.get("category") and historical.get("category") == current.get("category"):
         score += 10
     return score
+
+
+def _resolve_voice_text_match_score(source_text: str, current: dict) -> int:
+    """Fallback match when an old story row/title is unavailable or changed."""
+    text = " ".join((source_text or "").casefold().split())
+    if not text:
+        return 0
+    title = str(current.get("canonical_title") or "")
+    tokens = _resolve_title_tokens(title)
+    if not tokens:
+        return 0
+    hits = sum(1 for token in tokens[:8] if token in text)
+    # Require at least one distinctive proper/title term. Two or more is strong.
+    if hits >= 3:
+        return 420 + hits * 20
+    if hits == 2:
+        return 360
+    if hits == 1 and len(tokens) == 1 and len(tokens[0]) >= 5:
+        return 355
+
+    # Article titles sometimes preserve a cleaner movie/show name than the
+    # clustered canonical title, so let them provide the same safe fallback.
+    best = 0
+    for article in current.get("articles") or []:
+        article_tokens = _resolve_title_tokens(str(article.get("title") or ""))
+        if not article_tokens:
+            continue
+        article_hits = sum(1 for token in article_tokens[:8] if token in text)
+        if article_hits >= 3:
+            best = max(best, 400 + article_hits * 20)
+        elif article_hits == 2:
+            best = max(best, 350)
+    return best
 
 
 def _reconcile_voice_story_rows(
@@ -138,35 +200,61 @@ def _reconcile_voice_story_rows(
         if str(row.get("story_id") or "")
     ))
 
+    voice_text_by_story: dict[str, str] = {}
+    for row in voice_rows:
+        story_id = str(row.get("story_id") or "")
+        if not story_id:
+            continue
+        voice_text_by_story[story_id] = (
+            voice_text_by_story.get(story_id, "") + " " + str(row.get("source_text") or "")
+        ).strip()
+
+    match_details: dict[str, dict] = {}
     for story_id in referenced_ids:
         if story_id in current_by_id:
             mapping[story_id] = story_id
+            match_details[story_id] = {
+                "resolved_story_id": story_id,
+                "method": "current-id",
+                "score": 10_000,
+            }
             continue
         historical = historical_by_id.get(story_id)
-        if not historical:
-            unresolved.append(story_id)
-            continue
+        narration_text = voice_text_by_story.get(story_id, "")
 
-        scored = sorted(
-            (
-                (_resolve_story_match_score(historical, current), current_id)
-                for current_id, current in current_by_id.items()
-            ),
-            reverse=True,
-        )
+        scored = []
+        for current_id, current in current_by_id.items():
+            historical_score = _resolve_story_match_score(historical, current) if historical else 0
+            voice_score = _resolve_voice_text_match_score(narration_text, current)
+            scored.append((max(historical_score, voice_score), current_id, historical_score, voice_score))
+        scored.sort(reverse=True)
+
         if not scored or scored[0][0] < 350:
             unresolved.append(story_id)
+            match_details[story_id] = {
+                "resolved_story_id": "",
+                "method": "unresolved",
+                "score": scored[0][0] if scored else 0,
+            }
             continue
 
-        top_score, top_id = scored[0]
+        top_score, top_id, historical_score, voice_score = scored[0]
         second_score = scored[1][0] if len(scored) > 1 else -1
         # Never guess across indistinguishable duplicate current stories.
-        # Exact title/article overlap naturally produces a higher unique score
-        # when there is one real successor; ties remain unresolved.
         if top_score > second_score:
             mapping[story_id] = top_id
+            match_details[story_id] = {
+                "resolved_story_id": top_id,
+                "method": "historical-story" if historical_score >= voice_score else "narration-text",
+                "score": top_score,
+            }
         else:
             unresolved.append(story_id)
+            match_details[story_id] = {
+                "resolved_story_id": "",
+                "method": "ambiguous",
+                "score": top_score,
+            }
 
     resolved_rows: list[dict] = []
     remapped_count = 0
@@ -180,10 +268,26 @@ def _reconcile_voice_story_rows(
             remapped_count += 1
         resolved_rows.append(item)
 
+    unresolved_details = []
+    for story_id in unresolved:
+        rows = [row for row in voice_rows if str(row.get("story_id") or "") == story_id]
+        historical = historical_by_id.get(story_id) or {}
+        unresolved_details.append({
+            "story_id": story_id,
+            "historical_title": str(historical.get("canonical_title") or ""),
+            "segment_indexes": [int(row.get("segment_index") or 0) for row in rows],
+            "narration_excerpt": " ".join(
+                str(row.get("source_text") or "") for row in rows
+            )[:280],
+            "match": match_details.get(story_id, {}),
+        })
+
     return resolved_rows, {
         "story_id_map": mapping,
         "remapped_segment_count": remapped_count,
         "unresolved_story_ids": unresolved,
+        "unresolved_details": unresolved_details,
+        "match_details": match_details,
     }
 
 
