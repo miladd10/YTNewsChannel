@@ -65,18 +65,41 @@ async function loadNarrationWorkspace(){
 function latestReviewForDraft(workspace,draftId){return (workspace?.reviews||[]).filter(x=>x.narration_id===draftId).sort((a,b)=>Number(b.review_number)-Number(a.review_number))[0]||null}
 function narrationGateBadge(review){if(!review)return '<span class="signal">Not reviewed</span>';const gate=review.gate_status||'revision_required';return `<span class="signal ${gate==='pass'?'high':gate==='polish_optional'?'medium':'low'}">${esc(gate.replaceAll('_',' '))}</span>`}
 
+
+function reviewAuditBadges(review){
+  if(!review)return '';
+  const rows=[
+    ['Format',review.format_status],
+    ['Style',review.style_status],
+    ['Facts',review.factual_status],
+    ['Freshness',review.freshness_status],
+    ['Storytelling',review.storytelling_status]
+  ];
+  return rows.map(([label,status])=>`<span class="review-audit-badge ${status==='pass'?'pass':'needs-work'}">${esc(label)}: ${esc((status||'unknown').replaceAll('_',' '))}</span>`).join('');
+}
+function reviewFeedbackHtml(review){
+  if(!review){
+    return `<section id="reviewFeedbackPanel" class="review-feedback-panel empty"><div><div class="eyebrow">REVIEW FEEDBACK</div><h3>No review yet</h3><p>Run Reviewer to get a visible format, style, factual, freshness and storytelling audit for this exact draft.</p></div></section>`;
+  }
+  return `<section id="reviewFeedbackPanel" class="review-feedback-panel"><div class="review-feedback-head"><div><div class="eyebrow">REVIEW FEEDBACK · R${Number(review.review_number||1)}</div><h3>${esc(String(review.gate_status||'revision_required').replaceAll('_',' '))}</h3></div><div class="review-counts"><span>Blocking ${Number(review.blocking_count||0)}</span><span>Major ${Number(review.major_count||0)}</span><span>Minor ${Number(review.minor_count||0)}</span></div></div><div class="review-audits">${reviewAuditBadges(review)}</div><pre class="editor review-editor review-feedback-text">${esc(review.content||'')}</pre></section>`;
+}
+
 narrationHtml=async function(){
   const w=await loadNarrationWorkspace();
   const drafts=w.narrations||[];
   const enabledStyles=(w.style_transcripts||[]).filter(x=>Number(x.enabled));
   if(!state.narrationDraftId||!drafts.some(x=>x.id===state.narrationDraftId))state.narrationDraftId=drafts[0]?.id||null;
   const draft=drafts.find(x=>x.id===state.narrationDraftId)||null;
-  const review=draft?latestReviewForDraft(w,draft.id):null;
+  const savedReview=draft?latestReviewForDraft(w,draft.id):null;
+  const instantReview=(draft&&state.lastNarrationReview&&state.lastNarrationReview.narration_id===draft.id)?state.lastNarrationReview:null;
+  const review=instantReview||savedReview;
   const sectionSummary=(w.sections||[]).filter(x=>x.stories?.length).map(x=>`<div class="writer-section-row"><strong>${esc(x.label)}</strong><span>${x.stories.length} selected</span><small>${esc(x.writer_role||'')}</small></div>`).join('');
+  const familiarityCount=(w.sections||[]).flatMap(x=>x.stories||[]).filter(x=>x.familiarity_needed&&x.familiarity_anchor).length;
   const styles=(w.style_transcripts||[]).map(t=>`<div class="style-transcript-row"><div><strong>${esc(t.name)}</strong><span>${fmt(t.char_count)} chars - ${Number(t.enabled)?'used by writer/reviewer':'disabled'}</span></div><div class="top-actions"><button class="btn ghost small-link" data-toggle-style-transcript="${t.id}" data-enabled="${Number(t.enabled)?1:0}">${Number(t.enabled)?'Disable':'Enable'}</button><button class="btn ghost small-link" data-delete-style-transcript="${t.id}">Delete</button></div></div>`).join('');
   const draftOptions=drafts.map(d=>`<option value="${d.id}" ${d.id===state.narrationDraftId?'selected':''}>Draft V${d.version_number}${Number(d.approved)?' - APPROVED':''} - ${esc(d.model)}</option>`).join('');
-  return `<div class="section-head"><div><div class="eyebrow">STEP 03</div><h2>Narration Writer - Review Loop</h2><p>Selected current-week news is factual authority. Filmbaz transcripts are a separate style corpus for tone, pacing, transitions and storytelling only.</p></div><button id="generateNarrationBtn" class="btn primary">Generate Fresh Draft</button></div>${metrics()}<div class="writer-grid"><section class="card writer-panel"><div class="writer-panel-head"><div><div class="eyebrow">APPROVED NEWS INPUT</div><h3>Section plan</h3></div></div>${sectionSummary||'<div class="muted">No Included stories yet.</div>'}</section><section class="card writer-panel"><div class="writer-panel-head"><div><div class="eyebrow">STYLE CORPUS</div><h3>Filmbaz transcript library</h3><p>${enabledStyles.length} enabled transcript${enabledStyles.length===1?'':'s'} - style only, never current-week facts</p></div><button id="importStyleTranscriptsBtn" class="btn secondary">Import transcripts</button><input id="styleTranscriptFiles" type="file" accept=".txt,.md,text/plain,text/markdown" multiple class="hidden" /></div>${styles||'<div class="muted">Import Filmbaz transcript files. They are reusable across cinema weekly projects.</div>'}</section></div>${draft?`<section class="card narration-workbench"><div class="narration-toolbar"><select id="narrationDraftSelect">${draftOptions}</select><div class="top-actions">${narrationGateBadge(review)}<button id="reviewNarrationBtn" class="btn secondary">Run Reviewer</button>${review?`<button id="reviseNarrationBtn" class="btn secondary" ${review.gate_status==='pass'?'disabled':''}>Revise from Review</button>`:''}<button id="approveNarrationBtn" class="btn primary" ${Number(draft.approved)||!review||review.gate_status==='revision_required'?'disabled':''}>${Number(draft.approved)?'Approved':'Approve Draft'}</button></div></div><div class="writer-review-grid"><div><div class="eyebrow">DRAFT V${draft.version_number}</div><pre class="editor narration-editor">${esc(draft.content)}</pre></div><div><div class="eyebrow">LATEST REVIEW${review?` - R${review.review_number}`:''}</div>${review?`<div class="review-counts"><span>Blocking ${review.blocking_count}</span><span>Major ${review.major_count}</span><span>Minor ${review.minor_count}</span></div><pre class="editor review-editor">${esc(review.content)}</pre>`:'<div class="card placeholder">Run Reviewer. A passing or optional-polish review is required before approval.</div>'}</div></div></section>`:'<div class="card placeholder">Select news in Step 2, import style transcripts if available, then generate Draft V1.</div>'}`;
+  return `<div class="section-head"><div><div class="eyebrow">STEP 03</div><h2>Narration Writer - Review Loop</h2><p>Selected current-week news is factual authority. The full Filmbaz library teaches recurring tone, pacing, compact context and storytelling behavior. Non-obvious people/companies can use one short verified familiarity cue.</p></div><button id="generateNarrationBtn" class="btn primary">Generate Fresh Draft</button></div>${metrics()}<div class="writer-grid"><section class="card writer-panel"><div class="writer-panel-head"><div><div class="eyebrow">APPROVED NEWS INPUT</div><h3>Section plan</h3><p>${familiarityCount} selected story/stories include a casual-audience familiarity anchor.</p></div></div>${sectionSummary||'<div class="muted">No Included stories yet.</div>'}</section><section class="card writer-panel"><div class="writer-panel-head"><div><div class="eyebrow">STYLE CORPUS</div><h3>Filmbaz transcript library</h3><p>${enabledStyles.length} enabled transcript${enabledStyles.length===1?'':'s'} - all enabled references contribute distributed samples across their full episodes.</p></div><button id="importStyleTranscriptsBtn" class="btn secondary">Import transcripts</button><input id="styleTranscriptFiles" type="file" accept=".txt,.md,text/plain,text/markdown" multiple class="hidden" /></div>${styles||'<div class="muted">Import Filmbaz transcript files. They are reusable across cinema weekly projects.</div>'}</section></div>${draft?`<section class="card narration-workbench"><div class="narration-toolbar"><select id="narrationDraftSelect">${draftOptions}</select><div class="top-actions">${narrationGateBadge(review)}<button id="reviewNarrationBtn" class="btn secondary">Run Reviewer</button>${review?`<button id="reviseNarrationBtn" class="btn secondary" ${review.gate_status==='pass'?'disabled':''}>Revise from Review</button>`:''}<button id="approveNarrationBtn" class="btn primary" ${Number(draft.approved)||!review||review.gate_status==='revision_required'?'disabled':''}>${Number(draft.approved)?'Approved':'Approve Draft'}</button></div></div>${reviewFeedbackHtml(review)}<div class="draft-feedback-panel"><div class="eyebrow">DRAFT V${draft.version_number}</div><pre class="editor narration-editor">${esc(draft.content)}</pre></div></section>`:'<div class="card placeholder">Select news in Step 2, import style transcripts if available, then generate Draft V1.</div>'}`;
 };
+
 
 generateNarration=async function(){
   const b=$('#generateNarrationBtn');if(b){b.disabled=true;b.textContent='Writing...'}
@@ -84,20 +107,32 @@ generateNarration=async function(){
   startRunStatus({title:'Writing fresh narration draft',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading selected sections','Loading style corpus','Writer drafting','Draft saved']});
   try{
     const r=await api(`/api/projects/${state.project.id}/narration`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:s.writer_provider,model:s.writer_model})});
-    state.narrationDraftId=r.id;state.project=await api(`/api/projects/${state.project.id}`);await renderStage();
+    state.narrationDraftId=r.id;state.lastNarrationReview=null;state.project=await api(`/api/projects/${state.project.id}`);await renderStage();
     finishRunStatus(true,'',`Draft V${r.version_number} generated`);
     toast(`Draft V${r.version_number} generated - ${r.style_transcript_count} style transcript(s) used`);
   }catch(e){finishRunStatus(false,e.message);toast(e.message,true);if(b){b.disabled=false;b.textContent='Generate Fresh Draft'}}
 };
 async function reviewNarration(){
-  const id=state.narrationDraftId;if(!id)return;const s=state.settings?.ai||{};
-  startRunStatus({title:'Reviewing narration',meta:`${s.reviewer_provider||'reviewer'} - ${s.reviewer_model||'default'}`,steps:['Loading current-week sources','Comparing format and style','Building issue list','Review gate saved']});
-  try{const r=await api(`/api/projects/${state.project.id}/narrations/${id}/review`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:s.reviewer_provider,model:s.reviewer_model})});await renderStage();finishRunStatus(true,'',`Review R${r.review_number}: ${r.gate_status}`);toast(`Review complete: ${r.gate_status.replaceAll('_',' ')}`)}catch(e){finishRunStatus(false,e.message);toast(e.message,true)}
+  const id=state.narrationDraftId;if(!id)return;const s=state.settings?.ai||{};const b=$('#reviewNarrationBtn');
+  if(b){b.disabled=true;b.textContent='Reviewing...'}
+  startRunStatus({title:'Reviewing narration',meta:`${s.reviewer_provider||'reviewer'} - ${s.reviewer_model||'default'}`,steps:['Loading current-week sources','Comparing full reference style corpus','Checking familiarity context + naturalness','Building issue list','Review gate saved']});
+  try{
+    const r=await api(`/api/projects/${state.project.id}/narrations/${id}/review`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:s.reviewer_provider,model:s.reviewer_model})});
+    state.lastNarrationReview={...r,narration_id:r.narration_id||id};
+    if(state.narrationWorkspace){
+      state.narrationWorkspace.reviews=(state.narrationWorkspace.reviews||[]).filter(x=>x.id!==r.id);
+      state.narrationWorkspace.reviews.unshift(state.lastNarrationReview);
+    }
+    await renderStage();
+    finishRunStatus(true,'',`Review R${r.review_number}: ${r.gate_status}`);
+    toast(`Review complete: ${r.gate_status.replaceAll('_',' ')}`);
+    setTimeout(()=>document.querySelector('#reviewFeedbackPanel')?.scrollIntoView({behavior:'smooth',block:'start'}),60);
+  }catch(e){finishRunStatus(false,e.message);toast(e.message,true);if(b){b.disabled=false;b.textContent='Run Reviewer'}}
 }
 async function reviseNarration(){
   const id=state.narrationDraftId;if(!id)return;const review=latestReviewForDraft(state.narrationWorkspace,id);if(!review)return toast('Run Reviewer first',true);const s=state.settings?.ai||{};
   startRunStatus({title:'Applying reviewer feedback',meta:'Targeted revision',steps:['Loading review change list','Applying required fixes','Preserving correct material','New draft saved']});
-  try{const r=await api(`/api/projects/${state.project.id}/narrations/${id}/revise`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({review_id:review.id,provider:s.writer_provider,model:s.writer_model})});state.narrationDraftId=r.id;state.project=await api(`/api/projects/${state.project.id}`);await renderStage();finishRunStatus(true,'',`Draft V${r.version_number} revised`);toast(`Draft V${r.version_number} created from review feedback`)}catch(e){finishRunStatus(false,e.message);toast(e.message,true)}
+  try{const r=await api(`/api/projects/${state.project.id}/narrations/${id}/revise`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({review_id:review.id,provider:s.writer_provider,model:s.writer_model})});state.narrationDraftId=r.id;state.lastNarrationReview=null;state.project=await api(`/api/projects/${state.project.id}`);await renderStage();finishRunStatus(true,'',`Draft V${r.version_number} revised`);toast(`Draft V${r.version_number} created from review feedback`)}catch(e){finishRunStatus(false,e.message);toast(e.message,true)}
 }
 async function approveNarration(){const id=state.narrationDraftId;if(!id)return;try{await api(`/api/projects/${state.project.id}/narrations/${id}/approve`,{method:'POST'});state.project=await api(`/api/projects/${state.project.id}`);await renderStage();toast('Narration approved for Voice')}catch(e){toast(e.message,true)}}
 async function importStyleTranscripts(e){
@@ -118,7 +153,7 @@ wireStage=function(){
   const nf=$('#styleTranscriptFiles');if(nf)nf.onchange=importStyleTranscripts;
   document.querySelectorAll('[data-toggle-style-transcript]').forEach(b=>b.onclick=()=>toggleStyleTranscript(b.dataset.toggleStyleTranscript,b.dataset.enabled!=='1'));
   document.querySelectorAll('[data-delete-style-transcript]').forEach(b=>b.onclick=()=>deleteStyleTranscript(b.dataset.deleteStyleTranscript));
-  const nd=$('#narrationDraftSelect');if(nd)nd.onchange=()=>{state.narrationDraftId=nd.value;renderStage()};
+  const nd=$('#narrationDraftSelect');if(nd)nd.onchange=()=>{state.narrationDraftId=nd.value;state.lastNarrationReview=null;renderStage()};
 };
 
 const baseVoiceHtmlEditorial=voiceHtml;
