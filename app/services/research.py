@@ -353,11 +353,21 @@ def _social_platform_for_url(url: str) -> str:
         return "x"
     if _host_matches(host, "tiktok.com"):
         return "tiktok"
+    if _host_matches(host, "instagram.com"):
+        return "instagram"
+    if _host_matches(host, "youtube.com") or _host_matches(host, "youtu.be"):
+        return "youtube"
     return ""
 
 
 def _social_source_label(platform: str) -> str:
-    return {"reddit": "Reddit", "x": "X / Twitter", "tiktok": "TikTok"}.get(platform, platform.title())
+    return {
+        "reddit": "Reddit",
+        "x": "X / Twitter",
+        "tiktok": "TikTok",
+        "instagram": "Instagram",
+        "youtube": "YouTube",
+    }.get(platform, platform.title())
 
 
 def _social_queries(date_start: str, date_end: str) -> list[tuple[str, str, str]]:
@@ -743,11 +753,16 @@ def _spice_queries(story: dict, date_start: str, date_end: str) -> list[tuple[st
     if date_end:
         date_bits += f" before:{date_end}"
     return [
-        ("rumor_drama", f"{quoted} rumor controversy backlash dispute drama{date_bits}"),
-        ("critics", f"{quoted} critics review reaction Rotten Tomatoes Metacritic{date_bits}"),
-        ("social_reddit", f"site:reddit.com {quoted} reaction discussion{date_bits}"),
-        ("social_public", f"(site:x.com OR site:twitter.com OR site:tiktok.com) {quoted} reaction{date_bits}"),
-        ("cool_context", f"{quoted} interview behind the scenes production fact director cast{date_bits}"),
+        ("web_news", f"{quoted} latest news interview report update{date_bits}"),
+        ("rumor_drama", f"{quoted} rumor rumour controversy backlash dispute drama alleged report{date_bits}"),
+        ("critics", f"{quoted} critics review reaction Rotten Tomatoes Metacritic review scores{date_bits}"),
+        ("social_reddit", f"site:reddit.com {quoted} reaction discussion theory{date_bits}"),
+        ("social_x", f"(site:x.com OR site:twitter.com) {quoted} reaction discussion{date_bits}"),
+        ("social_tiktok", f"site:tiktok.com {quoted} reaction discussion{date_bits}"),
+        ("social_instagram", f"site:instagram.com {quoted} post reaction{date_bits}"),
+        ("youtube", f"site:youtube.com {quoted} interview press conference behind the scenes official{date_bits}"),
+        ("cool_context", f"{quoted} interview behind the scenes production fact director cast history{date_bits}"),
+        ("comparison", f"{quoted} box office budget record comparison previous film franchise{date_bits}"),
     ]
 
 
@@ -957,7 +972,8 @@ STRICT RULES:
 - A rumor is safe_to_narrate only when a reputable report/direct named source supports that the rumor exists. Reddit-only or random social speculation is NOT enough to say "there is a rumor"; keep that unsafe or classify genuinely notable discussion as social_buzz.
 - CONTROVERSY: needs a concrete dispute/backlash/legal/creative conflict supported by evidence. Ordinary disagreement is not automatically controversy.
 - CRITIC_REACTION: use actual critic/review evidence. Do not turn fan comments into critics.
-- SOCIAL_BUZZ: summarize only a pattern actually visible in the supplied evidence. One isolated comment/post is not "people are saying". State the platform when useful and do not imply statistical consensus.
+- SOCIAL_BUZZ: summarize only a pattern actually visible in the supplied evidence. One isolated comment/post is not "people are saying".
+- PLATFORM ATTRIBUTION IS REQUIRED for social_buzz. If evidence is Reddit, say Reddit/redditors; if X/Twitter, say X/Twitter users/posts; if TikTok, say TikTok; if multiple platforms genuinely support the same pattern, name those platforms. Do NOT use vague wording like "people on social media say" when the supplied evidence is platform-specific.
 - COOL_FACT / PRODUCTION_CONTEXT: may use older/background evidence if directly relevant and well supported, but clearly treat it as context rather than this week's event.
 - SURPRISING_COMPARISON: only when the supplied evidence gives the numbers/facts needed for the comparison.
 - Do not diagnose health, infer private life, repeat abusive claims, or convert anonymous gossip into fact.
