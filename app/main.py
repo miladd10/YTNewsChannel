@@ -1168,6 +1168,15 @@ def generate_narration(project_id: str, body: GenerateBody):
     if not stories:
         raise HTTPException(400, "Include at least one story before generating narration.")
 
+    # Fresh Draft is intentionally the baseline pass. Post-draft related-context
+    # searches are applied only by the dedicated Enrichment Rewrite step.
+    baseline_stories = []
+    for source_story in stories:
+        item = dict(source_story)
+        item["spice_angles"] = []
+        item["spice_sources"] = []
+        baseline_stories.append(item)
+
     packet = {
         "project": {
             "name": project.get("name"),
@@ -1181,7 +1190,7 @@ def generate_narration(project_id: str, body: GenerateBody):
             "editorial_focus": project.get("editorial_focus"),
         },
         "format_blueprint": format_packet(),
-        "approved_sections": _sectioned_story_packet(stories),
+        "approved_sections": _sectioned_story_packet(baseline_stories),
         "additional_instructions": body.instructions,
     }
     user = (
