@@ -91,6 +91,7 @@ def test_resolve_package_writes_importable_otio_with_source_in(tmp_path, monkeyp
 
     monkeypatch.setattr(resolve_plan_module, "_stage_resolve_video_cut", fake_stage_video)
     monkeypatch.setattr(resolve_plan_module, "_stage_resolve_image", fake_stage_image)
+    monkeypatch.setattr(resolve_plan_module, "_probe_media_duration", lambda path: 120.0)
 
     project = {"id": "p", "name": "Test News"}
     voice_rows = [
