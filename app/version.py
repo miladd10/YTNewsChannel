@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.22"
+APP_VERSION = "0.3.23"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Validated Resolve Video Cuts"
+APP_RELEASE_NAME = "Resolve-Safe Still Holds"
