@@ -33,7 +33,7 @@ from .services.cinema_format import (
     format_packet,
     parse_review_gate,
 )
-from .services.research import ai_rank_stories, cluster_articles, fetch_google_news, fetch_social_sources
+from .services.research import ai_rank_stories, annotate_source_window, cluster_articles, fetch_google_news, fetch_social_sources
 from .services.resolve_plan import build_edit_plan, write_resolve_package
 from .services.secrets import delete_api_key, get_api_key, masked_status, save_ai_settings, set_api_key
 from .version import APP_RELEASE_NAME, APP_VERSION
@@ -667,13 +667,13 @@ def run_research(project_id: str, body: ResearchBody):
             continue
         if dedupe_key:
             seen_urls.add(dedupe_key)
-        articles.append(article)
+        articles.append(annotate_source_window(article, project["date_start"], project["date_end"]))
 
     if not articles:
         errors = "; ".join(x.get("error", "") for x in diagnostics if not x.get("ok"))
         raise HTTPException(502, f"Research returned no articles or public social posts. {errors}".strip())
 
-    stories = cluster_articles(articles)
+    stories = cluster_articles(articles, project["date_start"], project["date_end"])
     provider = body.provider or masked_status().get("research_provider", "codex_local")
     model = body.model or masked_status().get("research_model", "default")
     ai_error = ""
@@ -714,8 +714,11 @@ def run_research(project_id: str, body: ResearchBody):
                 """INSERT INTO stories(
                     id,project_id,run_id,canonical_title,summary,category,attention,importance,freshness,
                     confidence,visual_potential,uniqueness,rationale,score,decision,section_fit,article_ids_json,source_count,
-                    source_platforms_json,source_kinds_json,reddit_only,primary_social_count,created_at,updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    source_platforms_json,source_kinds_json,reddit_only,primary_social_count,
+                    news_hook,news_hook_date,verification_status,verification_notes,temporal_gate,verification_gate,
+                    in_window_source_count,background_source_count,undated_source_count,independent_source_count,
+                    current_non_reddit_source_count,current_primary_social_count,created_at,updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     story["id"], project_id, run_id, story["canonical_title"], story["summary"], story["category"],
                     story["attention"], story["importance"], story["freshness"], story["confidence"],
@@ -723,6 +726,13 @@ def run_research(project_id: str, body: ResearchBody):
                     story.get("section_fit") or "medium", json.dumps(story["article_ids"]), story["source_count"],
                     json.dumps(story.get("source_platforms") or []), json.dumps(story.get("source_kinds") or []),
                     1 if story.get("reddit_only") else 0, int(story.get("primary_social_count") or 0),
+                    story.get("news_hook") or "", story.get("news_hook_date") or "",
+                    story.get("verification_status") or "needs_verification", story.get("verification_notes") or "",
+                    story.get("temporal_gate") or "warning", story.get("verification_gate") or "fail",
+                    int(story.get("in_window_source_count") or 0), int(story.get("background_source_count") or 0),
+                    int(story.get("undated_source_count") or 0), int(story.get("independent_source_count") or 0),
+                    int(story.get("current_non_reddit_source_count") or 0),
+                    int(story.get("current_primary_social_count") or 0),
                     stamp, stamp,
                 ),
             )
@@ -734,7 +744,17 @@ def run_research(project_id: str, body: ResearchBody):
         story_file.write_text(json.dumps(stories, indent=2, ensure_ascii=False), encoding="utf-8")
         save_manifest(conn, project_id)
 
-    return {"run_id": run_id, "article_count": len(articles), "story_count": len(stories), "ai_rank_error": ai_error, "provider": actual_provider, "model": actual_model}
+    return {
+        "run_id": run_id,
+        "article_count": len(articles),
+        "story_count": len(stories),
+        "current_story_count": sum(1 for story in stories if story.get("freshness") in {"current", "followup"}),
+        "verified_story_count": sum(1 for story in stories if story.get("verification_gate") == "pass"),
+        "stale_story_count": sum(1 for story in stories if story.get("freshness") == "stale"),
+        "ai_rank_error": ai_error,
+        "provider": actual_provider,
+        "model": actual_model,
+    }
 
 
 @app.get("/api/projects/{project_id}/stories")
@@ -768,6 +788,7 @@ def get_stories(project_id: str):
                     article["source_kind"] = str(raw.get("source_kind") or "news")
                     article["platform"] = str(raw.get("platform") or "")
                     article["trust_role"] = str(raw.get("trust_role") or "")
+                    article["temporal_role"] = str(raw.get("temporal_role") or "")
                     article_items.append(article)
                 item["articles"] = article_items
             else:
@@ -787,9 +808,26 @@ def update_story_decision(project_id: str, story_id: str, body: DecisionBody):
         raise HTTPException(400, "Decision must be include, maybe, or skip.")
     with db() as conn:
         project = project_or_404(conn, project_id)
-        row = conn.execute("SELECT 1 FROM stories WHERE id=? AND project_id=?", (story_id, project_id)).fetchone()
+        row = conn.execute("SELECT * FROM stories WHERE id=? AND project_id=?", (story_id, project_id)).fetchone()
         if not row:
             raise HTTPException(404, "Story not found")
+        if decision == "include":
+            freshness = str(row["freshness"] or "")
+            temporal_gate = str(row["temporal_gate"] or "")
+            verification_gate = str(row["verification_gate"] or "")
+            news_hook = str(row["news_hook"] or "").strip()
+            if (
+                freshness not in {"current", "followup"}
+                or temporal_gate != "pass"
+                or verification_gate != "pass"
+                or not news_hook
+                or int(row["in_window_source_count"] or 0) <= 0
+            ):
+                raise HTTPException(
+                    400,
+                    "This story cannot be Included yet. It needs a verified current-window news hook. "
+                    "Check Freshness/Verification in Step 2 or rerun Format Research.",
+                )
         conn.execute("UPDATE stories SET decision=?,updated_at=? WHERE id=?", (decision, now(), story_id))
         conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
         save_manifest(conn, project_id)
@@ -809,6 +847,14 @@ def selected_story_packet(conn, project_id: str) -> list[dict]:
     stories = []
     for row in conn.execute("SELECT * FROM stories WHERE run_id=? AND decision='include'", (run_id,)).fetchall():
         item = dict(row)
+        if (
+            str(item.get("freshness") or "") not in {"current", "followup"}
+            or str(item.get("temporal_gate") or "") != "pass"
+            or str(item.get("verification_gate") or "") != "pass"
+            or not str(item.get("news_hook") or "").strip()
+            or int(item.get("in_window_source_count") or 0) <= 0
+        ):
+            continue
         article_ids = json.loads(item.pop("article_ids_json") or "[]")
         item["source_platforms"] = json.loads(item.pop("source_platforms_json") or "[]")
         item["source_kinds"] = json.loads(item.pop("source_kinds_json") or "[]")
@@ -829,6 +875,7 @@ def selected_story_packet(conn, project_id: str) -> list[dict]:
                 article["source_kind"] = str(raw.get("source_kind") or "news")
                 article["platform"] = str(raw.get("platform") or "")
                 article["trust_role"] = str(raw.get("trust_role") or "")
+                article["temporal_role"] = str(raw.get("temporal_role") or "")
                 articles.append(article)
         item["articles"] = articles
         stories.append(item)
@@ -856,6 +903,9 @@ def _sectioned_story_packet(stories: list[dict]) -> list[dict]:
             "section": section["key"],
             "label": section["label"],
             "writer_role": section.get("writer_role") or "",
+            "mission": section.get("mission") or "",
+            "verification_policy": section.get("verification_policy") or {},
+            "freshness_policy": section.get("freshness_policy") or {},
             "stories": items,
         })
     return result
