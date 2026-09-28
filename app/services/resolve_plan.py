@@ -1115,6 +1115,11 @@ def _video_track(root: Path, plan: dict) -> dict:
                 "source_audio": "muted",
                 "crop": item.get("crop"),
                 "selection_reason": item.get("selection_reason"),
+                "coverage_label": item.get("coverage_label"),
+                "coverage_kind": item.get("coverage_kind"),
+                "coverage_cue": item.get("coverage_cue"),
+                "layout_hint": item.get("layout_hint"),
+                "composite_source_ids": item.get("composite_source_ids") or [],
                 "shot_index": item.get("shot_index"),
                 "shot_analysis_mode": item.get("shot_analysis_mode"),
                 "transition_type": item.get("transition_type") or "cut",
@@ -1614,8 +1619,9 @@ def write_resolve_package(root: Path, plan: dict) -> dict:
         writer.writerow([
             "story_id", "candidate_id", "media_type", "timeline_start", "timeline_end",
             "duration", "source_in", "source_out", "playback_speed", "source_audio",
-            "crop_mode", "crop_axis", "crop_fraction", "selection_reason", "shot_index",
-            "shot_analysis_mode", "transition_type", "transition_in_frames", "transition_out_frames",
+            "crop_mode", "crop_axis", "crop_fraction", "selection_reason",
+            "coverage_label", "coverage_kind", "coverage_cue", "layout_hint",
+            "shot_index", "shot_analysis_mode", "transition_type", "transition_in_frames", "transition_out_frames",
             "stored_path",
         ])
         for item in staged_plan.get("visual_clips") or []:
@@ -1625,14 +1631,16 @@ def write_resolve_package(root: Path, plan: dict) -> dict:
                 item.get("timeline_start"), item.get("timeline_end"), item.get("timeline_duration"),
                 item.get("source_in"), item.get("source_out"), item.get("playback_speed"),
                 item.get("source_audio"), crop.get("mode"), crop.get("crop_axis"),
-                crop.get("crop_fraction"), item.get("selection_reason"), item.get("shot_index"),
+                crop.get("crop_fraction"), item.get("selection_reason"),
+                item.get("coverage_label"), item.get("coverage_kind"), item.get("coverage_cue"),
+                item.get("layout_hint"), item.get("shot_index"),
                 item.get("shot_analysis_mode"), item.get("transition_type"),
                 item.get("transition_in_frames"), item.get("transition_out_frames"),
                 item.get("stored_path"),
             ])
 
     manifest = {
-        "version": 1,
+        "version": 2,
         "generator": "YT News Studio",
         "timeline_file": "resolve/news_timeline.otio",
         "edit_plan_file": "timing/resolve_plan.json",
@@ -1650,7 +1658,8 @@ def write_resolve_package(root: Path, plan: dict) -> dict:
         "resolve_safe_media": True,
         "video_stage_format": "H.264 MP4 · yuv420p · CFR exact frames · avc1 · no source audio",
         "image_stage_format": "H.264 MP4 still hold · yuv420p · CFR exact frames",
-        "shot_selection": "cached keyframe-first scene-boundary analysis",
+        "shot_selection": "narration-cue semantic ordering + cached keyframe-first scene-boundary analysis",
+        "image_layouts": "UHD two-up / three-up / stacked composites for selected grouped stills",
         "image_cadence_seconds": DEFAULT_IMAGE_HOLD,
         "transitions": "hard cuts inside trailers; short SMPTE dissolves for still/media/story changes",
         "warnings": staged_plan.get("warnings") or [],
@@ -1686,12 +1695,18 @@ For source media that is not already 16:9, **media_timing.csv** contains the cal
 crop axis/fraction with a center focal point. Resolve should use the project/input scaling
 equivalent of **Scale full frame with crop**.
 
-The planner now performs cached FFmpeg scene-boundary analysis on downloaded trailers/clips,
-avoids the typical trailer intro/outro area when possible, prefers non-overlapping 2.5–6 second
-shots, and uses hard cuts when moving between detected scenes from the same trailer. Selected
-stills are shown once only and for at most three seconds. Short SMPTE dissolves are inserted only when
-switching between still/media types or story boundaries; staged files include transition handles.
-This is shot-aware visual editing, not full semantic vision matching to every spoken sentence.
+The planner uses narration-aware coverage metadata from Media Sources before shot selection.
+People, related movies/shows, interviews, BTS/production material, comparisons and sourced fun-fact
+visuals can be positioned near the narration cue they were researched for. When two or three selected
+stills share a multi-panel visual group, YT News Studio renders a real 3840x2160 two-up/three-up or
+stacked composite under media/composites/ before Resolve packaging.
+
+Downloaded trailers/clips still use cached FFmpeg scene-boundary analysis, avoid the typical trailer
+intro/outro area when possible, prefer non-overlapping 2.5–6 second shots, and use hard cuts when
+moving between detected scenes from the same trailer. Selected standalone stills are shown once only
+and for at most three seconds. Short SMPTE dissolves are inserted only when switching between
+still/media types or story boundaries; staged files include transition handles. Semantic matching is
+based on sourced narration cues/entities, not full frame-level visual understanding.
 """
     (resolve_dir / "README.md").write_text(readme, encoding="utf-8")
 
