@@ -12,6 +12,7 @@ from app.services.research import (
     _social_platform_for_url,
     _social_queries,
     cluster_articles,
+    google_news_rss_url,
     source_temporal_role,
 )
 
@@ -270,3 +271,30 @@ def test_news_hook_date_outside_window_forces_stale_skip():
     assert story["freshness"] == "stale"
     assert story["temporal_gate"] == "fail"
     assert story["decision"] == "skip"
+
+
+
+def test_section_intelligence_schema_contains_freshness_and_verification_contracts():
+    for section in format_packet():
+        assert "freshness_policy" in section
+        assert "verification_policy" in section
+        assert section["intelligence_schema_version"] >= 1
+        if section["research"]:
+            assert section["freshness_policy"]["require_current_week_hook"] is True
+            assert section["freshness_policy"]["background_sources_count_as_freshness"] is False
+            assert "include_gate" in section["verification_policy"]
+
+
+def test_search_queries_widen_front_edge_but_gate_keeps_true_window():
+    url = google_news_rss_url(
+        "movie trailer",
+        "2026-09-21",
+        "2026-09-28",
+    )
+    assert "after%3A2026-09-20" in url
+    assert "before%3A2026-09-28" in url
+    assert source_temporal_role(
+        "2026-09-20T18:00:00+00:00",
+        "2026-09-21",
+        "2026-09-28",
+    ) == "background"
