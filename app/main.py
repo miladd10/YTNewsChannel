@@ -1576,6 +1576,39 @@ def _deterministic_fact_red_flags(
                 "correction_basis": "Preserve the official title identity (re-release/new cut) and separately describe new footage.",
                 "rule": "new_movie_vs_rerelease",
             })
+
+        rank_claim = bool(re.search(
+            r"(صدر\\s+جدول|رتبه[ٔ\s]*اول|شماره\\s*یک|#\\s*1|number\\s+one|"
+            r"topp?ed\\s+(?:the\\s+)?(?:box\\s+office|chart)|went\\s+straight\\s+to\\s+#?1)",
+            spoken,
+            flags=re.IGNORECASE,
+        ))
+        period_scope = bool(re.search(
+            r"(آخر\\s*هفته|هفتگی|روزانه|جمعه|شنبه|یکشنبه|weekend|weekly|daily)",
+            spoken,
+            flags=re.IGNORECASE,
+        ))
+        market_scope = bool(re.search(
+            r"(آمریکای\\s+شمالی|گیشه[ٔ\s]+آمریکا|داخلی|domestic|u\\.?s\\.?\\s+box\\s+office|"
+            r"worldwide|جهانی)",
+            spoken,
+            flags=re.IGNORECASE,
+        ))
+        if rank_claim and (not period_scope or not market_scope):
+            flags.append({
+                "story_id": story_id,
+                "claim": "Unqualified box-office ranking",
+                "problem": (
+                    "The narration claims #1/top-of-chart without clearly stating both the "
+                    "chart period (daily/weekend/weekly) and market (domestic/worldwide). "
+                    "Those charts can have different leaders."
+                ),
+                "correction_basis": (
+                    "Rewrite the ranking with the exact supported scope and date window, "
+                    "for example 'the Sep. 25–27 domestic weekend chart'."
+                ),
+                "rule": "unqualified_box_office_rank",
+            })
     return flags
 
 
