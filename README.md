@@ -90,3 +90,10 @@ The local SQLite index lives in `data/ytnews.db` and is intentionally ignored by
 - Resolve now reconciles approved narration segments that still reference story IDs from an older research run to the matching current Included stories.
 - Matching uses exact title/topic identity and source-article overlap, and refuses ambiguous duplicate matches.
 - The reconciled IDs are used for prerequisite checks, Resolve visual windows, and package signatures, so valid downloaded media no longer appears missing solely because research/story IDs changed after voice generation.
+
+
+### v0.3.20 Resolve final story mapping
+- Resolve reconciliation now also handles safely changed story titles with distinctive-token/fuzzy matching.
+- If an old STORY marker no longer exists in the database, the approved narration text is used as a guarded fallback to identify the current Included story.
+- Ambiguous matches remain blocked rather than guessed.
+- Step 7 now shows the exact unresolved story/title, voice segment indexes, and narration excerpt when a mapping still cannot be resolved.
