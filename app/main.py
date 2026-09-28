@@ -27,6 +27,7 @@ from .services.cinema_format import (
     CINEMA_WEEKLY_FORMAT,
     CONTENT_PLAN_SYSTEM,
     ENRICHMENT_REWRITE_SYSTEM,
+    FACT_CHECK_SYSTEM,
     REVISION_SYSTEM,
     REVIEWER_SYSTEM,
     SECTION_ORDER,
@@ -45,6 +46,7 @@ from .services.research import (
     fetch_google_news,
     fetch_social_sources,
     fetch_story_spice_sources,
+    fetch_narration_fact_check_sources,
 )
 from .services.resolve_plan import build_edit_plan, write_resolve_package
 from .services.secrets import delete_api_key, get_api_key, masked_status, save_ai_settings, set_api_key
