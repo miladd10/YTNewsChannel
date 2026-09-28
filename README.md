@@ -235,3 +235,23 @@ The local SQLite index lives in `data/ytnews.db` and is intentionally ignored by
 - Collected enrichment sources are retained in the story packet and automatically handed to Step 5 Media Sources as additional reference pages. Media still runs its own video/image search and relevance/original-source validation, but it can reuse already-discovered interviews, official posts, embedded videos, article images and context pages.
 - Media discovery combines core news sources plus enrichment sources, dedupes them by URL, inspects more reference pages, and includes safe enrichment text in the visual context used for B-roll discovery.
 - Manual enrichment works for any Included, current, verified story regardless of its original ranking score.
+
+
+### v0.3.35 Style Blueprint + story micro-arcs
+- Narration no longer asks one prompt to simultaneously discover useful facts and imitate a large reference corpus. Baseline generation now uses a fact-locked Content Plan pass first, then a dedicated spoken-style writing pass.
+- The Content Plan extracts supported headline hooks, setup/context, familiarity cues, interesting details, concrete consequences, safe optional context, ending facts and bridge hints for every selected story. Rich source packets should no longer collapse into a two-sentence headline summary just because the writer chose the safest facts.
+- Enabled Filmbaz references are now distilled into a persistent Style Blueprint. The blueprint explicitly captures oral Persian register, story micro-arcs, rhythm/connectors, explanation/familiarity behavior, humor/asides, transitions, section flow, depth/pacing and anti-patterns.
+- The Style Blueprint is cached by a hash of the enabled transcript library. Importing, enabling/disabling or changing references makes it stale; the next narration generation rebuilds it automatically, or the editor can use Build/Rebuild Blueprint in Step 3.
+- Step 3 shows the current/stale blueprint and lets the editor inspect exactly what the app learned from the reference library.
+- Reference sampling now has two layers: every enabled transcript still contributes distributed samples, while up to three long uninterrupted Flow Anchors preserve several minutes of real host cadence. This fixes the previous problem where dozens of tiny snippets taught vocabulary but lost the actual narrative flow.
+- Reference transcripts are explicitly treated as potentially noisy ASR. The app learns oral rhythm/structure but must not reproduce transcription misspellings or recognition errors.
+- Spoken-story guidance now models a normal item as a supported micro-arc rather than an article summary: concrete hook → needed setup → strongest detail/contrast → optional explanation/familiarity → supported aside/reaction → practical payoff/date. Thin stories stay short instead of receiving generic filler.
+- Natural Persian causal turns and occasional rhetorical setups are allowed when useful. Common spoken connectors such as "حالا", "یعنی", "برای همین", "مشکل اینجاست" and "جالبش اینجاست" are no longer treated as inherently bad; only empty mechanical repetition is discouraged.
+- The writer explicitly rejects abstract filler such as "this matters to audiences" without a concrete supported consequence, and empty adjective payoffs such as a cast being "سنگین" or a project "کنجکاوی‌برانگیز" without explaining why.
+- A cast list alone is no longer considered a story payoff. When supported, the writer should use premise, creator context, production details, history, reactions or an odd fact to make the names meaningful.
+- Persian projects now receive Persian spoken section labels (e.g. صنعت سینما، فیلم‌های جدید، سریال‌ها، گیشه) so a Persian narration cannot accidentally surface English headings such as Industry & Business or Upcoming Films.
+- The Reviewer now explicitly fails over-compressed headline-summary prose, formal written-Persian drift, empty adjective payoffs, abstract stakes, isolated database-card storytelling and English headings inside Persian narration.
+- Reviewer instructions no longer penalize natural oral connectors or rhetorical setup merely for existing; the check is whether they advance a real supported beat.
+- Reviewer-driven revisions now receive the same Style Blueprint and flow anchors. If a story is fundamentally over-compressed/article-like, the revision writer is allowed to rebuild the whole affected passage instead of preserving a weak two-sentence structure and patching one line.
+- Post-draft enrichment rewrites also receive the Style Blueprint, so adding rumors/reactions/cool facts does not pull the narration back toward generic news prose.
+- Content plans are saved under narration/plans in the project folder for inspection/debugging.
