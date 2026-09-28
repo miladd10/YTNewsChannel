@@ -327,6 +327,44 @@ def _load_historical_voice_stories(conn, project_id: str, voice_rows: list[dict]
     return output
 
 
+def _resolve_missing_story_details(
+    missing_story_ids: list[str],
+    resolved_voice_rows: list[dict],
+    current_stories: list[dict],
+    historical_stories: list[dict],
+    reconciliation: dict,
+) -> list[dict]:
+    current_by_id = {str(item.get("id") or ""): item for item in current_stories}
+    historical_by_id = {str(item.get("id") or ""): item for item in historical_stories}
+    unresolved_by_id = {
+        str(item.get("story_id") or ""): item
+        for item in reconciliation.get("unresolved_details") or []
+    }
+    details = []
+    for story_id in missing_story_ids:
+        story = current_by_id.get(story_id) or historical_by_id.get(story_id) or {}
+        rows = [
+            row for row in resolved_voice_rows
+            if str(row.get("story_id") or "") == story_id
+        ]
+        unresolved = unresolved_by_id.get(story_id) or {}
+        details.append({
+            "story_id": story_id,
+            "title": str(story.get("canonical_title") or unresolved.get("historical_title") or ""),
+            "segment_indexes": unresolved.get("segment_indexes") or [
+                int(row.get("segment_index") or 0) for row in rows
+            ],
+            "narration_excerpt": str(
+                unresolved.get("narration_excerpt")
+                or " ".join(str(row.get("source_text") or "") for row in rows)[:280]
+            ),
+            "mapping_status": str((unresolved.get("match") or {}).get("method") or (
+                "current-story-no-downloaded-media" if story_id in current_by_id else "unresolved-story-id"
+            )),
+        })
+    return details
+
+
 def _resolve_prerequisites(voice_rows: list[dict], candidates: list[dict]) -> dict:
     pending_voice = [
         row for row in voice_rows
@@ -1795,6 +1833,13 @@ def get_resolve_plan(project_id: str):
 
     prerequisites = _resolve_prerequisites(resolved_voice_rows, candidates)
     prerequisites["story_id_reconciliation"] = reconciliation
+    prerequisites["missing_story_details"] = _resolve_missing_story_details(
+        prerequisites["stories_missing_downloaded_media"],
+        resolved_voice_rows,
+        current_stories,
+        historical_stories,
+        reconciliation,
+    )
     current_signature = _resolve_input_signature(resolved_voice_rows, candidates)
     root = Path(project["root_path"])
     plan_path = root / "timing" / "resolve_plan.json"
@@ -1841,9 +1886,12 @@ def get_resolve_plan(project_id: str):
     if prerequisites["voice_pending"]:
         message = f"{prerequisites['voice_pending']} voice segment(s) still need an approved aligned take in Step 4."
     elif prerequisites["stories_missing_downloaded_media"]:
+        details = prerequisites.get("missing_story_details") or []
+        missing_name = str((details[0] if details else {}).get("title") or "").strip()
+        suffix = f" Missing: {missing_name}." if missing_name else ""
         message = (
-            f"{len(prerequisites['stories_missing_downloaded_media'])} narrated story/stories have no downloaded selected media. "
-            "Complete Steps 5–6 before Resolve planning."
+            f"{len(prerequisites['stories_missing_downloaded_media'])} narrated story/stories could not be matched to downloaded selected media."
+            + suffix
         )
     elif not prerequisites["selected_downloaded"]:
         message = "Select and download media in Steps 5–6 before Resolve planning."
@@ -1888,6 +1936,13 @@ def generate_resolve_plan(project_id: str):
 
     prerequisites = _resolve_prerequisites(resolved_voice_rows, candidates)
     prerequisites["story_id_reconciliation"] = reconciliation
+    prerequisites["missing_story_details"] = _resolve_missing_story_details(
+        prerequisites["stories_missing_downloaded_media"],
+        resolved_voice_rows,
+        current_stories,
+        historical_stories,
+        reconciliation,
+    )
     if not voice_rows:
         raise HTTPException(400, "Generate the narrator voice first.")
     if prerequisites["voice_pending"]:
@@ -1908,10 +1963,15 @@ def generate_resolve_plan(project_id: str):
             f"{len(missing_media)} selected media item(s) have not been downloaded yet.",
         )
     if prerequisites["stories_missing_downloaded_media"]:
+        details = prerequisites.get("missing_story_details") or []
+        first = details[0] if details else {}
+        label = str(first.get("title") or first.get("story_id") or "unknown story")
+        segments = ", ".join(str(x) for x in first.get("segment_indexes") or [])
+        segment_note = f" (voice segment(s) {segments})" if segments else ""
         raise HTTPException(
             400,
-            f"{len(prerequisites['stories_missing_downloaded_media'])} narrated story/stories have no downloaded selected media. "
-            "Choose at least one media item for each narrated story in Step 5 and download them in Step 6.",
+            f"{len(prerequisites['stories_missing_downloaded_media'])} narrated story/stories could not be matched to downloaded selected media. "
+            f"Missing mapping: {label}{segment_note}.",
         )
 
     try:
