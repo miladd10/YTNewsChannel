@@ -6,6 +6,24 @@ const cinemaSections=[
   ['now_available','Now Available in HD'],['toxic_news','Toxic News']
 ];
 function sectionLabel(key){return cinemaSections.find(x=>x[0]===key)?.[1]||String(key||'').replaceAll('_',' ')}
+const sectionGuides={
+  trend:'Lead story of the week. Deepest coverage: impact, numbers, reaction, controversy and connected follow-up.',
+  industry:'Studio, streaming, legal, regulatory, finance, executive and labor/business stories.',
+  upcoming_films:'Trailers, first looks, casting, production starts, festival reaction, release dates and film announcements.',
+  tv_series:'Renewals, cancellations, delays, premieres, showrunner changes and platform strategy tied to series.',
+  celebrities:'People-focused news: honors/events, verified personal announcements, incidents and strong interview anecdotes.',
+  ai_tech:'AI, VFX, production technology, virtual performers and entertainment-tech stories with a reality check.',
+  viral_images:'Fast visual stories centered on a specific original post/photo/image that became notable this week.',
+  box_office:'Weekly box-office rundown, totals and meaningful milestones.',
+  channel_polls:'Your own channel poll results only; never invented from web research.',
+  now_available:'Films newly available digitally, on VOD/PVOD, or streaming this week.',
+  toxic_news:'Light, weird or embarrassing but verifiable entertainment stories for the closer.'
+};
+const sectionTargets={
+  trend:'target 1-2',industry:'target 1-3',upcoming_films:'target 3-8',tv_series:'0-4',
+  celebrities:'0-5',ai_tech:'0-3',viral_images:'0-4',box_office:'top 5 + milestone',
+  channel_polls:'0-2 supplied polls',now_available:'0-4',toxic_news:'0-3'
+};
 
 researchHtml=function(){
   const counts=Object.fromEntries(cinemaSections.map(([key])=>[key,state.stories.filter(s=>s.category===key).length]));
@@ -16,9 +34,8 @@ pickerHtml=function(){
   const include=state.stories.filter(s=>s.decision==='include'),maybe=state.stories.filter(s=>s.decision==='maybe'),skip=state.stories.filter(s=>s.decision==='skip');
   const groups=cinemaSections.map(([key,label])=>{
     const items=state.stories.filter(s=>s.category===key);
-    if(!items.length)return '';
     const inc=items.filter(s=>s.decision==='include').length;
-    return `<section class="section-selection"><div class="section-selection-head"><div><div class="eyebrow">FORMAT SECTION</div><h3>${esc(label)}</h3></div><span class="pill">${inc} included - ${items.length} found</span></div>${storyCards(items)}</section>`;
+    return `<section class="section-selection"><div class="section-selection-head"><div><div class="eyebrow">FORMAT SECTION · ${esc(sectionTargets[key]||'')}</div><h3>${esc(label)}</h3><p class="section-guide">${esc(sectionGuides[key]||'')}</p></div><span class="pill">${inc} included - ${items.length} found</span></div>${items.length?storyCards(items):`<div class="card placeholder compact-placeholder">No suitable ${esc(label)} story found in this research run.</div>`}</section>`;
   }).join('');
   return `<div class="section-head"><div><div class="eyebrow">STEP 02</div><h2>Select news inside each section</h2><p>Only <strong>Include</strong> stories are factual inputs to the narration writer, and their section assignment is preserved.</p></div></div>${metrics()}<div class="toolbar"><span class="pill">Include ${include.length}</span><span class="pill">Maybe ${maybe.length}</span><span class="pill">Skip ${skip.length}</span></div>${state.stories.length?groups:'<div class="card placeholder">Run Format Research first.</div>'}`;
 };
