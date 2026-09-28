@@ -2927,14 +2927,17 @@ def search_included_story_media(project_id: str, body: MediaSearchBody):
                     """INSERT INTO media_candidates(
                         id,project_id,story_id,media_type,title,page_url,asset_url,thumbnail_url,source,provider,
                         duration,published_at,width,height,search_query,clip_start_sec,clip_end_sec,target_duration_sec,shared_source,
-                        coverage_label,coverage_kind,selected,download_status,stored_path,error,rights_status,created_at,updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        coverage_label,coverage_kind,coverage_group,coverage_cue,coverage_reason,layout_hint,
+                        selected,download_status,stored_path,error,rights_status,created_at,updated_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         item["id"], project_id, story["id"], item["media_type"], item["title"], item["page_url"],
                         item["asset_url"], item["thumbnail_url"], item["source"], item["provider"], item["duration"],
                         item["published_at"], item["width"], item["height"], item["search_query"],
                         item.get("clip_start_sec"), item.get("clip_end_sec"), item.get("target_duration_sec"), item.get("shared_source", 0),
                         item.get("coverage_label", ""), item.get("coverage_kind", ""),
+                        item.get("coverage_group", ""), item.get("coverage_cue", ""),
+                        item.get("coverage_reason", ""), item.get("layout_hint", "single"),
                         0, "not_downloaded", "", "", "unverified", stamp, stamp,
                     ),
                 )
