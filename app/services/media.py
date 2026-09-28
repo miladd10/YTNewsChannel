@@ -78,7 +78,7 @@ CORPORATE_STORY_TERMS = (
 )
 
 CORPORATE_BROLL_TERMS = (
-    "studio lot", "headquarters", "logo", "brand film",
+    "studio lot", "studio tour", "backlot tour", "headquarters", "logo", "brand film",
     "company reel", "sizzle reel", "centennial", "100 years", "anniversary",
     "campus", "backlot", "soundstage", "sound stage", "official intro",
 )
@@ -1767,6 +1767,9 @@ def _youtube_search_queries(story: dict) -> list[str]:
         for entity in _known_entities(_story_text(story)):
             queries.extend([
                 f'{entity} official studio lot',
+                f'{entity} official studio tour',
+                f'{entity} official backlot tour',
+                f'{entity} official centennial anniversary',
                 f'{entity} official logo',
                 f'{entity} official company reel',
             ])
