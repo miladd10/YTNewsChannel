@@ -155,7 +155,7 @@ narrationHtml=async function(){
 generateNarration=async function(){
   const b=$('#generateNarrationBtn');if(b){b.disabled=true;b.textContent='Writing...'}
   const s=state.settings?.ai||{};
-  startRunStatus({title:'Writing fresh narration draft',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading selected sections','Loading style corpus','Writer drafting','Draft saved']});
+  startRunStatus({title:'Writing baseline narration draft',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading selected sections','Loading style corpus','Writing baseline without post-draft enrichment','Draft saved']});
   try{
     const r=await api(`/api/projects/${state.project.id}/narration`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:s.writer_provider,model:s.writer_model})});
     state.narrationDraftId=r.id;state.lastNarrationReview=null;state.project=await api(`/api/projects/${state.project.id}`);await renderStage();
@@ -163,10 +163,55 @@ generateNarration=async function(){
     toast(`Draft V${r.version_number} generated - ${r.style_transcript_count} style transcript(s) used`);
   }catch(e){finishRunStatus(false,e.message);toast(e.message,true);if(b){b.disabled=false;b.textContent='Generate Fresh Draft'}}
 };
+async function searchStoryContext(storyId){
+  const b=document.querySelector(`[data-search-story-context="${storyId}"]`);
+  if(b){b.disabled=true;b.textContent='Searching...'}
+  const s=state.settings?.ai||{};
+  startRunStatus({title:'Searching related context for one story',meta:'Public web + Reddit + X/Twitter + TikTok + Instagram + YouTube',steps:['Searching general web','Searching rumors / controversy','Searching critic reaction','Searching Reddit + X + TikTok + Instagram','Searching interviews / behind the scenes','Validating sources and safe angles','Saving sources for Narration + Media']});
+  try{
+    const r=await api(`/api/projects/${state.project.id}/stories/${storyId}/context-search`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({provider:s.research_provider,model:s.research_model})
+    });
+    state.lastNarrationReview=null;
+    await renderStage();
+    finishRunStatus(true,'',`Story enrichment complete: ${r.safe_angle_count} usable angle(s), ${r.source_count} collected source(s)`);
+    toast(`Found ${r.safe_angle_count} usable angle(s) from ${r.source_count} collected source(s)`);
+    setTimeout(()=>document.querySelector(`[data-search-story-context="${storyId}"]`)?.scrollIntoView({behavior:'smooth',block:'center'}),60);
+  }catch(e){
+    finishRunStatus(false,e.message);
+    toast(e.message,true);
+    if(b){b.disabled=false;b.textContent='Find Cool Stuff'}
+  }
+}
+async function rewriteWithEnrichment(){
+  const id=state.narrationDraftId;if(!id)return;
+  const b=$('#rewriteEnrichedBtn');if(b){b.disabled=true;b.textContent='Rewriting...'}
+  const s=state.settings?.ai||{};
+  startRunStatus({title:'Rewriting draft with researched context',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading per-story searches','Using only safe evidence-backed angles','Preserving good draft structure','Using Reddit/X/TikTok attribution specifically','Saving enriched draft']});
+  try{
+    const r=await api(`/api/projects/${state.project.id}/narrations/${id}/enrich-rewrite`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({provider:s.writer_provider,model:s.writer_model})
+    });
+    state.narrationDraftId=r.id;
+    state.lastNarrationReview=null;
+    state.project=await api(`/api/projects/${state.project.id}`);
+    await renderStage();
+    finishRunStatus(true,'',`Draft V${r.version_number} enriched with ${r.safe_angle_count} safe angle(s)`);
+    toast(`Enriched Draft V${r.version_number} created. Run Reviewer next.`);
+  }catch(e){
+    finishRunStatus(false,e.message);toast(e.message,true);
+    if(b){b.disabled=false;b.textContent='Rewrite with Enrichment'}
+  }
+}
+
 async function reviewNarration(){
   const id=state.narrationDraftId;if(!id)return;const s=state.settings?.ai||{};const b=$('#reviewNarrationBtn');
   if(b){b.disabled=true;b.textContent='Reviewing...'}
-  startRunStatus({title:'Reviewing narration',meta:`${s.reviewer_provider||'reviewer'} - ${s.reviewer_model||'default'}`,steps:['Loading current-week sources','Comparing full reference style corpus','Checking familiarity context + naturalness','Building issue list','Review gate saved']});
+  startRunStatus({title:'Reviewing narration',meta:`${s.reviewer_provider||'reviewer'} - ${s.reviewer_model||'default'}`,steps:['Loading current-week + enrichment sources','Checking rumor/social/critic attribution','Comparing full reference style corpus','Checking familiarity context + naturalness','Building issue list','Review gate saved']});
   try{
     const r=await api(`/api/projects/${state.project.id}/narrations/${id}/review`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:s.reviewer_provider,model:s.reviewer_model})});
     state.lastNarrationReview={...r,narration_id:r.narration_id||id};
@@ -198,6 +243,8 @@ const baseWireStageEditorial=wireStage;
 wireStage=function(){
   baseWireStageEditorial();
   const nr=$('#reviewNarrationBtn');if(nr)nr.onclick=reviewNarration;
+  const re=$('#rewriteEnrichedBtn');if(re)re.onclick=rewriteWithEnrichment;
+  document.querySelectorAll('[data-search-story-context]').forEach(b=>b.onclick=()=>searchStoryContext(b.dataset.searchStoryContext));
   const nv=$('#reviseNarrationBtn');if(nv)nv.onclick=reviseNarration;
   const na=$('#approveNarrationBtn');if(na)na.onclick=approveNarration;
   const ni=$('#importStyleTranscriptsBtn');if(ni)ni.onclick=()=>$('#styleTranscriptFiles')?.click();
