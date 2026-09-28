@@ -242,3 +242,25 @@
 .fact-check-issue{display:grid;gap:4px;padding:9px 10px;border-radius:9px;background:#0c1219;border:1px solid #2f3946}
 .fact-check-issue strong{font-size:9px;color:#d7dee8}
 .fact-check-issue span,.fact-check-issue small{font-size:9px;color:#9aa6b6;line-height:1.45}
+
+.claim-audit-panel{margin:12px 0;padding:14px;border:1px solid #34404f;border-radius:12px;background:#101720}
+.claim-audit-panel.pass{border-color:#315c46;background:#0f1915}
+.claim-audit-panel.needs-work{border-color:#713d44;background:#1b1114}
+.claim-audit-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.claim-audit-head h3{margin:2px 0 0;font-size:14px}
+.claim-audit-panel>p{margin:8px 0 0;color:#95a1b1;font-size:10px;line-height:1.5}
+.claim-audit-metrics{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+.claim-blocked-list,.claim-check-list,.claim-ledger-list{display:grid;gap:7px;margin-top:9px}
+.claim-check-row,.claim-ledger-row{padding:9px 10px;border:1px solid #2f3946;border-radius:9px;background:#0c1219}
+.claim-check-row.blocked,.claim-ledger-row.blocked{border-color:#713d44;background:#1b1114}
+.claim-check-row.verified,.claim-ledger-row.verified{border-color:#315c46}
+.claim-check-row.verified_with_attribution,.claim-ledger-row.verified_with_attribution{border-color:#66562e}
+.claim-check-row>div,.claim-ledger-row>div{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.claim-check-row strong,.claim-ledger-row strong{font-size:9px;line-height:1.45}
+.claim-check-row small,.claim-ledger-row small{display:block;margin-top:5px;color:#9aa6b6;font-size:8px;line-height:1.45}
+.claim-status,.claim-id{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#b8c4d0}
+.claim-audit-details{margin-top:9px}
+.claim-audit-details summary{cursor:pointer;font-size:9px;color:#c5d1dc}
+.claim-source-links{display:flex;gap:7px;flex-wrap:wrap;margin-top:6px}
+.claim-source-links a{font-size:8px}
+@media(max-width:760px){.claim-audit-head{flex-direction:column}.claim-audit-head .btn{align-self:flex-start}}
