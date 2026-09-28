@@ -161,3 +161,15 @@
 .source-time-badge.current{border-color:#2f7a56}
 .source-time-badge.background,.source-time-badge.out_of_window{border-color:#7a4b2f}
 .source-time-badge.undated{border-color:#5a5f67}
+
+.review-feedback-panel{margin:12px 0 14px;padding:14px;border:1px solid #35506b;border-radius:12px;background:#0f151d;scroll-margin-top:18px}
+.review-feedback-panel.empty{border-style:dashed;border-color:#33404d}
+.review-feedback-panel h3{margin:3px 0 0;text-transform:capitalize}
+.review-feedback-panel p{margin:5px 0 0;color:var(--muted);font-size:9px;line-height:1.5}
+.review-feedback-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.review-audits{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.review-audit-badge{display:inline-flex;padding:4px 7px;border-radius:999px;border:1px solid #3a4652;font-size:8px;text-transform:capitalize}
+.review-audit-badge.pass{border-color:#315f49}
+.review-audit-badge.needs-work{border-color:#7a4b3c}
+.review-feedback-text{max-height:520px;min-height:180px;overflow:auto;white-space:pre-wrap;background:#0b1016}
+.draft-feedback-panel{margin-top:12px}
