@@ -13,9 +13,10 @@ from urllib.parse import quote_plus
 
 import xml.etree.ElementTree as ET
 import httpx
+from ddgs import DDGS
 
 from .ai import generate_text
-from .cinema_format import FORMAT_BY_KEY, research_query_groups, section_label
+from .cinema_format import FORMAT_BY_KEY, research_query_groups, section_label, format_packet
 
 CINEMA_QUERY_GROUPS = research_query_groups()
 CATEGORY_LABELS = {key: section_label(key) for key in FORMAT_BY_KEY}
@@ -95,6 +96,150 @@ def fetch_google_news(date_start: str, date_end: str, *, per_query_limit: int = 
     return articles, diagnostics
 
 
+SOCIAL_DOMAINS = {
+    "reddit": ("reddit.com",),
+    "x": ("x.com", "twitter.com"),
+    "tiktok": ("tiktok.com",),
+}
+
+SOCIAL_SECTION_QUERIES = {
+    "trend": [
+        "movie film reaction cinema this week",
+        "movie box office audience reaction this week",
+    ],
+    "industry": [
+        "Hollywood studio merger acquisition executive statement",
+    ],
+    "upcoming_films": [
+        "new movie trailer first look casting official",
+        "upcoming film director actor announcement",
+    ],
+    "celebrities": [
+        "actor actress director filmmaker announcement interview movie",
+        "Hollywood celebrity award event personal announcement film",
+    ],
+    "ai_tech": [
+        "AI film actor VFX Hollywood viral technology",
+    ],
+    "viral_images": [
+        "movie celebrity viral photo image post cinema",
+        "actor director on set photo award viral",
+    ],
+    "now_available": [
+        "movie digital release VOD streaming available now",
+    ],
+    "toxic_news": [
+        "Hollywood weird funny bizarre actor director movie incident",
+        "film celebrity social media mishap viral",
+    ],
+}
+
+
+def _social_platform_for_url(url: str) -> str:
+    value = (url or "").casefold()
+    if "reddit.com/" in value:
+        return "reddit"
+    if "x.com/" in value or "twitter.com/" in value:
+        return "x"
+    if "tiktok.com/" in value:
+        return "tiktok"
+    return ""
+
+
+def _social_source_label(platform: str) -> str:
+    return {"reddit": "Reddit", "x": "X / Twitter", "tiktok": "TikTok"}.get(platform, platform.title())
+
+
+def _social_queries(date_start: str, date_end: str) -> list[tuple[str, str, str]]:
+    queries: list[tuple[str, str, str]] = []
+    for category, terms in SOCIAL_SECTION_QUERIES.items():
+        allowed = set((FORMAT_BY_KEY.get(category) or {}).get("social_sources") or [])
+        for platform in ("x", "tiktok", "reddit"):
+            if platform not in allowed:
+                continue
+            domains = SOCIAL_DOMAINS[platform]
+            site_part = " OR ".join(f"site:{domain}" for domain in domains)
+            for term in terms:
+                query = f"({site_part}) {term}"
+                if date_start:
+                    query += f" after:{date_start}"
+                if date_end:
+                    query += f" before:{date_end}"
+                queries.append((category, platform, query))
+    return queries
+
+
+def fetch_social_sources(
+    date_start: str,
+    date_end: str,
+    *,
+    per_query_limit: int = 8,
+) -> tuple[list[dict], list[dict]]:
+    """Discover public Reddit/X/TikTok URLs through web search.
+
+    This intentionally does not pretend to have authenticated private-platform
+    access. It discovers public posts/pages that search engines can index.
+    """
+    articles: list[dict] = []
+    diagnostics: list[dict] = []
+    seen_urls: set[str] = set()
+
+    for category, platform, query in _social_queries(date_start, date_end):
+        count = 0
+        try:
+            results = list(DDGS().text(query, max_results=per_query_limit) or [])
+            for result in results:
+                url = str(result.get("href") or result.get("url") or "").strip()
+                actual_platform = _social_platform_for_url(url)
+                if not url or actual_platform != platform or url in seen_urls:
+                    continue
+                title = _plain(str(result.get("title") or ""))
+                body = _plain(str(result.get("body") or result.get("snippet") or ""))
+                if not title and not body:
+                    continue
+                seen_urls.add(url)
+                raw_date = str(result.get("date") or result.get("published") or "")
+                articles.append({
+                    "id": str(uuid.uuid4()),
+                    "title": title or body[:180],
+                    "url": url,
+                    "source": _social_source_label(platform),
+                    "published_at": raw_date,
+                    "category": category,
+                    "snippet": body[:1000],
+                    "query_key": query,
+                    "raw": {
+                        "source_kind": "social",
+                        "platform": platform,
+                        "discovery": "ddgs_public_web",
+                        "trust_role": (
+                            "community_signal" if platform == "reddit"
+                            else "primary_post_candidate"
+                        ),
+                    },
+                })
+                count += 1
+            diagnostics.append({
+                "category": category,
+                "platform": platform,
+                "query": query,
+                "count": count,
+                "ok": True,
+                "source_kind": "social",
+            })
+        except Exception as exc:
+            diagnostics.append({
+                "category": category,
+                "platform": platform,
+                "query": query,
+                "count": 0,
+                "ok": False,
+                "error": str(exc),
+                "source_kind": "social",
+            })
+    return articles, diagnostics
+
+
 def normalize_title(title: str) -> str:
     text = title.lower()
     text = re.sub(r"\s+-\s+[^-]{2,60}$", "", text)
@@ -141,6 +286,23 @@ def cluster_articles(articles: list[dict]) -> list[dict]:
                 snippets.append(item["snippet"])
         category = max(categories, key=categories.get)
         source_count = max(len(sources), len(cluster)) if not sources else len(sources)
+        platforms = sorted({
+            str((item.get("raw") or {}).get("platform") or "")
+            for item in cluster
+            if str((item.get("raw") or {}).get("platform") or "")
+        })
+        source_kinds = sorted({
+            str((item.get("raw") or {}).get("source_kind") or "news")
+            for item in cluster
+        })
+        reddit_only = bool(cluster) and all(
+            str((item.get("raw") or {}).get("platform") or "") == "reddit"
+            for item in cluster
+        )
+        primary_social_count = sum(
+            1 for item in cluster
+            if str((item.get("raw") or {}).get("trust_role") or "") == "primary_post_candidate"
+        )
         score = heuristic_score(cluster, source_count)
         stories.append({
             "id": str(uuid.uuid4()),
@@ -158,6 +320,10 @@ def cluster_articles(articles: list[dict]) -> list[dict]:
             "decision": "include" if score >= 7.5 else ("maybe" if score >= 4.0 else "skip"),
             "article_ids": [x["id"] for x in cluster],
             "source_count": source_count,
+            "source_platforms": platforms,
+            "source_kinds": source_kinds,
+            "reddit_only": reddit_only,
+            "primary_social_count": primary_social_count,
         })
     stories.sort(key=lambda x: (x["score"], x["source_count"]), reverse=True)
     return stories
@@ -196,14 +362,41 @@ def ai_rank_stories(stories: list[dict], project: dict, provider: str, model: st
         {
             "id": s["id"],
             "title": s["canonical_title"],
-            "category": s["category"],
-            "summary": s["summary"][:450],
+            "current_category": s["category"],
+            "summary": s["summary"][:650],
             "source_count": s["source_count"],
+            "source_platforms": s.get("source_platforms") or [],
+            "source_kinds": s.get("source_kinds") or [],
+            "reddit_only": bool(s.get("reddit_only")),
+            "primary_social_count": int(s.get("primary_social_count") or 0),
             "heuristic_score": s["score"],
         }
-        for s in stories[:80]
+        for s in stories[:100]
     ]
-    system = """You are the research editor for a section-driven weekly cinema-news YouTube show. Evaluate only the supplied stories and keep each story in its supplied format section/category. Do not invent facts. Return ONLY valid JSON: an array with one object per supplied story using exactly these keys: id, attention, importance, freshness, confidence, visual_potential, uniqueness, score, decision, rationale. Allowed signal values are low|medium|high except confidence is rumor|reported|confirmed and freshness is current|followup|stale. score is 0-10. decision is include|maybe|skip. Favor stories that are genuinely important, fresh in the selected week, well-supported, visually useful, and a strong fit for their section. A rumor can still be included only when it is itself newsworthy and clearly labelled as rumor. Do not fill a section with weak material merely because the format contains that section."""
+    system = """You are the section editor and ranking editor for a weekly cinema-news show.
+
+You receive strict SECTION CONTRACTS and discovered stories. Classify each story by MEANING, not by the query that happened to find it.
+
+Return ONLY valid JSON: one object per supplied story using exactly these keys:
+id, category, section_fit, attention, importance, freshness, confidence, visual_potential, uniqueness, score, decision, rationale.
+
+Rules:
+- category must be one of the supplied researchable section keys.
+- Move a story when its current_category is wrong.
+- section_fit is low|medium|high.
+- attention/importance/visual_potential/uniqueness are low|medium|high.
+- confidence is rumor|reported|confirmed.
+- freshness is current|followup|stale.
+- score is 0-10; decision is include|maybe|skip.
+- Apply each section's mission/include/exclude/evidence rules strictly.
+- Do not force every section to contain news. A weak story should be skipped.
+- Trends is reserved for a genuinely conversation-driving lead story, not every new trailer.
+- Box Office is for chart/ranking/milestone coverage; a lead film's box-office data can remain in Trends when it is part of the week's dominant story.
+- Celebrity/Viral/Toxic social evidence: a person's/studio's own public X/TikTok post can support what that account itself posted. Do not assume an account is official solely from a search result.
+- Reddit is discovery/community reaction, not sole factual verification unless the story itself is explicitly about Reddit reaction.
+- If reddit_only=true and the story makes an external factual claim, confidence cannot be confirmed and decision should normally be maybe/skip pending corroboration.
+- Reject unsupported health/appearance speculation and anonymous gossip.
+- Never invent facts."""
     user = json.dumps({
         "project": {
             "channel": project.get("channel"),
@@ -214,6 +407,10 @@ def ai_rank_stories(stories: list[dict], project: dict, provider: str, model: st
             "geographic_focus": project.get("geographic_focus"),
             "editorial_focus": project.get("editorial_focus"),
         },
+        "section_contracts": [
+            section for section in format_packet()
+            if section.get("research")
+        ],
         "stories": compact,
     }, ensure_ascii=False)
     text, actual_provider, actual_model = generate_text(provider, model, system, user)
@@ -223,10 +420,18 @@ def ai_rank_stories(stories: list[dict], project: dict, provider: str, model: st
         item = by_id.get(story["id"])
         if not item:
             continue
+        category = str(item.get("category") or "").strip()
+        if category in FORMAT_BY_KEY and FORMAT_BY_KEY[category].get("research"):
+            story["category"] = category
+        section_fit = str(item.get("section_fit") or "").strip().lower()
+        if section_fit in {"low", "medium", "high"}:
+            story["section_fit"] = section_fit
         for key in ("attention", "importance", "freshness", "confidence", "visual_potential", "uniqueness", "decision", "rationale"):
             value = item.get(key)
             if isinstance(value, str) and value.strip():
                 story[key] = value.strip().lower() if key != "rationale" else value.strip()
+        if story.get("section_fit") == "low" and story.get("decision") == "include":
+            story["decision"] = "maybe"
         try:
             story["score"] = max(0.0, min(10.0, float(item.get("score"))))
         except Exception:
