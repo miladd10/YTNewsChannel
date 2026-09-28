@@ -230,3 +230,15 @@
 .layout-chip{padding:3px 6px;border-radius:999px;background:#211c35;border:1px solid #4e4276;color:#c8bdf5;font-size:8px}
 .coverage-cue{margin-top:7px;padding:7px 8px;border-left:2px solid #52647d;background:#101720;color:#97a4b4;font-size:8px;line-height:1.45}
 .quality-badge.image-layout-ready{background:#18251f;border-color:#3c6e55;color:#a8dfbf}
+
+.fact-check-panel{margin:12px 0;padding:14px;border:1px solid #34404f;border-radius:12px;background:#101720}
+.fact-check-panel.pass{border-color:#315c46;background:#0f1915}
+.fact-check-panel.corrected{border-color:#66562e;background:#1a1710}
+.fact-check-panel.needs-work{border-color:#713d44;background:#1b1114}
+.fact-check-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.fact-check-head h3{margin:2px 0 0;font-size:14px}
+.fact-check-panel>p{margin:8px 0 0;color:#95a1b1;font-size:10px;line-height:1.5}
+.fact-check-issues{display:grid;gap:7px;margin-top:10px}
+.fact-check-issue{display:grid;gap:4px;padding:9px 10px;border-radius:9px;background:#0c1219;border:1px solid #2f3946}
+.fact-check-issue strong{font-size:9px;color:#d7dee8}
+.fact-check-issue span,.fact-check-issue small{font-size:9px;color:#9aa6b6;line-height:1.45}
