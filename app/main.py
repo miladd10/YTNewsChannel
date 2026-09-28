@@ -25,6 +25,7 @@ from .services.project_store import choose_folder, create_project_folder, reveal
 from .services.prompts import MEDIA_PLAN_SYSTEM
 from .services.cinema_format import (
     CINEMA_WEEKLY_FORMAT,
+    ENRICHMENT_REWRITE_SYSTEM,
     REVISION_SYSTEM,
     REVIEWER_SYSTEM,
     SECTION_ORDER,
@@ -695,25 +696,6 @@ def run_research(project_id: str, body: ResearchBody):
         except Exception as exc:
             ai_error = str(exc)
 
-        if not ai_error:
-            try:
-                context_articles, sources_by_story, context_diagnostics = fetch_story_spice_sources(
-                    stories,
-                    project["date_start"],
-                    project["date_end"],
-                )
-                articles.extend(context_articles)
-                diagnostics.extend(context_diagnostics)
-                stories, actual_provider, actual_model = ai_enrich_story_spice(
-                    stories,
-                    sources_by_story,
-                    project,
-                    provider,
-                    model,
-                )
-            except Exception as exc:
-                spice_error = str(exc)
-
     run_id = str(uuid.uuid4())
     stamp = now()
     query_config = {
@@ -750,8 +732,9 @@ def run_research(project_id: str, body: ResearchBody):
                     news_hook,news_hook_date,verification_status,verification_notes,temporal_gate,verification_gate,
                     in_window_source_count,background_source_count,undated_source_count,independent_source_count,
                     current_non_reddit_source_count,current_primary_social_count,familiarity_needed,familiarity_anchor,
-                    search_subject,spice_json,spice_source_ids_json,created_at,updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    search_subject,spice_json,spice_source_ids_json,context_searched_at,context_search_count,context_search_error,
+                    created_at,updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     story["id"], project_id, run_id, story["canonical_title"], story["summary"], story["category"],
                     story["attention"], story["importance"], story["freshness"], story["confidence"],
@@ -771,6 +754,7 @@ def run_research(project_id: str, body: ResearchBody):
                     story.get("search_subject") or "",
                     json.dumps(story.get("spice_angles") or [], ensure_ascii=False),
                     json.dumps(story.get("spice_source_ids") or []),
+                    "", 0, "",
                     stamp, stamp,
                 ),
             )
@@ -789,8 +773,8 @@ def run_research(project_id: str, body: ResearchBody):
         "current_story_count": sum(1 for story in stories if story.get("freshness") in {"current", "followup"}),
         "verified_story_count": sum(1 for story in stories if story.get("verification_gate") == "pass"),
         "stale_story_count": sum(1 for story in stories if story.get("freshness") == "stale"),
-        "spice_story_count": sum(1 for story in stories if story.get("spice_angles")),
-        "spice_angle_count": sum(len(story.get("spice_angles") or []) for story in stories),
+        "spice_story_count": 0,
+        "spice_angle_count": 0,
         "ai_rank_error": ai_error,
         "spice_error": spice_error,
         "provider": actual_provider,
@@ -894,6 +878,170 @@ def update_story_decision(project_id: str, story_id: str, body: DecisionBody):
         conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
         save_manifest(conn, project_id)
     return {"ok": True, "decision": decision}
+
+
+class StoryContextSearchBody(BaseModel):
+    provider: str | None = None
+    model: str | None = None
+
+
+@app.post("/api/projects/{project_id}/stories/{story_id}/context-search")
+def search_story_context(project_id: str, story_id: str, body: StoryContextSearchBody):
+    settings = masked_status()
+    provider = body.provider or settings.get("research_provider", "codex_local")
+    model = body.model or settings.get("research_model", "default")
+
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        draft = conn.execute(
+            "SELECT id FROM narrations WHERE project_id=? ORDER BY version_number DESC LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        if not draft:
+            raise HTTPException(400, "Generate the first narration draft before running story enrichment.")
+        run_id = latest_run_id(conn, project_id)
+        if not run_id:
+            raise HTTPException(400, "Run Format Research first.")
+        row = conn.execute(
+            "SELECT * FROM stories WHERE id=? AND project_id=? AND run_id=?",
+            (story_id, project_id, run_id),
+        ).fetchone()
+        if not row or str(row["decision"] or "") != "include":
+            raise HTTPException(404, "Included story not found in the current research run.")
+        stories = selected_story_packet(conn, project_id)
+        story = next((item for item in stories if item["id"] == story_id), None)
+        if not story:
+            raise HTTPException(400, "This story no longer passes the current selection/verification gates.")
+
+        previous_ids = json.loads(row["spice_source_ids_json"] or "[]")
+        previous_sources: list[dict] = []
+        if previous_ids:
+            placeholders = ",".join("?" for _ in previous_ids)
+            for source_row in conn.execute(
+                f"""SELECT id,title,url,source,published_at,category,snippet,query_key,raw_json
+                    FROM research_articles WHERE id IN ({placeholders})""",
+                previous_ids,
+            ).fetchall():
+                source = dict(source_row)
+                try:
+                    source["raw"] = json.loads(source.pop("raw_json") or "{}")
+                except Exception:
+                    source["raw"] = {}
+                previous_sources.append(source)
+
+    stamp = now()
+    search_error = ""
+    new_sources: list[dict] = []
+    diagnostics: list[dict] = []
+    actual_provider, actual_model = provider, model
+    try:
+        new_sources, sources_by_story, diagnostics = fetch_story_spice_sources(
+            [story],
+            project["date_start"],
+            project["date_end"],
+            max_stories=1,
+            per_query_limit=6,
+        )
+
+        combined_by_url: dict[str, dict] = {}
+        for source in [*previous_sources, *new_sources]:
+            url = str(source.get("url") or "").strip()
+            if not url:
+                continue
+            combined_by_url[url.casefold()] = source
+        combined_sources = list(combined_by_url.values())
+
+        enriched, actual_provider, actual_model = ai_enrich_story_spice(
+            [story],
+            {story_id: combined_sources},
+            project,
+            provider,
+            model,
+        )
+        story = enriched[0]
+    except Exception as exc:
+        search_error = str(exc)
+        combined_sources = previous_sources
+        story["spice_angles"] = json.loads(row["spice_json"] or "[]")
+
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        # Persist only newly discovered source rows. Existing rows keep their IDs.
+        existing_urls = {
+            str(source.get("url") or "").strip().casefold(): str(source.get("id") or "")
+            for source in previous_sources
+            if str(source.get("url") or "").strip()
+        }
+        persisted_ids = [source_id for source_id in existing_urls.values() if source_id]
+        for source in new_sources:
+            url = str(source.get("url") or "").strip()
+            key = url.casefold()
+            if not url or key in existing_urls:
+                continue
+            source_id = str(source.get("id") or uuid.uuid4())
+            source["id"] = source_id
+            conn.execute(
+                """INSERT INTO research_articles(
+                    id,project_id,run_id,title,url,source,published_at,category,snippet,query_key,raw_json
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    source_id, project_id, run_id, source.get("title") or "", url,
+                    source.get("source") or "", source.get("published_at") or "",
+                    source.get("category") or story.get("category") or "",
+                    source.get("snippet") or "", source.get("query_key") or "",
+                    json.dumps(source.get("raw") or {}, ensure_ascii=False),
+                ),
+            )
+            existing_urls[key] = source_id
+            persisted_ids.append(source_id)
+
+        # ai_enrich_story_spice works with the search packet IDs. Remap by URL so
+        # repeated searches accumulate one persistent source set.
+        all_source_ids = list(dict.fromkeys(persisted_ids))
+        count = int(row["context_search_count"] or 0) + 1
+        conn.execute(
+            """UPDATE stories
+               SET spice_json=?,spice_source_ids_json=?,context_searched_at=?,
+                   context_search_count=?,context_search_error=?,updated_at=?
+               WHERE id=? AND project_id=?""",
+            (
+                json.dumps(story.get("spice_angles") or [], ensure_ascii=False),
+                json.dumps(all_source_ids),
+                stamp, count, search_error, stamp, story_id, project_id,
+            ),
+        )
+        root = Path(project["root_path"]) / "research" / "stories"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / f"{story_id}_context_{count:02d}.json").write_text(
+            json.dumps({
+                "story_id": story_id,
+                "searched_at": stamp,
+                "provider": actual_provider,
+                "model": actual_model,
+                "angles": story.get("spice_angles") or [],
+                "sources": combined_sources,
+                "diagnostics": diagnostics,
+                "error": search_error,
+            }, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (stamp, project_id))
+        save_manifest(conn, project_id)
+
+    if search_error and not previous_sources:
+        raise HTTPException(400, search_error)
+    return {
+        "story_id": story_id,
+        "searched_at": stamp,
+        "search_count": int(row["context_search_count"] or 0) + 1,
+        "angle_count": len(story.get("spice_angles") or []),
+        "safe_angle_count": sum(1 for angle in story.get("spice_angles") or [] if angle.get("safe_to_narrate")),
+        "source_count": len(combined_sources),
+        "angles": story.get("spice_angles") or [],
+        "error": search_error,
+        "provider": actual_provider,
+        "model": actual_model,
+    }
 
 
 class GenerateBody(BaseModel):
@@ -1094,6 +1242,11 @@ class StyleTranscriptToggleBody(BaseModel):
     enabled: bool
 
 
+class NarrationEnrichmentRewriteBody(BaseModel):
+    provider: str | None = None
+    model: str | None = None
+
+
 class NarrationReviewBody(BaseModel):
     provider: str | None = None
     model: str | None = None
@@ -1170,6 +1323,93 @@ def narration_workspace(project_id: str):
         "narrations": narrations,
         "reviews": reviews,
         "style_transcripts": styles,
+    }
+
+
+@app.post("/api/projects/{project_id}/narrations/{narration_id}/enrich-rewrite")
+def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: NarrationEnrichmentRewriteBody):
+    settings = masked_status()
+    provider = body.provider or settings.get("writer_provider", "codex_local")
+    model = body.model or settings.get("writer_model", "default")
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        draft = conn.execute(
+            "SELECT * FROM narrations WHERE id=? AND project_id=?",
+            (narration_id, project_id),
+        ).fetchone()
+        if not draft:
+            raise HTTPException(404, "Narration draft not found")
+        stories = selected_story_packet(conn, project_id)
+        searched = [story for story in stories if str(story.get("context_searched_at") or "")]
+        if not searched:
+            raise HTTPException(400, "Search at least one story for related context before rewriting.")
+        styles = _style_transcripts(
+            conn,
+            project.get("channel") or "cinema",
+            project.get("content_type") or "weekly_news",
+        )
+
+    user = "\n".join([
+        "<current_week_authoritative_packet>",
+        json.dumps({
+            "project": {
+                "language": project.get("language"),
+                "date_start": project.get("date_start"),
+                "date_end": project.get("date_end"),
+            },
+            "format_blueprint": format_packet(),
+            "approved_sections": _sectioned_story_packet(stories),
+        }, ensure_ascii=False),
+        "</current_week_authoritative_packet>",
+        "",
+        build_style_packet(styles),
+        "",
+        "<existing_first_draft>",
+        draft["content"],
+        "</existing_first_draft>",
+    ])
+    try:
+        rewritten_text, actual_provider, actual_model = generate_text(
+            provider,
+            model,
+            ENRICHMENT_REWRITE_SYSTEM,
+            user,
+        )
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    new_id = str(uuid.uuid4())
+    stamp = now()
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        version = _narration_version(conn, project_id)
+        conn.execute(
+            """INSERT INTO narrations(
+                id,project_id,version_number,content,provider,model,story_ids_json,
+                created_at,approved,parent_narration_id,revision_review_id
+            ) VALUES (?,?,?,?,?,?,?,?,0,?,'')""",
+            (
+                new_id, project_id, version, rewritten_text, actual_provider, actual_model,
+                draft["story_ids_json"], stamp, narration_id,
+            ),
+        )
+        _write_narration_file(project, version, rewritten_text)
+        conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (stamp, project_id))
+        save_manifest(conn, project_id)
+    return {
+        "id": new_id,
+        "version_number": version,
+        "content": rewritten_text,
+        "provider": actual_provider,
+        "model": actual_model,
+        "parent_narration_id": narration_id,
+        "searched_story_count": len(searched),
+        "safe_angle_count": sum(
+            1
+            for story in searched
+            for angle in story.get("spice_angles") or []
+            if angle.get("safe_to_narrate")
+        ),
     }
 
 
