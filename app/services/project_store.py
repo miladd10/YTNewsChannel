@@ -11,6 +11,7 @@ PROJECT_DIRS = [
     "research/raw",
     "research/stories",
     "narration",
+    "narration/plans",
     "narration/reviews",
     "audio/narration",
     "timing",
