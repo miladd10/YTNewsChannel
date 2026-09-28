@@ -131,6 +131,9 @@ def init_db() -> None:
                 current_primary_social_count INTEGER NOT NULL DEFAULT 0,
                 familiarity_needed INTEGER NOT NULL DEFAULT 0,
                 familiarity_anchor TEXT NOT NULL DEFAULT '',
+                search_subject TEXT NOT NULL DEFAULT '',
+                spice_json TEXT NOT NULL DEFAULT '[]',
+                spice_source_ids_json TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -276,6 +279,12 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_media_candidates_selected ON media_candidates(project_id, selected);
             """
         )
+        if not _column_exists(conn, "stories", "search_subject"):
+            conn.execute("ALTER TABLE stories ADD COLUMN search_subject TEXT NOT NULL DEFAULT ''")
+        if not _column_exists(conn, "stories", "spice_json"):
+            conn.execute("ALTER TABLE stories ADD COLUMN spice_json TEXT NOT NULL DEFAULT '[]'")
+        if not _column_exists(conn, "stories", "spice_source_ids_json"):
+            conn.execute("ALTER TABLE stories ADD COLUMN spice_source_ids_json TEXT NOT NULL DEFAULT '[]'")
         if not _column_exists(conn, "stories", "familiarity_needed"):
             conn.execute("ALTER TABLE stories ADD COLUMN familiarity_needed INTEGER NOT NULL DEFAULT 0")
         if not _column_exists(conn, "stories", "familiarity_anchor"):
