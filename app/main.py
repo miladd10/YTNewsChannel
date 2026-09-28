@@ -33,7 +33,15 @@ from .services.cinema_format import (
     format_packet,
     parse_review_gate,
 )
-from .services.research import ai_rank_stories, annotate_source_window, cluster_articles, fetch_google_news, fetch_social_sources
+from .services.research import (
+    ai_enrich_story_spice,
+    ai_rank_stories,
+    annotate_source_window,
+    cluster_articles,
+    fetch_google_news,
+    fetch_social_sources,
+    fetch_story_spice_sources,
+)
 from .services.resolve_plan import build_edit_plan, write_resolve_package
 from .services.secrets import delete_api_key, get_api_key, masked_status, save_ai_settings, set_api_key
 from .version import APP_RELEASE_NAME, APP_VERSION
@@ -678,11 +686,31 @@ def run_research(project_id: str, body: ResearchBody):
     model = body.model or masked_status().get("research_model", "default")
     ai_error = ""
     actual_provider, actual_model = provider, model
+    context_articles: list[dict] = []
+    context_diagnostics: list[dict] = []
+    spice_error = ""
     if body.ai_rank:
         try:
             stories, actual_provider, actual_model = ai_rank_stories(stories, project, provider, model)
+            context_articles, sources_by_story, context_diagnostics = fetch_story_spice_sources(
+                stories,
+                project["date_start"],
+                project["date_end"],
+            )
+            stories, actual_provider, actual_model = ai_enrich_story_spice(
+                stories,
+                sources_by_story,
+                project,
+                provider,
+                model,
+            )
+            articles.extend(context_articles)
+            diagnostics.extend(context_diagnostics)
         except Exception as exc:
-            ai_error = str(exc)
+            if not ai_error:
+                ai_error = str(exc)
+            else:
+                spice_error = str(exc)
 
     run_id = str(uuid.uuid4())
     stamp = now()
@@ -692,6 +720,8 @@ def run_research(project_id: str, body: ResearchBody):
         "ai_rank_error": ai_error,
         "news_article_count": len(news_articles),
         "social_article_count": len(social_articles),
+        "story_context_article_count": len(context_articles),
+        "story_context_error": spice_error,
     }
     with db() as conn:
         project = project_or_404(conn, project_id)
@@ -717,8 +747,9 @@ def run_research(project_id: str, body: ResearchBody):
                     source_platforms_json,source_kinds_json,reddit_only,primary_social_count,
                     news_hook,news_hook_date,verification_status,verification_notes,temporal_gate,verification_gate,
                     in_window_source_count,background_source_count,undated_source_count,independent_source_count,
-                    current_non_reddit_source_count,current_primary_social_count,familiarity_needed,familiarity_anchor,created_at,updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    current_non_reddit_source_count,current_primary_social_count,familiarity_needed,familiarity_anchor,
+                    search_subject,spice_json,spice_source_ids_json,created_at,updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     story["id"], project_id, run_id, story["canonical_title"], story["summary"], story["category"],
                     story["attention"], story["importance"], story["freshness"], story["confidence"],
@@ -735,6 +766,9 @@ def run_research(project_id: str, body: ResearchBody):
                     int(story.get("current_primary_social_count") or 0),
                     1 if story.get("familiarity_needed") else 0,
                     story.get("familiarity_anchor") or "",
+                    story.get("search_subject") or "",
+                    json.dumps(story.get("spice_angles") or [], ensure_ascii=False),
+                    json.dumps(story.get("spice_source_ids") or []),
                     stamp, stamp,
                 ),
             )
@@ -753,7 +787,10 @@ def run_research(project_id: str, body: ResearchBody):
         "current_story_count": sum(1 for story in stories if story.get("freshness") in {"current", "followup"}),
         "verified_story_count": sum(1 for story in stories if story.get("verification_gate") == "pass"),
         "stale_story_count": sum(1 for story in stories if story.get("freshness") == "stale"),
+        "spice_story_count": sum(1 for story in stories if story.get("spice_angles")),
+        "spice_angle_count": sum(len(story.get("spice_angles") or []) for story in stories),
         "ai_rank_error": ai_error,
+        "spice_error": spice_error,
         "provider": actual_provider,
         "model": actual_model,
     }
@@ -775,6 +812,26 @@ def get_stories(project_id: str):
             item["source_kinds"] = json.loads(item.pop("source_kinds_json") or "[]")
             item["reddit_only"] = bool(item.get("reddit_only"))
             item["familiarity_needed"] = bool(item.get("familiarity_needed"))
+            item["spice_angles"] = json.loads(item.pop("spice_json") or "[]")
+            spice_ids = json.loads(item.pop("spice_source_ids_json") or "[]")
+            item["spice_sources"] = []
+            if spice_ids:
+                spice_placeholders = ",".join("?" for _ in spice_ids)
+                spice_rows = conn.execute(
+                    f"""SELECT id,title,url,source,published_at,snippet,raw_json
+                        FROM research_articles WHERE id IN ({spice_placeholders})""", spice_ids
+                ).fetchall()
+                for spice_row in spice_rows:
+                    spice_source = dict(spice_row)
+                    try:
+                        raw = json.loads(spice_source.pop("raw_json") or "{}")
+                    except Exception:
+                        raw = {}
+                    spice_source["source_kind"] = str(raw.get("source_kind") or "story_context")
+                    spice_source["platform"] = str(raw.get("platform") or "")
+                    spice_source["context_kind"] = str(raw.get("context_kind") or "")
+                    spice_source["temporal_role"] = str(raw.get("temporal_role") or "")
+                    item["spice_sources"].append(spice_source)
             if ids:
                 placeholders = ",".join("?" for _ in ids)
                 article_rows = conn.execute(
@@ -863,6 +920,26 @@ def selected_story_packet(conn, project_id: str) -> list[dict]:
         item["source_kinds"] = json.loads(item.pop("source_kinds_json") or "[]")
         item["reddit_only"] = bool(item.get("reddit_only"))
         item["familiarity_needed"] = bool(item.get("familiarity_needed"))
+        item["spice_angles"] = json.loads(item.pop("spice_json") or "[]")
+        spice_ids = json.loads(item.pop("spice_source_ids_json") or "[]")
+        item["spice_sources"] = []
+        if spice_ids:
+            spice_placeholders = ",".join("?" for _ in spice_ids)
+            spice_rows = conn.execute(
+                f"""SELECT title,url,source,published_at,snippet,raw_json
+                    FROM research_articles WHERE id IN ({spice_placeholders})""", spice_ids
+            ).fetchall()
+            for spice_row in spice_rows:
+                spice_source = dict(spice_row)
+                try:
+                    raw = json.loads(spice_source.pop("raw_json") or "{}")
+                except Exception:
+                    raw = {}
+                spice_source["source_kind"] = str(raw.get("source_kind") or "story_context")
+                spice_source["platform"] = str(raw.get("platform") or "")
+                spice_source["context_kind"] = str(raw.get("context_kind") or "")
+                spice_source["temporal_role"] = str(raw.get("temporal_role") or "")
+                item["spice_sources"].append(spice_source)
         articles = []
         if article_ids:
             placeholders = ",".join("?" for _ in article_ids)
