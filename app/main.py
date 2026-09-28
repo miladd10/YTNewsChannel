@@ -33,7 +33,7 @@ from .services.cinema_format import (
     format_packet,
     parse_review_gate,
 )
-from .services.research import ai_rank_stories, cluster_articles, fetch_google_news
+from .services.research import ai_rank_stories, cluster_articles, fetch_google_news, fetch_social_sources
 from .services.resolve_plan import build_edit_plan, write_resolve_package
 from .services.secrets import delete_api_key, get_api_key, masked_status, save_ai_settings, set_api_key
 from .version import APP_RELEASE_NAME, APP_VERSION
@@ -654,10 +654,24 @@ def run_research(project_id: str, body: ResearchBody):
     with db() as conn:
         project = project_or_404(conn, project_id)
 
-    articles, diagnostics = fetch_google_news(project["date_start"], project["date_end"])
+    news_articles, news_diagnostics = fetch_google_news(project["date_start"], project["date_end"])
+    social_articles, social_diagnostics = fetch_social_sources(project["date_start"], project["date_end"])
+    diagnostics = news_diagnostics + social_diagnostics
+
+    articles = []
+    seen_urls: set[str] = set()
+    for article in [*news_articles, *social_articles]:
+        url = str(article.get("url") or "").strip()
+        dedupe_key = url.casefold()
+        if dedupe_key and dedupe_key in seen_urls:
+            continue
+        if dedupe_key:
+            seen_urls.add(dedupe_key)
+        articles.append(article)
+
     if not articles:
         errors = "; ".join(x.get("error", "") for x in diagnostics if not x.get("ok"))
-        raise HTTPException(502, f"Research returned no articles. {errors}".strip())
+        raise HTTPException(502, f"Research returned no articles or public social posts. {errors}".strip())
 
     stories = cluster_articles(articles)
     provider = body.provider or masked_status().get("research_provider", "codex_local")
@@ -672,7 +686,13 @@ def run_research(project_id: str, body: ResearchBody):
 
     run_id = str(uuid.uuid4())
     stamp = now()
-    query_config = {"diagnostics": diagnostics, "ai_rank_requested": body.ai_rank, "ai_rank_error": ai_error}
+    query_config = {
+        "diagnostics": diagnostics,
+        "ai_rank_requested": body.ai_rank,
+        "ai_rank_error": ai_error,
+        "news_article_count": len(news_articles),
+        "social_article_count": len(social_articles),
+    }
     with db() as conn:
         project = project_or_404(conn, project_id)
         conn.execute(
@@ -693,13 +713,17 @@ def run_research(project_id: str, body: ResearchBody):
             conn.execute(
                 """INSERT INTO stories(
                     id,project_id,run_id,canonical_title,summary,category,attention,importance,freshness,
-                    confidence,visual_potential,uniqueness,rationale,score,decision,article_ids_json,source_count,created_at,updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    confidence,visual_potential,uniqueness,rationale,score,decision,section_fit,article_ids_json,source_count,
+                    source_platforms_json,source_kinds_json,reddit_only,primary_social_count,created_at,updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     story["id"], project_id, run_id, story["canonical_title"], story["summary"], story["category"],
                     story["attention"], story["importance"], story["freshness"], story["confidence"],
                     story["visual_potential"], story["uniqueness"], story["rationale"], story["score"], story["decision"],
-                    json.dumps(story["article_ids"]), story["source_count"], stamp, stamp,
+                    story.get("section_fit") or "medium", json.dumps(story["article_ids"]), story["source_count"],
+                    json.dumps(story.get("source_platforms") or []), json.dumps(story.get("source_kinds") or []),
+                    1 if story.get("reddit_only") else 0, int(story.get("primary_social_count") or 0),
+                    stamp, stamp,
                 ),
             )
         conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (stamp, project_id))
@@ -725,12 +749,27 @@ def get_stories(project_id: str):
         for row in rows:
             item = dict(row)
             ids = json.loads(item.pop("article_ids_json") or "[]")
+            item["source_platforms"] = json.loads(item.pop("source_platforms_json") or "[]")
+            item["source_kinds"] = json.loads(item.pop("source_kinds_json") or "[]")
+            item["reddit_only"] = bool(item.get("reddit_only"))
             if ids:
                 placeholders = ",".join("?" for _ in ids)
                 article_rows = conn.execute(
-                    f"SELECT id,title,url,source,published_at,category FROM research_articles WHERE id IN ({placeholders}) ORDER BY published_at DESC", ids
+                    f"""SELECT id,title,url,source,published_at,category,snippet,query_key,raw_json
+                        FROM research_articles WHERE id IN ({placeholders}) ORDER BY published_at DESC""", ids
                 ).fetchall()
-                item["articles"] = [dict(x) for x in article_rows]
+                article_items = []
+                for article_row in article_rows:
+                    article = dict(article_row)
+                    try:
+                        raw = json.loads(article.pop("raw_json") or "{}")
+                    except Exception:
+                        raw = {}
+                    article["source_kind"] = str(raw.get("source_kind") or "news")
+                    article["platform"] = str(raw.get("platform") or "")
+                    article["trust_role"] = str(raw.get("trust_role") or "")
+                    article_items.append(article)
+                item["articles"] = article_items
             else:
                 item["articles"] = []
             result.append(item)
@@ -771,12 +810,26 @@ def selected_story_packet(conn, project_id: str) -> list[dict]:
     for row in conn.execute("SELECT * FROM stories WHERE run_id=? AND decision='include'", (run_id,)).fetchall():
         item = dict(row)
         article_ids = json.loads(item.pop("article_ids_json") or "[]")
+        item["source_platforms"] = json.loads(item.pop("source_platforms_json") or "[]")
+        item["source_kinds"] = json.loads(item.pop("source_kinds_json") or "[]")
+        item["reddit_only"] = bool(item.get("reddit_only"))
         articles = []
         if article_ids:
             placeholders = ",".join("?" for _ in article_ids)
-            articles = [dict(x) for x in conn.execute(
-                f"SELECT title,url,source,published_at,snippet FROM research_articles WHERE id IN ({placeholders})", article_ids
-            ).fetchall()]
+            article_rows = conn.execute(
+                f"""SELECT title,url,source,published_at,snippet,category,query_key,raw_json
+                    FROM research_articles WHERE id IN ({placeholders})""", article_ids
+            ).fetchall()
+            for article_row in article_rows:
+                article = dict(article_row)
+                try:
+                    raw = json.loads(article.pop("raw_json") or "{}")
+                except Exception:
+                    raw = {}
+                article["source_kind"] = str(raw.get("source_kind") or "news")
+                article["platform"] = str(raw.get("platform") or "")
+                article["trust_role"] = str(raw.get("trust_role") or "")
+                articles.append(article)
         item["articles"] = articles
         stories.append(item)
     stories.sort(key=lambda item: (
