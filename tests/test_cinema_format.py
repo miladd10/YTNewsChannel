@@ -503,3 +503,18 @@ def test_review_gate_still_blocks_needs_work_and_bold_major_issue():
     issue = "## ISSUE 1 — x\n- **Severity:** major (fix first)\n- Problem: y"
     gate = parse_review_gate(_review("- Status: PASS", "- Recommendation: PASS", issue))
     assert gate["major_count"] == 1 and gate["gate_status"] == "revision_required"
+
+
+def test_one_attribution_policy_is_shared_by_all_narration_prompts():
+    from app.services import cinema_format as cf
+    for prompt in (cf.WRITER_SYSTEM, cf.REVIEWER_SYSTEM, cf.REVISION_SYSTEM, cf.ENRICHMENT_REWRITE_SYSTEM, cf.FACT_CHECK_SYSTEM):
+        assert cf.ATTRIBUTION_POLICY in prompt
+    assert "Do not mention sources aloud unless" not in cf.WRITER_SYSTEM
+
+
+def test_spoken_outlet_phrasing_counts_as_attribution():
+    from app.services.claim_ledger import _attribution_present
+    claim = {"attribution_required": True}
+    assert _attribution_present("ورایتی می‌گه حدود ۴۰ میلیون فروخته", claim, True)
+    assert _attribution_present("حدود ۴۰ میلیون فروخته", claim, True)
+    assert not _attribution_present("۴۰ میلیون فروخته", claim, True)

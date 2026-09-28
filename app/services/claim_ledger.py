@@ -439,7 +439,7 @@ def _attribution_present(sentence: str, claim: dict, extractor_value: bool) -> b
     if not extractor_value:
         return False
     return bool(re.search(
-        r"(طبق|بر\s+اساس|گزارش|به\s+گفته|اعلام|according|reported|reports?|says?|"
+        r"(طبق|بر\s+اساس|گزارش|به\s+گفته|گفته|می[\u200c ]?گ(?:ه|ن|ید)|اعلام|according|reported|reports?|says?|"
         r"estimat(?:e|ed)|حدود|تقریباً|برآورد)",
         _clean(sentence).casefold(), flags=re.IGNORECASE,
     ))

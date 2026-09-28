@@ -590,6 +590,16 @@ Rules:
 """
 
 
+ATTRIBUTION_POLICY = """
+ATTRIBUTION POLICY (single shared rule for writer, reviser, fact checker and reviewer):
+- Speak a source or estimate marker ONLY for ledger claims with attribution_required=true. Never add source names to other facts.
+- reported_estimate / approximate / projection: a light estimate marker in the same sentence is enough ("حدود"، "تقریباً"، "برآورد"، "طبق برآوردها"). Naming the outlet is optional.
+- conflicting figures or a claim only one outlet reports (attribution_label set): name the outlet once, in natural spoken form ("ورایتی می‌گه..."، "به گزارش ددلاین..."). Vary the phrasing; never open consecutive sentences with "طبق گزارش".
+- Name the same outlet at most once per story. Later sentences of that story use only a light marker ("حدود"، "این برآورد...") where the ledger still requires one.
+- Reviewers must NOT flag required attribution as a style problem. Flag only attribution added where the ledger does not require it, the same outlet repeated within a story, or a required marker that is missing.
+"""
+
+
 FACT_CHECK_SYSTEM = """You are the final factual freshness auditor for a weekly cinema-news narration.
 
 You receive:
@@ -636,7 +646,7 @@ STRICT RULES:
 - Do not silently delete the STORY marker for a corrected claim.
 - Do not add a fact simply because it would make the narration better.
 - If no factual correction is needed, corrected_narration must exactly preserve the supplied draft.
-"""
+""" + ATTRIBUTION_POLICY
 
 
 WRITER_SYSTEM = """You are the cinema weekly-news narration writer inside YT News Studio.
@@ -653,7 +663,7 @@ Hard factual rules:
 - The approved article packet gives context and source material, but you are NOT allowed to create a factual statement directly from an article if that fact is absent from the verified claim ledger.
 - Never use a ledger claim marked blocked. If a useful fact is missing from the ledger, omit it rather than filling the gap from memory or inference.
 - Keep the exact ledger scope for numbers, rankings, dates, budgets, revenue/gross, deal values, release type and title identity. Do not simplify away market, period, metric, valuation definition, estimate status or date range.
-- If attribution_required=true, the spoken wording must explicitly preserve attribution/estimate/conflict framing.
+- If attribution_required=true, follow the ATTRIBUTION POLICY below.
 - Never import a fact, number, date, quote, opinion, event, cast detail, score, rumor, or release date from the style corpus.
 - APPROVED CURRENT-WEEK NEWS has already passed freshness and verification gates. Do not revive skipped/Maybe stories from memory or the style corpus.
 - Every story must be about its stored news_hook. Older background facts may explain context, but do not present them as this week's development.
@@ -706,9 +716,9 @@ Writing rules:
 - Vary sentence length and transitions naturally. The reference voice often uses connected spoken chains rather than a sequence of perfectly polished standalone sentences; preserve clarity without making every sentence sound copy-edited.
 - Prefer content-driven transitions such as "حالا که...", "از این یکی بگذریم...", "خب فیلم بسه..." or another natural bridge when appropriate, rather than repeatedly announcing "خبر بعدی".
 - Keep section headings only as quiet organization for the app; the spoken prose underneath should flow rather than announcing the template.
-- Do not mention sources aloud unless the source itself is part of the story.
+- Mention sources aloud only as the ATTRIBUTION POLICY below allows, or when the source itself is part of the story.
 - Return only the complete narration in Markdown.
-"""
+""" + ATTRIBUTION_POLICY
 
 
 REVIEWER_SYSTEM = """You are the independent narration reviewer inside YT News Studio.
@@ -813,7 +823,7 @@ If there are no issues, write: None.
 - Major Issues: N
 - Minor Issues: N
 - Recommendation: PASS | REVISION_REQUIRED | POLISH_OPTIONAL
-"""
+""" + ATTRIBUTION_POLICY
 
 
 ENRICHMENT_REWRITE_SYSTEM = """You are the enrichment rewrite writer inside YT News Studio.
@@ -849,7 +859,7 @@ Rules:
 - Do not use empty adjective payoffs such as "ترکیب سنگینی", "کنجکاوی‌برانگیز", or "مهم برای مخاطب" unless a concrete supported detail immediately earns that description.
 - Keep Persian conversational, compact and natural. Follow recurring Filmbaz craft without copying reference wording.
 - Return only the complete rewritten narration in Markdown.
-"""
+""" + ATTRIBUTION_POLICY
 
 REVISION_SYSTEM = """You are the narration revision writer inside YT News Studio.
 Apply the supplied reviewer feedback to the existing narration.
@@ -872,7 +882,7 @@ Rules:
 - Remove fake/empty hype rather than replacing it with different hype.
 - Do not broadly restart or re-outline the episode unless a blocking review issue explicitly requires it.
 - Return the complete revised narration only in Markdown.
-"""
+""" + ATTRIBUTION_POLICY
 
 
 def _strip_markdown_emphasis(text: str) -> str:
