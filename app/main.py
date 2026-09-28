@@ -2736,8 +2736,82 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
     }
 
 
+def _narration_failed_gates(draft: dict, review: dict | None) -> list[str]:
+    failed = []
+    if not review:
+        failed.append("Run Reviewer before approving this narration.")
+    elif review.get("gate_status") == "revision_required":
+        failed.append("Reviewer still requires revision. Revise this draft and review the new version first.")
+    if str(draft.get("fact_check_status") or "not_run") in {"not_run", "needs_human_check"}:
+        failed.append("Automatic fact check has not passed.")
+    if (str(draft.get("claim_audit_status") or "not_run") != "pass"
+            or int(draft.get("claim_blocked_count") or 0) > 0 or int(draft.get("claim_count") or 0) <= 0):
+        failed.append("Claim Ledger audit has not passed. Every factual narration claim must map to verified evidence.")
+    return failed
+
+
+class NarrationApproveBody(BaseModel):
+    override: bool = False
+    reason: str = ""
+
+
+class NarrationManualEditBody(BaseModel):
+    content: str = Field(min_length=1)
+    note: str = ""
+
+
+@app.post("/api/projects/{project_id}/narrations/{narration_id}/manual-edit")
+def manual_edit_narration(project_id: str, narration_id: str, body: NarrationManualEditBody):
+    """Save an editor's hand edit as a new draft version.
+
+    The parent's fact-check result is inherited; the claim audit and review
+    are reset so the edited text must be audited/reviewed (or explicitly
+    overridden) before approval.
+    """
+    content = body.content.replace("\r\n", "\n").strip() + "\n"
+    with db() as conn:
+        project = project_or_404(conn, project_id)
+        parent = conn.execute(
+            "SELECT * FROM narrations WHERE id=? AND project_id=?", (narration_id, project_id)
+        ).fetchone()
+        if not parent:
+            raise HTTPException(404, "Narration draft not found")
+        parent = dict(parent)
+        if content.strip() == str(parent.get("content") or "").strip():
+            raise HTTPException(400, "No changes to save.")
+        version = _narration_version(conn, project_id)
+        new_id = str(uuid.uuid4())
+        inherited = str(parent.get("fact_check_status") or "not_run")
+        fact_json = {
+            "status": inherited,
+            "issue_count": 0,
+            "issues": [],
+            "inherited_from_version": parent.get("version_number"),
+            "note": "Hand-edited copy; fact-check result inherited from the parent draft. "
+                    "Run Claim Audit to check the edited sentences against the evidence ledger.",
+            "editor_note": body.note.strip(),
+        }
+        conn.execute(
+            """INSERT INTO narrations(
+                id,project_id,version_number,content,provider,model,story_ids_json,
+                created_at,approved,parent_narration_id,revision_review_id,
+                fact_check_status,fact_check_issue_count,fact_check_json,claim_audit_status
+            ) VALUES (?,?,?,?,?,?,?,?,0,?,'',?,0,?,'not_run')""",
+            (
+                new_id, project_id, version, content, "manual", "editor",
+                parent.get("story_ids_json") or "[]", now(), narration_id,
+                inherited, json.dumps(fact_json, ensure_ascii=False),
+            ),
+        )
+        _write_narration_file(project, version, content)
+        conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
+        save_manifest(conn, project_id)
+    return {"ok": True, "narration_id": new_id, "version_number": version}
+
+
 @app.post("/api/projects/{project_id}/narrations/{narration_id}/approve")
-def approve_narration(project_id: str, narration_id: str):
+def approve_narration(project_id: str, narration_id: str, body: NarrationApproveBody | None = None):
+    body = body or NarrationApproveBody()
     with db() as conn:
         project_or_404(conn, project_id)
         draft = conn.execute(
@@ -2750,27 +2824,20 @@ def approve_narration(project_id: str, narration_id: str):
             "SELECT * FROM narration_reviews WHERE narration_id=? ORDER BY review_number DESC LIMIT 1",
             (narration_id,),
         ).fetchone()
-        if not review:
-            raise HTTPException(400, "Run Reviewer before approving this narration.")
-        if review["gate_status"] == "revision_required":
-            raise HTTPException(400, "Reviewer still requires revision. Revise this draft and review the new version first.")
-        fact_status = str(draft["fact_check_status"] or "not_run")
-        if fact_status in {"not_run", "needs_human_check"}:
-            raise HTTPException(
-                400,
-                "Automatic fact check has not passed. Generate/revise this draft again or resolve the fact-check warning before approval.",
-            )
-        claim_status = str(draft["claim_audit_status"] or "not_run")
-        if claim_status != "pass" or int(draft["claim_blocked_count"] or 0) > 0 or int(draft["claim_count"] or 0) <= 0:
-            raise HTTPException(
-                400,
-                "Claim Ledger audit has not passed. Every factual narration claim must map to verified evidence before approval.",
-            )
+        failed_gates = _narration_failed_gates(dict(draft), dict(review) if review else None)
+        note = ""
+        if failed_gates:
+            if not body.override:
+                raise HTTPException(400, failed_gates[0])
+            reason = body.reason.strip()
+            if len(reason) < 10:
+                raise HTTPException(400, "Approving over failed checks needs a short reason (at least 10 characters).")
+            note = f"Editor override ({now()}): {reason} | Failed checks: " + " / ".join(failed_gates)
         conn.execute("UPDATE narrations SET approved=0 WHERE project_id=?", (project_id,))
-        conn.execute("UPDATE narrations SET approved=1 WHERE id=?", (narration_id,))
+        conn.execute("UPDATE narrations SET approved=1, approval_note=? WHERE id=?", (note, narration_id))
         conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
         save_manifest(conn, project_id)
-    return {"ok": True, "approved_narration_id": narration_id}
+    return {"ok": True, "approved_narration_id": narration_id, "override": bool(note), "approval_note": note}
 
 
 class ElevenLabsKeyBody(BaseModel):

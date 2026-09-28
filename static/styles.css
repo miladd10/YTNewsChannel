@@ -266,3 +266,4 @@
 @media(max-width:760px){.claim-audit-head{flex-direction:column}.claim-audit-head .btn{align-self:flex-start}}
 .pronunciation-card{padding:16px 18px;margin:14px 0}.pronunciation-card textarea{width:100%;margin-top:10px;font:15px/1.8 Vazirmatn,Tahoma,"Segoe UI",sans-serif}.pronunciation-card code{background:#0f141c;padding:1px 5px;border-radius:5px}
 .warn-text{color:var(--amber);font-weight:650}
+.draft-head-row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}textarea.narration-editor{resize:vertical;min-height:460px}
