@@ -245,7 +245,7 @@ def _alignment_visual_beat_offsets(segment: dict, usable_duration: float | None 
     if not words:
         points: list[float] = []
         cursor = TARGET_NARRATION_BEAT
-        while cursor < duration - 1.0:
+        while cursor < duration - MIN_NARRATION_BEAT:
             points.append(round(cursor, 6))
             cursor += TARGET_NARRATION_BEAT
         return points
