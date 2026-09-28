@@ -175,3 +175,17 @@ The local SQLite index lives in `data/ytnews.db` and is intentionally ignored by
 - Step 2 now shows every cinema section, including zero-result sections, with a concise description of what belongs there and the expected story-count range. Missing coverage is visible instead of silently disappearing.
 - Social platform matching uses exact hostname boundaries, preventing false matches such as netflix.com being mistaken for x.com.
 - Public social discovery does not imply authenticated/private-feed access; logged-in-only, private, deleted, or non-indexed posts remain unavailable without a platform-specific authenticated integration.
+
+
+### v0.3.31 Verified current-window research
+- The cinema section blueprint now exposes a versioned Section Intelligence schema. Every researchable section carries: mission, include/exclude rules, evidence expectations, preferred source types, social-source policy, freshness policy, verification policy, and section-specific freshness examples.
+- Freshness is tied to the PROJECT date window, not the computer clock. The window is date_start inclusive and date_end exclusive.
+- Search intentionally widens the front edge by one day so providers with exclusive `after:` semantics do not miss the first selected date; deterministic filtering then labels every source as current, background, out_of_window, or undated.
+- Every candidate story now stores a semantic `news_hook`: the specific new development that happened during the selected window. A recently published recap of an older event is stale unless it contains an actual new hook in the selected week.
+- Older sources may be retained as background/context, but background and undated sources never count as freshness evidence.
+- Story verification metadata now includes verification_status, verification_notes, temporal_gate, verification_gate, in-window/background/undated source counts, independent current-source count, current non-Reddit source count, and current primary-social-post candidate count.
+- Verification rules are conservative: 2+ independent current non-Reddit sources can be verified; one current non-Reddit source is treated as reported unless stronger primary evidence is established; public X/TikTok discoveries do not automatically prove the account is official; Reddit-only external factual claims remain needs_verification.
+- Step 2 shows the current-window hook, hook date when supported, freshness status, verification status, current/background source counts, and a per-source temporal badge/date.
+- Include is disabled and the API rejects the action unless the story has: a current/follow-up status, a specific current-window news hook, at least one in-window source, a passing temporal gate, and a passing verification gate.
+- The narration writer receives only stories that pass those gates. The narration reviewer now has a separate Freshness Audit and must catch any draft that turns older background context into this week's development.
+- Existing research runs from older versions should be rerun once after upgrading; their old story rows intentionally do not inherit trust they never earned under the new freshness/verification schema.
