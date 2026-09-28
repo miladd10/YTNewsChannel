@@ -238,3 +238,15 @@ def test_high_risk_filter_matches_whole_words_only():
         assert HIGH_RISK_RE.search(text), text
     for text in safe:
         assert not HIGH_RISK_RE.search(text), text
+
+
+def test_spoken_numbers_may_be_rounded_to_spoken_precision():
+    from app.services.claim_ledger import _same_number
+    ledger = {"numeric_value": 42.7, "unit": "million"}
+    assert _same_number({"numeric_value": 43, "unit": "million"}, ledger)
+    assert _same_number({"numeric_value": 42.7, "unit": "million"}, ledger)
+    assert not _same_number({"numeric_value": 45, "unit": "million"}, ledger)
+    assert not _same_number({"numeric_value": 41, "unit": "million"}, ledger)
+    assert _same_number({"numeric_value": 1.2, "unit": "billion"}, {"numeric_value": 1234, "unit": "million"})
+    assert _same_number({"numeric_value": 1.3, "unit": "billion"}, {"numeric_value": 1260, "unit": "million"})
+    assert not _same_number({"numeric_value": 2, "unit": "billion"}, {"numeric_value": 1234, "unit": "million"})

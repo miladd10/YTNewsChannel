@@ -162,12 +162,35 @@ def _scaled_number(value, unit: str):
     return number * scale
 
 
+def _decimal_places(value: float) -> int:
+    text = f"{value:.6f}".rstrip("0").rstrip(".")
+    return len(text.split(".")[1]) if "." in text else 0
+
+
 def _same_number(a: dict, b: dict) -> bool:
+    """a = spoken claim, b = ledger claim.
+
+    Exact matches pass. A spoken figure may also be the ledger figure rounded
+    (half-up) or truncated to the precision the narrator actually used, in the
+    narrator's own unit: 42.7 million may be spoken as 43 million, 1,234
+    million as 1.2 billion. A different figure (45 for 42.7) still fails.
+    """
     av = _scaled_number(a.get("numeric_value"), a.get("unit") or "")
     bv = _scaled_number(b.get("numeric_value"), b.get("unit") or "")
     if av is None or bv is None:
         return av is None and bv is None
-    return abs(av - bv) <= max(1e-6, abs(bv) * 0.0005)
+    if abs(av - bv) <= max(1e-6, abs(bv) * 0.0005):
+        return True
+    spoken = _float(a.get("numeric_value"))
+    scale = {"thousand": 1e3, "million": 1e6, "billion": 1e9}.get(_normalize_unit(a.get("unit") or ""), 1.0)
+    if spoken is None or not scale:
+        return False
+    ledger_in_spoken_unit = bv / scale
+    places = _decimal_places(spoken)
+    factor = 10 ** places
+    rounded = math.floor(abs(ledger_in_spoken_unit) * factor + 0.5) / factor
+    truncated = math.floor(abs(ledger_in_spoken_unit) * factor) / factor
+    return any(abs(abs(spoken) - candidate) < 1e-9 for candidate in (rounded, truncated))
 
 
 def _number_supported(spoken: dict, ledger: dict) -> bool:
