@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.36"
+APP_VERSION = "0.3.37"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Fun Facts + Semantic B-roll"
+APP_RELEASE_NAME = "Automatic Fresh-Fact Audit"
