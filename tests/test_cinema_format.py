@@ -7,6 +7,7 @@ from app.services.cinema_format import (
     parse_review_gate,
     research_query_groups,
 )
+from app.services.research import _social_platform_for_url, _social_queries
 
 
 def test_cinema_format_contains_recurring_weekly_sections():
@@ -119,3 +120,37 @@ None.
 - Recommendation: PASS
 """
     assert parse_review_gate(review)["gate_status"] == "pass"
+
+
+
+def test_every_research_section_has_a_semantic_contract():
+    for section in format_packet():
+        if not section["research"]:
+            continue
+        assert section["mission"]
+        assert section["include"]
+        assert section["exclude"]
+        assert section["evidence"]
+        assert section["preferred_sources"]
+
+
+def test_celebrity_and_viral_sections_enable_social_discovery():
+    by_key = {item["key"]: item for item in format_packet()}
+    assert set(by_key["celebrities"]["social_sources"]) == {"x", "tiktok", "reddit"}
+    assert set(by_key["viral_images"]["social_sources"]) == {"x", "tiktok", "reddit"}
+    assert "Reddit is discovery/reaction" in by_key["celebrities"]["social_policy"]
+
+
+def test_social_queries_are_section_and_platform_specific():
+    rows = _social_queries("2026-09-21", "2026-09-28")
+    assert any(section == "celebrities" and platform == "x" and "site:x.com" in query for section, platform, query in rows)
+    assert any(section == "celebrities" and platform == "tiktok" and "site:tiktok.com" in query for section, platform, query in rows)
+    assert any(section == "celebrities" and platform == "reddit" and "site:reddit.com" in query for section, platform, query in rows)
+    assert not any(section == "box_office" and platform == "reddit" for section, platform, _ in rows)
+
+
+def test_social_platform_detection_does_not_confuse_news_domains():
+    assert _social_platform_for_url("https://x.com/example/status/1") == "x"
+    assert _social_platform_for_url("https://www.tiktok.com/@example/video/1") == "tiktok"
+    assert _social_platform_for_url("https://www.reddit.com/r/movies/comments/abc") == "reddit"
+    assert _social_platform_for_url("https://www.netflix.com/title/123") == ""
