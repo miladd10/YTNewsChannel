@@ -33,7 +33,7 @@ HARD RULES:
 - BUDGET: distinguish production budget from marketing/total spend. Public budgets are usually reported estimates unless authoritative evidence explicitly confirms them.
 - REVENUE: distinguish theatrical gross, company revenue, streaming/licensing revenue, operating revenue, net income/profit and other metrics.
 - DEAL VALUE: distinguish equity value, enterprise value, transaction value and other valuation conventions.
-- RELEASE: distinguish limited/special/70mm/wide theatrical, streaming, PVOD/VOD and announcement vs actual availability.
+- RELEASE: distinguish limited/special-format/event/wide theatrical, streaming, PVOD/VOD and announcement vs actual availability.
 - TITLE IDENTITY: distinguish new film/sequel/prequel/remake/reboot/re-release/extended cut/new version when supported.
 - Conflicting figures/definitions require attribution; never flatten them into one unqualified fact.
 - Prefer fresh preferred evidence for volatile current values. Older values may stay only as explicitly historical claims.
@@ -54,7 +54,7 @@ HARD RULES:
 - Split multiple atomic claims in one sentence.
 - ledger_claim_ids may reference only supplied ledger IDs for the same story.
 - Match meaning, not just the same number.
-- "opened to $108.3M worldwide" does not match "has reached $108.3M worldwide".
+- "opened to <amount> <market>" does not match "has reached <amount> <market>" (opening period vs cumulative total).
 - weekend rank does not match weekly rank; domestic does not match worldwide.
 - limited theatrical does not match wide theatrical.
 - production budget does not match marketing spend.

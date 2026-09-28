@@ -74,7 +74,8 @@ SPOKEN_SOURCE_TERMS = (
 CORPORATE_STORY_TERMS = (
     "merger", "acquisition", "acquire", "deal", "lawsuit", "sues", "settle",
     "settlement", "antitrust", "attorney general", "bid", "shareholder",
-    "investor", "regulator", "regulatory", "states over", "close merger",
+    "investor", "regulator", "regulatory", "layoff", "restructuring", "earnings",
+    "ceo", "executive", "bankruptcy", "spin-off", "spinoff",
 )
 
 CORPORATE_BROLL_TERMS = (
@@ -268,8 +269,8 @@ def _subject_matches(value: str, target_text: str) -> bool:
     target_words = set(_normalized_words(target_text))
     if len(words) == 1:
         return words[0] in target_words
-    # Require all meaningful words for short title/entity names such as
-    # "Ray Gunn", "Resident Evil" and "Avengers Doomsday".
+    # Require all meaningful words for short (2-4 word) title/entity names so a
+    # partial word overlap cannot match an unrelated title.
     required = words[:4]
     return all(word in target_words for word in required)
 
@@ -282,7 +283,7 @@ def _story_subjects(story: dict) -> list[str]:
 
     # Prefer a quoted phrase that behaves like an actual title. Entertainment
     # headlines often open with a quoted slogan and mention the movie title
-    # later, e.g. “Feed upon the flesh...” ... “Werwulf” trailer.
+    # later, e.g. “<tagline>!” ... “<Title>” trailer.
     quoted_matches: list[tuple[int, str, str]] = []
     quote_patterns = (
         r"“([^”]{2,80})”",
@@ -320,7 +321,7 @@ def _story_subjects(story: dict) -> list[str]:
     )[0].strip()
 
     compact = _compact_subject(normalized)
-    # Strip generic leading/trailing news words so "New Resident Evil film"
+    # Strip generic leading/trailing news words so "New <Title> film"
     # becomes a useful subject rather than matching unrelated videos.
     words = compact.split()
     while words and words[0].lower().strip("’'") in {"new", "the", "a", "an"}:
@@ -410,7 +411,7 @@ def _story_visual_subjects(story: dict) -> list[str]:
             continue
         # Quoted taglines/dialogue are common in entertainment headlines. Only
         # promote a secondary quote when it looks title-like; exclamatory or
-        # sentence-like slogans such as “Feed upon the flesh of mankind!” are
+        # sentence-like slogans (ending in !/? or longer than six words) are
         # narration text, not a separate visual subject.
         quote_words = re.findall(r"[A-Za-z0-9]+", quoted)
         if re.search(r"[!?][”’\"']?$", quoted.strip()) or len(quote_words) > 6:
@@ -693,7 +694,7 @@ def _matches_actual_story_subject(item: dict, story: dict) -> bool:
         # "current footage". If an official video adds a colon subtitle whose
         # meaningful words are absent from the actual canonical headline, treat
         # it as archive/franchise material so the contextual fallback can label
-        # it honestly instead. Example: Rings of Power footage for a new LOTR movie.
+        # it honestly instead (e.g. a spin-off series clip for a new film in the same franchise).
         primary_subjects = _story_subjects(story)
         primary_subject = primary_subjects[0] if primary_subjects else ""
         lower_title = title.lower()
@@ -1041,7 +1042,8 @@ def _dedupe_quality_first_results(items: list[dict], story: dict, limit: int) ->
 
 def _quoted_subjects(text: str) -> list[str]:
     # Match real quote pairs. Treating every curly apostrophe as both an
-    # opener and closer breaks headlines such as "Brad Bird’s ‘Ray Gunn’".
+    # opener and closer breaks headlines with a possessive before a quoted
+    # title ("<Name>’s ‘<Title>’").
     patterns = (
         r"“([^”]{2,80})”",
         r"‘([^’]{2,80})’",
@@ -2220,8 +2222,8 @@ def search_story_media(
     }
 
     # Search every distinct narration/title beat independently. This is what
-    # lets a comparison story retrieve Avengers footage AND Resident Evil
-    # footage instead of letting the first title consume all candidate slots.
+    # lets a comparison story retrieve footage for EACH compared title
+    # instead of letting the first title consume all candidate slots.
     # If the supplied reference page already contains usable HD footage for a
     # beat, treat that as authoritative and skip the expensive broad search.
     for beat in beats:

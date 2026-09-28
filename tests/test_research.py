@@ -26,7 +26,7 @@ def test_fact_check_queries_treat_box_office_as_volatile():
     }
     queries = _fact_check_queries(story, "2026-09-21", "2026-09-28")
     assert any("latest box office worldwide total" in query for query in queries)
-    assert any("second weekend cumulative total" in query for query in queries)
+    assert any("latest weekend cumulative running total" in query for query in queries)
     assert all("after:2026-09-20" in query for query in queries)
     assert all("before:2026-09-28" in query for query in queries)
 

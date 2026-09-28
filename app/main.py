@@ -1566,8 +1566,11 @@ def _deterministic_fact_red_flags(
             flags=re.IGNORECASE,
         ))
         evidence_rerelease = bool(re.search(
-            r"(re-?release|returns?\s+to\s+theat(?:er|re)s|back\s+in\s+theat(?:er|re)s|"
-            r"same\s+(?:2019\s+)?movie|new\s+version\s+of\s+the\s+2019|extended\s+cut)",
+            r"(re-?release[sd]?|re-?issue[sd]?|returns?\s+to\s+theat(?:er|re)s|back\s+in\s+theat(?:er|re)s|"
+            r"anniversary\s+(?:re-?release|screenings?|edition)|remaster(?:ed)?|"
+            r"same\s+(?:(?:19|20)\d{2}\s+)?(?:movie|film)|"
+            r"new\s+version\s+of\s+the\s+(?:(?:19|20)\d{2}\s+)?(?:original|movie|film)|"
+            r"extended\s+(?:cut|edition)|director'?s\s+cut)",
             evidence,
             flags=re.IGNORECASE,
         ))
@@ -1611,7 +1614,7 @@ def _deterministic_fact_red_flags(
                 ),
                 "correction_basis": (
                     "Rewrite the ranking with the exact supported scope and date window, "
-                    "for example 'the Sep. 25–27 domestic weekend chart'."
+                    "in the form '<market> <daily|weekend|weekly> chart for <exact date range from the evidence>'."
                 ),
                 "rule": "unqualified_box_office_rank",
             })

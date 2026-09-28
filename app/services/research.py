@@ -648,7 +648,7 @@ Rules:
 - verification_notes briefly explain which evidence verifies the hook and any remaining limitation.
 - search_subject is a concise searchable subject for the story (movie title, person, company/deal, series title, etc.), not the whole headline. Use only names/titles supported by the supplied evidence.
 - familiarity_needed is true|false. Set true only when a central director/actor/creator/company is important to the story but a casual movie audience may not immediately recognize the name.
-- familiarity_anchor is ONE very short recognition cue supported by supplied current/background evidence, ideally a single famous work or clear identity (for example: "director of The Incredibles"). Leave it empty for household names, obvious companies/platforms, or when the supplied evidence does not support a safe anchor.
+- familiarity_anchor is ONE very short recognition cue supported by supplied current/background evidence, ideally a single famous work or clear identity (pattern: "<role> of <best-known work named in the evidence>"). Leave it empty for household names, obvious companies/platforms, or when the supplied evidence does not support a safe anchor.
 - Never invent a filmography credit or company association to fill familiarity_anchor.
 - A newly published recap of an old event is STALE unless it contains a genuinely new development inside the selected window.
 - Older/background sources may explain context but do NOT make the story current.
@@ -834,7 +834,7 @@ def _fact_check_subjects(story: dict) -> list[str]:
     Search subjects generated during research are normally best, but older
     projects can contain a full headline here. Pull quoted film/show names out
     as additional variants so exact milestone/identity searches do not quote an
-    entire sentence such as "Coyote vs. Acme approaches $100M ...".
+    entire headline sentence instead of the title itself.
     """
     values: list[str] = []
     primary = _story_context_subject(story)
@@ -852,8 +852,8 @@ def _fact_check_subjects(story: dict) -> list[str]:
             if value and value.casefold() not in {x.casefold() for x in values}:
                 values.append(value)
 
-    # Safe headline fallback for unquoted movie names such as
-    # "Coyote vs. Acme crosses..." or "Resident Evil breaks...".
+    # Safe headline fallback for unquoted titles: keep the text before the
+    # first news verb ("<Title> crosses ...", "<Title> breaks ...").
     cleaned = re.sub(r"\s+-\s+[^-]{2,80}$", "", title).strip()
     split = re.split(
         r"(?i)\b(?:crosses?|passed?|passes|nears?|approaches?|breaks?|sets?|opens?|"
@@ -872,10 +872,15 @@ def _fact_check_subjects(story: dict) -> list[str]:
 FACT_CHECK_PREFERRED_DOMAINS = (
     "apnews.com", "reuters.com", "variety.com", "deadline.com",
     "hollywoodreporter.com", "thewrap.com", "boxofficemojo.com",
-    "the-numbers.com", "netflix.com", "tudum.com", "sonypictures.com",
-    "sonypictures.ca", "nbcuniversal.com", "warnerbros.com",
-    "paramount.com", "disney.com", "marvel.com", "filmlinc.org",
-    "ft.com", "wsj.com", "washingtonpost.com", "nytimes.com",
+    "the-numbers.com", "screendaily.com", "indiewire.com", "bloomberg.com",
+    "ft.com", "wsj.com", "washingtonpost.com", "nytimes.com", "bbc.com", "bbc.co.uk",
+    # Official studio / distributor / platform domains (applies to any story).
+    "netflix.com", "tudum.com", "disney.com", "thewaltdisneycompany.com", "marvel.com",
+    "pixar.com", "lucasfilm.com", "warnerbros.com", "wbd.com", "max.com", "hbo.com",
+    "paramount.com", "paramountpictures.com", "paramountplus.com", "nbcuniversal.com",
+    "universalpictures.com", "peacocktv.com", "sonypictures.com", "sonypictures.ca",
+    "lionsgate.com", "a24films.com", "focusfeatures.com", "neonrated.com",
+    "amazonmgmstudios.com", "primevideo.com", "apple.com", "tv.apple.com", "hulu.com",
 )
 
 
@@ -926,12 +931,12 @@ def _fact_check_queries(story: dict, date_start: str, date_end: str) -> list[str
                 f"{quoted} latest box office worldwide total domestic international weekend{date_bits}",
                 f"{quoted} latest worldwide cumulative box office total{date_bits}",
                 f"{quoted} crossed passed reached milestone million worldwide box office{date_bits}",
-                f"{quoted} second weekend cumulative total box office{date_bits}",
+                f"{quoted} latest weekend cumulative running total box office{date_bits}",
             ])
         elif category == "industry":
             queries.extend([
-                f"{quoted} latest deal settlement acquisition value terms{date_bits}",
-                f"{quoted} official settlement agreement value latest{date_bits}",
+                f"{quoted} official announcement statement latest{date_bits}",
+                f"{quoted} latest terms value parties outcome{date_bits}",
             ])
         elif category == "upcoming_films":
             queries.extend([
@@ -940,7 +945,7 @@ def _fact_check_queries(story: dict, date_start: str, date_end: str) -> list[str
             ])
         elif category == "tv_series":
             queries.extend([
-                f"{quoted} Netflix official title cast premiere latest{date_bits}",
+                f"{quoted} official title cast premiere date network streaming platform latest{date_bits}",
                 f"{quoted} official series announcement latest{date_bits}",
             ])
         else:
