@@ -51,6 +51,198 @@ def _published(entry) -> str:
         return raw
 
 
+def _parse_source_datetime(value: str) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    candidates = [raw]
+    if raw.endswith("Z"):
+        candidates.append(raw[:-1] + "+00:00")
+    for candidate in candidates:
+        try:
+            parsed = datetime.fromisoformat(candidate)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except Exception:
+            pass
+    try:
+        return parsedate_to_datetime(raw).astimezone(timezone.utc)
+    except Exception:
+        pass
+    match = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", raw)
+    if match:
+        try:
+            return datetime(
+                int(match.group(1)), int(match.group(2)), int(match.group(3)),
+                tzinfo=timezone.utc,
+            )
+        except Exception:
+            return None
+    return None
+
+
+def _window_bounds(date_start: str, date_end: str) -> tuple[datetime | None, datetime | None]:
+    start = _parse_source_datetime(f"{date_start}T00:00:00+00:00") if date_start else None
+    end = _parse_source_datetime(f"{date_end}T00:00:00+00:00") if date_end else None
+    return start, end
+
+
+def source_temporal_role(published_at: str, date_start: str, date_end: str) -> str:
+    published = _parse_source_datetime(published_at)
+    if published is None:
+        return "undated"
+    start, end = _window_bounds(date_start, date_end)
+    if start is not None and published < start:
+        return "background"
+    if end is not None and published >= end:
+        return "out_of_window"
+    return "current"
+
+
+def _source_identity(article: dict) -> str:
+    source = str(article.get("source") or "").strip().casefold()
+    try:
+        host = (urlparse(str(article.get("url") or "")).hostname or "").casefold()
+    except Exception:
+        host = ""
+    if source and source not in {"google news", "news"}:
+        return source
+    return host or str(article.get("url") or "").strip().casefold()
+
+
+def annotate_source_window(article: dict, date_start: str, date_end: str) -> dict:
+    item = dict(article)
+    raw = dict(item.get("raw") or {})
+    role = source_temporal_role(str(item.get("published_at") or ""), date_start, date_end)
+    raw["temporal_role"] = role
+    raw["selected_window_start"] = date_start
+    raw["selected_window_end_exclusive"] = date_end
+    item["raw"] = raw
+    return item
+
+
+def _evidence_metrics(cluster: list[dict]) -> dict:
+    current = [item for item in cluster if str((item.get("raw") or {}).get("temporal_role") or "") == "current"]
+    background = [item for item in cluster if str((item.get("raw") or {}).get("temporal_role") or "") == "background"]
+    out_of_window = [item for item in cluster if str((item.get("raw") or {}).get("temporal_role") or "") == "out_of_window"]
+    undated = [item for item in cluster if str((item.get("raw") or {}).get("temporal_role") or "") == "undated"]
+    current_non_reddit = [
+        item for item in current
+        if str((item.get("raw") or {}).get("platform") or "") != "reddit"
+    ]
+    independent_current = {
+        _source_identity(item)
+        for item in current_non_reddit
+        if _source_identity(item)
+    }
+    primary_social_current = [
+        item for item in current
+        if str((item.get("raw") or {}).get("trust_role") or "") == "primary_post_candidate"
+    ]
+    if len(independent_current) >= 2:
+        verification_status = "verified"
+        verification_notes = "At least two independent current-window non-Reddit sources were discovered."
+    elif len(independent_current) == 1:
+        verification_status = "reported"
+        verification_notes = "One current-window non-Reddit source was discovered; treat as reported unless a primary/second source confirms it."
+    elif primary_social_current:
+        verification_status = "needs_verification"
+        verification_notes = "Only public social-post candidates currently support the hook; account authenticity/corroboration is still required."
+    else:
+        verification_status = "needs_verification"
+        verification_notes = "No current-window non-Reddit evidence is available."
+
+    if current:
+        freshness = "current"
+    elif background or out_of_window:
+        freshness = "stale"
+    else:
+        freshness = "date_unknown"
+
+    return {
+        "in_window_source_count": len(current),
+        "background_source_count": len(background) + len(out_of_window),
+        "undated_source_count": len(undated),
+        "independent_source_count": len(independent_current),
+        "current_non_reddit_source_count": len(current_non_reddit),
+        "current_primary_social_count": len(primary_social_current),
+        "verification_status": verification_status,
+        "verification_notes": verification_notes,
+        "freshness": freshness,
+    }
+
+
+def _apply_story_quality_gates(story: dict, project: dict) -> dict:
+    date_start = str(project.get("date_start") or "")
+    date_end = str(project.get("date_end") or "")
+    in_window = int(story.get("in_window_source_count") or 0)
+    background = int(story.get("background_source_count") or 0)
+    undated = int(story.get("undated_source_count") or 0)
+    freshness = str(story.get("freshness") or "").strip().lower()
+    hook = str(story.get("news_hook") or "").strip()
+    hook_date = str(story.get("news_hook_date") or "").strip()
+    verification = str(story.get("verification_status") or "needs_verification").strip().lower()
+
+    deterministic_temporal = "pass"
+    if in_window <= 0:
+        deterministic_temporal = "fail" if background > 0 else "warning"
+        freshness = "stale" if background > 0 else "date_unknown"
+
+    if hook_date:
+        hook_dt = _parse_source_datetime(hook_date)
+        start, end = _window_bounds(date_start, date_end)
+        if hook_dt is not None:
+            if (start is not None and hook_dt < start) or (end is not None and hook_dt >= end):
+                freshness = "stale"
+                deterministic_temporal = "fail"
+
+    if freshness == "stale":
+        deterministic_temporal = "fail"
+    elif freshness not in {"current", "followup"}:
+        deterministic_temporal = "warning"
+
+    if not hook:
+        deterministic_temporal = "warning" if deterministic_temporal != "fail" else "fail"
+
+    if bool(story.get("reddit_only")):
+        verification = "needs_verification"
+        story["confidence"] = "reported"
+
+    # Deterministic evidence can cap, but not inflate, the AI verification call.
+    current_non_reddit = int(story.get("current_non_reddit_source_count") or 0)
+    independent = int(story.get("independent_source_count") or 0)
+    if current_non_reddit <= 0:
+        verification = "needs_verification"
+    elif independent < 2 and verification == "verified":
+        verification = "reported"
+
+    story["freshness"] = freshness
+    story["verification_status"] = verification
+    story["temporal_gate"] = deterministic_temporal
+    story["verification_gate"] = (
+        "pass" if verification in {"verified", "reported"} else "fail"
+    )
+
+    can_include = (
+        deterministic_temporal == "pass"
+        and bool(hook)
+        and freshness in {"current", "followup"}
+        and verification in {"verified", "reported"}
+        and in_window > 0
+    )
+    if not can_include and story.get("decision") == "include":
+        story["decision"] = "maybe" if deterministic_temporal != "fail" else "skip"
+    if deterministic_temporal == "fail":
+        story["decision"] = "skip"
+        story["score"] = min(float(story.get("score") or 0), 3.5)
+    elif verification == "needs_verification":
+        story["decision"] = "maybe" if story.get("decision") != "skip" else "skip"
+        story["score"] = min(float(story.get("score") or 0), 6.5)
+
+    return story
+
+
 def fetch_google_news(date_start: str, date_end: str, *, per_query_limit: int = 35) -> tuple[list[dict], list[dict]]:
     articles: list[dict] = []
     diagnostics: list[dict] = []
@@ -267,9 +459,14 @@ def _title_similarity(a: str, b: str) -> float:
     return max(seq, jac)
 
 
-def cluster_articles(articles: list[dict]) -> list[dict]:
+def cluster_articles(
+    articles: list[dict],
+    date_start: str = "",
+    date_end: str = "",
+) -> list[dict]:
+    annotated = [annotate_source_window(article, date_start, date_end) for article in articles]
     clusters: list[list[dict]] = []
-    for article in sorted(articles, key=lambda x: x.get("published_at", ""), reverse=True):
+    for article in sorted(annotated, key=lambda x: x.get("published_at", ""), reverse=True):
         best_index = -1
         best_score = 0.0
         for idx, cluster in enumerate(clusters):
@@ -312,6 +509,20 @@ def cluster_articles(articles: list[dict]) -> list[dict]:
             1 for item in cluster
             if str((item.get("raw") or {}).get("trust_role") or "") == "primary_post_candidate"
         )
+        evidence = _evidence_metrics(cluster)
+        source_evidence = [
+            {
+                "title": item.get("title") or "",
+                "source": item.get("source") or "",
+                "published_at": item.get("published_at") or "",
+                "temporal_role": str((item.get("raw") or {}).get("temporal_role") or ""),
+                "source_kind": str((item.get("raw") or {}).get("source_kind") or "news"),
+                "platform": str((item.get("raw") or {}).get("platform") or ""),
+                "trust_role": str((item.get("raw") or {}).get("trust_role") or ""),
+                "snippet": str(item.get("snippet") or "")[:500],
+            }
+            for item in cluster[:8]
+        ]
         score = heuristic_score(cluster, source_count)
         stories.append({
             "id": str(uuid.uuid4()),
@@ -320,19 +531,25 @@ def cluster_articles(articles: list[dict]) -> list[dict]:
             "category": category,
             "attention": _bucket(score, 7.5, 4.5),
             "importance": "medium",
-            "freshness": "current",
-            "confidence": "confirmed" if source_count >= 3 else "reported",
+            "freshness": evidence["freshness"],
+            "confidence": "confirmed" if evidence["independent_source_count"] >= 2 else "reported",
             "visual_potential": "high" if category in {"trend", "upcoming_films", "celebrities"} else "medium",
             "uniqueness": "medium",
             "rationale": f"Found across {source_count} source{'s' if source_count != 1 else ''} in the selected week.",
             "score": score,
-            "decision": "include" if score >= 7.5 else ("maybe" if score >= 4.0 else "skip"),
+            "decision": "skip" if evidence["freshness"] == "stale" else ("maybe" if score >= 4.0 else "skip"),
             "article_ids": [x["id"] for x in cluster],
             "source_count": source_count,
             "source_platforms": platforms,
             "source_kinds": source_kinds,
             "reddit_only": reddit_only,
             "primary_social_count": primary_social_count,
+            "source_evidence": source_evidence,
+            "news_hook": "",
+            "news_hook_date": "",
+            "temporal_gate": "pass" if evidence["freshness"] == "current" else ("fail" if evidence["freshness"] == "stale" else "warning"),
+            "verification_gate": "pass" if evidence["verification_status"] in {"verified", "reported"} else "fail",
+            **evidence,
         })
     stories.sort(key=lambda x: (x["score"], x["source_count"]), reverse=True)
     return stories
@@ -378,6 +595,11 @@ def ai_rank_stories(stories: list[dict], project: dict, provider: str, model: st
             "source_kinds": s.get("source_kinds") or [],
             "reddit_only": bool(s.get("reddit_only")),
             "primary_social_count": int(s.get("primary_social_count") or 0),
+            "in_window_source_count": int(s.get("in_window_source_count") or 0),
+            "background_source_count": int(s.get("background_source_count") or 0),
+            "undated_source_count": int(s.get("undated_source_count") or 0),
+            "independent_source_count": int(s.get("independent_source_count") or 0),
+            "source_evidence": s.get("source_evidence") or [],
             "heuristic_score": s["score"],
         }
         for s in stories[:100]
@@ -387,7 +609,7 @@ def ai_rank_stories(stories: list[dict], project: dict, provider: str, model: st
 You receive strict SECTION CONTRACTS and discovered stories. Classify each story by MEANING, not by the query that happened to find it.
 
 Return ONLY valid JSON: one object per supplied story using exactly these keys:
-id, category, section_fit, attention, importance, freshness, confidence, visual_potential, uniqueness, score, decision, rationale.
+id, category, section_fit, attention, importance, freshness, news_hook, news_hook_date, verification_status, verification_notes, confidence, visual_potential, uniqueness, score, decision, rationale.
 
 Rules:
 - category must be one of the supplied researchable section keys.
@@ -395,7 +617,15 @@ Rules:
 - section_fit is low|medium|high.
 - attention/importance/visual_potential/uniqueness are low|medium|high.
 - confidence is rumor|reported|confirmed.
-- freshness is current|followup|stale.
+- freshness is current|followup|stale|date_unknown.
+- news_hook must name the SPECIFIC new development that occurred in the selected project window; do not merely restate the subject/movie.
+- news_hook_date should be YYYY-MM-DD only when the supplied evidence supports that date; otherwise return an empty string.
+- verification_status is verified|reported|needs_verification|rejected.
+- verification_notes briefly explain which evidence verifies the hook and any remaining limitation.
+- A newly published recap of an old event is STALE unless it contains a genuinely new development inside the selected window.
+- Older/background sources may explain context but do NOT make the story current.
+- At least one source with temporal_role=current is required for current/followup eligibility.
+- Undated sources alone cannot establish freshness.
 - score is 0-10; decision is include|maybe|skip.
 - Apply each section's mission/include/exclude/evidence rules strictly.
 - Do not force every section to contain news. A weak story should be skipped.
@@ -405,7 +635,8 @@ Rules:
 - Reddit is discovery/community reaction, not sole factual verification unless the story itself is explicitly about Reddit reaction.
 - If reddit_only=true and the story makes an external factual claim, confidence cannot be confirmed and decision should normally be maybe/skip pending corroboration.
 - Reject unsupported health/appearance speculation and anonymous gossip.
-- Never invent facts."""
+- Never invent facts.
+- The selected date window is date_start inclusive and date_end exclusive."""
     user = json.dumps({
         "project": {
             "channel": project.get("channel"),
@@ -435,16 +666,24 @@ Rules:
         section_fit = str(item.get("section_fit") or "").strip().lower()
         if section_fit in {"low", "medium", "high"}:
             story["section_fit"] = section_fit
-        for key in ("attention", "importance", "freshness", "confidence", "visual_potential", "uniqueness", "decision", "rationale"):
+        for key in ("attention", "importance", "freshness", "confidence", "visual_potential", "uniqueness", "decision"):
             value = item.get(key)
             if isinstance(value, str) and value.strip():
-                story[key] = value.strip().lower() if key != "rationale" else value.strip()
+                story[key] = value.strip().lower()
+        for key in ("rationale", "news_hook", "news_hook_date", "verification_notes"):
+            value = item.get(key)
+            if isinstance(value, str):
+                story[key] = value.strip()
+        verification_status = str(item.get("verification_status") or "").strip().lower()
+        if verification_status in {"verified", "reported", "needs_verification", "rejected"}:
+            story["verification_status"] = verification_status
         if story.get("section_fit") == "low" and story.get("decision") == "include":
             story["decision"] = "maybe"
         try:
             story["score"] = max(0.0, min(10.0, float(item.get("score"))))
         except Exception:
             pass
+        _apply_story_quality_gates(story, project)
     stories.sort(key=lambda x: x["score"], reverse=True)
     return stories, actual_provider, actual_model
 
