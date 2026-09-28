@@ -173,3 +173,5 @@
 .review-audit-badge.needs-work{border-color:#7a4b3c}
 .review-feedback-text{max-height:520px;min-height:180px;overflow:auto;white-space:pre-wrap;background:#0b1016}
 .draft-feedback-panel{margin-top:12px}
+
+.familiarity-note{margin:8px 0;padding:8px 10px;border-left:2px solid #45647e;background:#101720;color:#c6d2df;font-size:9px;line-height:1.45}
