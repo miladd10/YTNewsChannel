@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.25"
+APP_VERSION = "0.3.26"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Smart Shot Selection + Fast Analysis"
+APP_RELEASE_NAME = "Unique Stills + Reserved Outro"
