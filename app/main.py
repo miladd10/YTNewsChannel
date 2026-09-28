@@ -3015,6 +3015,8 @@ def media_candidates(project_id: str):
                     "summary": story.get("summary", ""),
                     "category": story.get("category", ""),
                     "articles": story.get("articles", []),
+                    "context_sources": story.get("spice_sources", []),
+                    "visual_context": story.get("visual_context", []),
                     "voice_duration_seconds": voice_duration,
                     "visual_coverage": story_visual_plan(story_for_plan),
                 },
