@@ -7,7 +7,13 @@ from app.services.cinema_format import (
     parse_review_gate,
     research_query_groups,
 )
-from app.services.research import _social_platform_for_url, _social_queries
+from app.services.research import (
+    _apply_story_quality_gates,
+    _social_platform_for_url,
+    _social_queries,
+    cluster_articles,
+    source_temporal_role,
+)
 
 
 def test_cinema_format_contains_recurring_weekly_sections():
@@ -67,6 +73,10 @@ Good overall.
 - Status: NEEDS_WORK
 - Notes: one unsupported number
 
+# Freshness Audit
+- Status: PASS
+- Notes: current hook checked
+
 # Storytelling Audit
 - Status: PASS
 - Notes: fine
@@ -105,6 +115,10 @@ Clean.
 # Factual / Source Audit
 - Status: PASS
 - Notes: fine
+
+# Freshness Audit
+- Status: PASS
+- Notes: current hook checked
 
 # Storytelling Audit
 - Status: PASS
@@ -154,3 +168,105 @@ def test_social_platform_detection_does_not_confuse_news_domains():
     assert _social_platform_for_url("https://www.tiktok.com/@example/video/1") == "tiktok"
     assert _social_platform_for_url("https://www.reddit.com/r/movies/comments/abc") == "reddit"
     assert _social_platform_for_url("https://www.netflix.com/title/123") == ""
+
+
+
+def test_source_temporal_role_uses_project_window_not_current_clock():
+    assert source_temporal_role("2026-09-21T10:00:00+00:00", "2026-09-21", "2026-09-28") == "current"
+    assert source_temporal_role("2026-09-27T23:59:59+00:00", "2026-09-21", "2026-09-28") == "current"
+    assert source_temporal_role("2026-09-20T23:59:59+00:00", "2026-09-21", "2026-09-28") == "background"
+    assert source_temporal_role("2026-09-28T00:00:00+00:00", "2026-09-21", "2026-09-28") == "out_of_window"
+    assert source_temporal_role("", "2026-09-21", "2026-09-28") == "undated"
+
+
+def test_cluster_marks_old_news_stale_even_if_subject_is_relevant():
+    articles = [
+        {
+            "id": "a1",
+            "title": "Old movie casting announcement",
+            "url": "https://example.com/old",
+            "source": "Example News",
+            "published_at": "2026-09-01T12:00:00+00:00",
+            "category": "upcoming_films",
+            "snippet": "Casting was announced earlier this month.",
+            "query_key": "upcoming film casting",
+            "raw": {},
+        }
+    ]
+    stories = cluster_articles(articles, "2026-09-21", "2026-09-28")
+    assert stories[0]["freshness"] == "stale"
+    assert stories[0]["temporal_gate"] == "fail"
+    assert stories[0]["decision"] == "skip"
+    assert stories[0]["in_window_source_count"] == 0
+    assert stories[0]["background_source_count"] == 1
+
+
+def test_current_story_without_semantic_hook_cannot_be_auto_included():
+    story = {
+        "decision": "include",
+        "freshness": "current",
+        "news_hook": "",
+        "news_hook_date": "",
+        "verification_status": "reported",
+        "in_window_source_count": 1,
+        "background_source_count": 0,
+        "undated_source_count": 0,
+        "current_non_reddit_source_count": 1,
+        "independent_source_count": 1,
+        "reddit_only": False,
+        "score": 8.5,
+    }
+    _apply_story_quality_gates(
+        story,
+        {"date_start": "2026-09-21", "date_end": "2026-09-28"},
+    )
+    assert story["temporal_gate"] == "warning"
+    assert story["decision"] == "maybe"
+
+
+def test_current_verified_hook_can_pass_selection_gate():
+    story = {
+        "decision": "include",
+        "freshness": "current",
+        "news_hook": "Studio released the first trailer this week.",
+        "news_hook_date": "2026-09-25",
+        "verification_status": "verified",
+        "in_window_source_count": 2,
+        "background_source_count": 1,
+        "undated_source_count": 0,
+        "current_non_reddit_source_count": 2,
+        "independent_source_count": 2,
+        "reddit_only": False,
+        "score": 8.5,
+    }
+    _apply_story_quality_gates(
+        story,
+        {"date_start": "2026-09-21", "date_end": "2026-09-28"},
+    )
+    assert story["temporal_gate"] == "pass"
+    assert story["verification_gate"] == "pass"
+    assert story["decision"] == "include"
+
+
+def test_news_hook_date_outside_window_forces_stale_skip():
+    story = {
+        "decision": "include",
+        "freshness": "current",
+        "news_hook": "A casting announcement.",
+        "news_hook_date": "2026-09-10",
+        "verification_status": "verified",
+        "in_window_source_count": 2,
+        "background_source_count": 0,
+        "undated_source_count": 0,
+        "current_non_reddit_source_count": 2,
+        "independent_source_count": 2,
+        "reddit_only": False,
+        "score": 9.0,
+    }
+    _apply_story_quality_gates(
+        story,
+        {"date_start": "2026-09-21", "date_end": "2026-09-28"},
+    )
+    assert story["freshness"] == "stale"
+    assert story["temporal_gate"] == "fail"
+    assert story["decision"] == "skip"
