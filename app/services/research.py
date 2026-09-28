@@ -733,6 +733,90 @@ SPICE_TYPES = {
 }
 
 
+VISUAL_CONTEXT_KINDS = {
+    "person",
+    "people_group",
+    "related_title",
+    "behind_the_scenes",
+    "interview",
+    "fun_fact",
+    "comparison",
+    "event_photo",
+}
+
+VISUAL_LAYOUT_HINTS = {
+    "single",
+    "two_up",
+    "three_up",
+    "person_plus_title",
+    "collage",
+}
+
+
+def _validated_visual_context(raw_context: object, sources: list[dict]) -> list[dict]:
+    if not isinstance(raw_context, list):
+        return []
+    source_by_url = {
+        str(source.get("url") or "").strip(): source
+        for source in sources
+        if str(source.get("url") or "").strip()
+    }
+    cleaned: list[dict] = []
+    for index, raw in enumerate(raw_context[:10]):
+        if not isinstance(raw, dict):
+            continue
+        kind = str(raw.get("kind") or "").strip().lower()
+        if kind not in VISUAL_CONTEXT_KINDS:
+            continue
+        label = str(raw.get("label") or "").strip()
+        subjects = [
+            str(value).strip()
+            for value in (raw.get("subjects") or [])
+            if str(value).strip()
+        ][:3]
+        if label and label not in subjects:
+            subjects = [label, *subjects][:3]
+        if not subjects:
+            continue
+        urls = [
+            str(url).strip()
+            for url in (raw.get("source_urls") or [])
+            if str(url).strip() in source_by_url
+        ]
+        # Contextual visual claims need the same source grounding as narration
+        # enrichment. Current-title promo is handled independently by Media.
+        if not urls:
+            continue
+        layout = str(raw.get("layout_hint") or "single").strip().lower()
+        if layout not in VISUAL_LAYOUT_HINTS:
+            layout = "single"
+        if kind == "people_group":
+            if len(subjects) >= 3:
+                layout = "three_up"
+            elif len(subjects) == 2:
+                layout = "two_up"
+        cleaned.append({
+            "kind": kind,
+            "label": label or " + ".join(subjects),
+            "subjects": subjects,
+            "related_title": str(raw.get("related_title") or "").strip()[:160],
+            "narration_cue": str(raw.get("narration_cue") or "").strip()[:280],
+            "why": str(raw.get("why") or "").strip()[:500],
+            "preferred_media": [
+                str(value).strip()
+                for value in (raw.get("preferred_media") or [])
+                if str(value).strip()
+            ][:5],
+            "layout_hint": layout,
+            "source_urls": urls[:4],
+            "source_labels": [
+                str(source_by_url[url].get("source") or "") for url in urls[:4]
+            ],
+            "order": index,
+        })
+    return cleaned
+
+
 def _story_context_subject(story: dict) -> str:
     subject = str(story.get("search_subject") or "").strip()
     if subject:
@@ -937,6 +1021,7 @@ def ai_enrich_story_spice(
             "news_hook": story.get("news_hook") or "",
             "news_hook_date": story.get("news_hook_date") or "",
             "familiarity_anchor": story.get("familiarity_anchor") or "",
+            "narration_text": str(story.get("_narration_text") or "")[:5000],
             "sources": [
                 {
                     "title": source.get("title") or "",
@@ -959,14 +1044,26 @@ def ai_enrich_story_spice(
 For each CURRENT verified story, inspect ONLY the supplied related search evidence and extract OPTIONAL angles that can make narration richer.
 
 Return ONLY JSON: an array of objects:
-{"id":"...", "spice_angles":[
+{"id":"...",
+ "spice_angles":[
   {"type":"rumor|controversy|critic_reaction|social_buzz|cool_fact|surprising_comparison|production_context",
    "text":"concise factual angle",
    "evidence_status":"strong|supported|weak|social_only",
    "safe_to_narrate":true|false,
    "source_urls":["exact supplied URL"],
    "usage_note":"how to frame it without overstating"}
-]}
+ ],
+ "visual_context":[
+  {"kind":"person|people_group|related_title|behind_the_scenes|interview|fun_fact|comparison|event_photo",
+   "label":"short visual label",
+   "subjects":["one to three exact people/titles/entities supported by evidence"],
+   "related_title":"movie/show title when relevant, otherwise empty",
+   "narration_cue":"short phrase/idea in the supplied narration this visual should cover",
+   "why":"why this visual directly helps the narration",
+   "preferred_media":["official BTS","official interview","press photo","poster","official still","official trailer/clip"],
+   "layout_hint":"single|two_up|three_up|person_plus_title|collage",
+   "source_urls":["exact supplied URL"]}
+ ]}
 
 STRICT RULES:
 - It is perfectly valid to return an empty spice_angles array. NEVER manufacture spice.
@@ -982,6 +1079,13 @@ STRICT RULES:
 - Do not use outside knowledge or memory.
 - source_urls MUST be copied exactly from the supplied source list.
 - Prefer 0-3 strong angles over many weak ones.
+- VISUAL CONTEXT is for professional B-roll planning from the narration, not extra narration facts.
+- Read narration_text. Identify named people, related films/shows, previous credits, interviews, BTS/production references, comparisons, events, and one strong cool fact that deserves its own visual beat.
+- If the narration says a creator is known for another title, create related_title context for that title only when the supplied evidence supports the connection.
+- If 2-3 people are discussed together, prefer one people_group item with subjects in spoken order and two_up/three_up layout.
+- For a cool_fact that is safe_to_narrate and visually concrete, create one kind=fun_fact visual_context item so Media/Resolve can give that fact one dedicated shot.
+- Do not force visual context. Never create a person/title relationship from memory.
+- narration_cue must describe the actual supplied narration beat to cover, not a new claim.
 """
     user = json.dumps({
         "project_window": {
@@ -998,6 +1102,7 @@ STRICT RULES:
         item = by_id.get(story_id) or {}
         sources = sources_by_story.get(story_id) or []
         story["spice_angles"] = _validated_spice_angles(item.get("spice_angles"), sources)
+        story["visual_context"] = _validated_visual_context(item.get("visual_context"), sources)
         story["spice_source_ids"] = [str(source.get("id")) for source in sources if source.get("id")]
     return stories, actual_provider, actual_model
 
