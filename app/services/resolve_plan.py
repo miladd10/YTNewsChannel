@@ -541,18 +541,70 @@ def _run_ffmpeg(command: list[str]) -> None:
         raise RuntimeError(f"FFmpeg could not create Resolve-safe media. {tail}".strip())
 
 
-def _stage_resolve_image(source: Path, target: Path) -> None:
+def _stage_resolve_image_hold(
+    source: Path,
+    target: Path,
+    *,
+    duration: float,
+    fps: int,
+) -> dict:
+    """Render a still image as an exact-duration CFR H.264 hold clip.
+
+    Resolve's OTIO importer treats a still image as essentially one source
+    frame. Giving a PNG a multi-second OTIO source_range can therefore display
+    the first frame and mark the remainder Offline. Rendering the hold to MP4
+    makes the source duration explicit and deterministic.
+    """
     ffmpeg = _require_ffmpeg()
     target.parent.mkdir(parents=True, exist_ok=True)
     target.unlink(missing_ok=True)
-    _run_ffmpeg([
+
+    duration = max(0.05, float(duration or 0.05))
+    fps = max(1, int(fps or DEFAULT_FPS))
+    frame_count = max(1, int(round(duration * fps)))
+    staged_duration = frame_count / fps
+    common = [
         ffmpeg, "-y", "-v", "error",
+        "-loop", "1",
+        "-framerate", str(fps),
         "-i", str(source),
-        "-frames:v", "1",
-        str(target),
-    ])
-    if not target.exists() or target.stat().st_size <= 0:
-        raise RuntimeError(f"Resolve-safe image was not created: {target.name}")
+        "-an", "-sn", "-dn",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-frames:v", str(frame_count),
+        "-r", str(fps),
+        "-pix_fmt", "yuv420p",
+        "-tag:v", "avc1",
+        "-movflags", "+faststart",
+    ]
+    attempts = [
+        common + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", str(target)],
+        common + ["-c:v", "h264_videotoolbox", "-b:v", "12M", str(target)],
+    ]
+    errors: list[str] = []
+    for command in attempts:
+        try:
+            _run_ffmpeg(command)
+            if not target.exists() or target.stat().st_size <= 0:
+                raise RuntimeError("FFmpeg returned success but no usable still-hold MP4 was written.")
+            measured = _probe_media_duration(target)
+            tolerance = max(0.12, 2.0 / fps)
+            if measured is None or measured + tolerance < staged_duration:
+                raise RuntimeError(
+                    f"Staged still-hold MP4 is shorter than planned: expected {staged_duration:.3f}s, "
+                    f"got {measured if measured is not None else 'unknown'}."
+                )
+            return {
+                "frame_count": frame_count,
+                "staged_duration": staged_duration,
+                "measured_duration": measured,
+            }
+        except Exception as exc:
+            errors.append(str(exc))
+            target.unlink(missing_ok=True)
+    raise RuntimeError(
+        f"Could not create a validated H.264 still-hold from {source.name}: "
+        + " | ".join(errors[-2:])
+    )
 
 
 def _stage_resolve_video_cut(
@@ -645,6 +697,7 @@ def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
     staged = json.loads(json.dumps(plan))
     cache: dict[str, str] = {}
     video_stage_meta: dict[str, dict] = {}
+    image_stage_meta: dict[str, dict] = {}
     source_duration_cache: dict[str, float | None] = {}
     voice_count = 0
     visual_count = 0
@@ -726,22 +779,36 @@ def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
             item["resolve_measured_duration"] = (stage_meta or {}).get("measured_duration")
             item["resolve_media_format"] = "H.264 MP4 · yuv420p · CFR · validated frames"
         else:
-            # Normalize every still to PNG. Resolve can be inconsistent with
-            # WebP/AVIF and with images whose URL extension did not match bytes.
-            key = f"image|{source}"
+            # Do not hand a multi-second PNG source_range to Resolve's OTIO
+            # importer. It can treat the still as one source frame and show the
+            # remainder of the timeline clip as Media Offline. Render each
+            # distinct hold duration to a short CFR H.264 MP4 instead.
+            frame_count = max(1, int(round(duration * fps)))
+            planned_stage_duration = frame_count / fps
+            key = f"image-hold|{source}|{frame_count}|{fps}"
             relative = cache.get(key)
+            stage_meta = image_stage_meta.get(key)
             if not relative:
                 visual_count += 1
-                target = resolve_media / _safe_stage_name("visual", visual_count, source, ".png")
-                _stage_resolve_image(source, target)
+                target = resolve_media / _safe_stage_name("visual", visual_count, source, ".mp4")
+                stage_meta = _stage_resolve_image_hold(
+                    source,
+                    target,
+                    duration=planned_stage_duration,
+                    fps=fps,
+                )
                 relative = target.relative_to(root).as_posix()
                 cache[key] = relative
+                image_stage_meta[key] = stage_meta
             item["source_stored_path"] = original_stored_path
             item["stored_path"] = relative
             item["source_in"] = 0.0
-            item["source_out"] = None
-            item["source_media_duration"] = None
-            item["resolve_media_format"] = "PNG still"
+            item["source_out"] = planned_stage_duration
+            item["source_media_duration"] = planned_stage_duration
+            item["timeline_duration"] = planned_stage_duration
+            item["resolve_frame_count"] = frame_count
+            item["resolve_measured_duration"] = (stage_meta or {}).get("measured_duration")
+            item["resolve_media_format"] = "H.264 MP4 still hold · yuv420p · CFR · validated frames"
 
     return staged, {
         "media_folder": str(resolve_media),
@@ -813,7 +880,7 @@ def write_resolve_package(root: Path, plan: dict) -> dict:
         "staged_unique_files": staged_info["staged_unique_files"],
         "resolve_safe_media": True,
         "video_stage_format": "H.264 MP4 · yuv420p · CFR exact frames · avc1 · no source audio",
-        "image_stage_format": "PNG",
+        "image_stage_format": "H.264 MP4 still hold · yuv420p · CFR exact frames",
         "warnings": staged_plan.get("warnings") or [],
     }
     manifest_path = resolve_dir / "package_manifest.json"
@@ -835,14 +902,14 @@ Import **news_timeline.otio** through File > Import > Timeline.
 All media referenced by the OTIO is staged under **resolve/media/** and the OTIO
 uses raw absolute filesystem paths for DaVinci Resolve compatibility. Video cuts
 are normalized to **H.264 MP4 / yuv420p / CFR exact frames** with source audio removed,
-and still images are normalized to **PNG**, so Resolve does not depend on the
+and still-image holds are rendered to **H.264 MP4 / yuv420p / CFR exact frames**, so Resolve does not depend on the
 original YouTube codec/container or web-image format. Source-in values are clamped against the
 actual downloaded-file duration, and every staged MP4 is probed before the OTIO is written.
 Do not import
 an older package after changing/approving voice takes; regenerate this Resolve package first.
 
 The OTIO source ranges trim each downloaded video to the planned source in/out range.
-Still images are held only for their assigned narration interval.
+Still images are pre-rendered as exact-duration MP4 hold clips for their assigned narration interval.
 For source media that is not already 16:9, **media_timing.csv** contains the calculated
 crop axis/fraction with a center focal point. Resolve should use the project/input scaling
 equivalent of **Scale full frame with crop**.
