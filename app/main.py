@@ -1129,6 +1129,124 @@ def _style_transcripts(conn, channel: str = "cinema", content_type: str = "weekl
     ).fetchall()]
 
 
+def _parse_json_object_text(value: str) -> dict:
+    raw = str(value or "").strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1] if "\n" in raw else raw
+        raw = raw.rsplit("```", 1)[0]
+    first = raw.find("{")
+    last = raw.rfind("}")
+    if first < 0 or last < first:
+        raise ValueError("AI response did not contain a JSON object.")
+    parsed = json.loads(raw[first:last + 1])
+    if not isinstance(parsed, dict):
+        raise ValueError("AI response JSON was not an object.")
+    return parsed
+
+
+def _style_profile_status(conn, channel: str, content_type: str, style_rows: list[dict]) -> dict:
+    enabled = [row for row in style_rows if int(row.get("enabled") or 0) and str(row.get("content") or "").strip()]
+    current_hash = style_corpus_hash(enabled)
+    row = conn.execute(
+        "SELECT * FROM style_profiles WHERE channel=? AND content_type=?",
+        (channel, content_type),
+    ).fetchone()
+    item = dict(row) if row else {
+        "id": "",
+        "channel": channel,
+        "content_type": content_type,
+        "corpus_hash": "",
+        "profile_text": "",
+        "provider": "",
+        "model": "",
+        "transcript_count": 0,
+        "created_at": "",
+        "updated_at": "",
+    }
+    item["current_corpus_hash"] = current_hash
+    item["enabled_transcript_count"] = len(enabled)
+    item["current"] = bool(item.get("profile_text")) and item.get("corpus_hash") == current_hash
+    item["stale"] = bool(item.get("profile_text")) and not item["current"]
+    return item
+
+
+def _ensure_style_profile(
+    channel: str,
+    content_type: str,
+    style_rows: list[dict],
+    provider: str,
+    model: str,
+    *,
+    force: bool = False,
+) -> dict:
+    enabled = [row for row in style_rows if int(row.get("enabled") or 0) and str(row.get("content") or "").strip()]
+    if not enabled:
+        return {
+            "id": "",
+            "channel": channel,
+            "content_type": content_type,
+            "corpus_hash": "",
+            "profile_text": "No imported style transcripts are enabled. Use the built-in spoken-writing rules only.",
+            "provider": "builtin",
+            "model": "builtin",
+            "transcript_count": 0,
+            "created_at": "",
+            "updated_at": "",
+            "current": True,
+            "stale": False,
+            "enabled_transcript_count": 0,
+        }
+
+    with db() as conn:
+        status = _style_profile_status(conn, channel, content_type, enabled)
+    if status["current"] and not force:
+        return status
+
+    style_packet = build_style_packet(enabled, max_chars=120000)
+    try:
+        profile_text, actual_provider, actual_model = generate_text(
+            provider,
+            model,
+            STYLE_PROFILE_SYSTEM,
+            style_packet,
+        )
+    except Exception as exc:
+        raise HTTPException(400, f"Could not build style blueprint: {exc}") from exc
+
+    stamp = now()
+    profile_id = status.get("id") or str(uuid.uuid4())
+    corpus_hash = style_corpus_hash(enabled)
+    with db() as conn:
+        existing = conn.execute(
+            "SELECT id FROM style_profiles WHERE channel=? AND content_type=?",
+            (channel, content_type),
+        ).fetchone()
+        if existing:
+            profile_id = existing["id"]
+            conn.execute(
+                """UPDATE style_profiles
+                   SET corpus_hash=?,profile_text=?,provider=?,model=?,transcript_count=?,updated_at=?
+                   WHERE channel=? AND content_type=?""",
+                (
+                    corpus_hash, profile_text, actual_provider, actual_model, len(enabled), stamp,
+                    channel, content_type,
+                ),
+            )
+        else:
+            conn.execute(
+                """INSERT INTO style_profiles(
+                    id,channel,content_type,corpus_hash,profile_text,provider,model,
+                    transcript_count,created_at,updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    profile_id, channel, content_type, corpus_hash, profile_text,
+                    actual_provider, actual_model, len(enabled), stamp, stamp,
+                ),
+            )
+        status = _style_profile_status(conn, channel, content_type, enabled)
+    return status
+
+
 def _sectioned_story_packet(stories: list[dict]) -> list[dict]:
     result = []
     for section in CINEMA_WEEKLY_FORMAT:
