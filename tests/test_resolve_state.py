@@ -1,4 +1,4 @@
-from app.main import _reconcile_voice_story_rows, _resolve_input_signature, _resolve_prerequisites
+from app.main import _alignment_phrase_start, _reconcile_voice_story_rows, _resolve_input_signature, _resolve_prerequisites
 
 
 def voice_row(index=1, story_id="story", approved=True, source_text=""):
@@ -174,3 +174,22 @@ def test_resolve_can_recover_missing_historical_story_from_narration_text():
     assert resolved[0]["story_id"] == "new-werwulf"
     assert info["unresolved_story_ids"] == []
     assert info["match_details"]["hallucinated-old-id"]["method"] == "narration-text"
+
+
+
+def test_alignment_phrase_start_finds_legacy_outro_boundary():
+    alignment = {
+        "words": [
+            {"text": "Ray", "start": 0.0, "end": 0.3},
+            {"text": " ", "start": 0.3, "end": 0.4},
+            {"text": "Gunn.", "start": 0.4, "end": 0.9},
+            {"text": "\n", "start": 0.9, "end": 0.91},
+            {"text": "این", "start": 2.1, "end": 2.3},
+            {"text": " ", "start": 2.3, "end": 2.4},
+            {"text": "هفته،", "start": 2.4, "end": 2.8},
+            {"text": " ", "start": 2.8, "end": 2.9},
+            {"text": "خبرها", "start": 2.9, "end": 3.2},
+        ]
+    }
+    start = _alignment_phrase_start(alignment, "این هفته، خبرها")
+    assert start == 2.1
