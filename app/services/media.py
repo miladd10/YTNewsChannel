@@ -579,11 +579,18 @@ def _matches_actual_story_subject(item: dict, story: dict) -> bool:
     query_subject = _query_subject(str(item.get("_search_query") or ""))
 
     if not story.get("_allow_archive_media"):
+        story_title_lower = str(story.get("canonical_title") or "").casefold()
+        video_title_lower = title.casefold()
+        story_is_movie = any(term in story_title_lower for term in (" movie", " film", "cinema", "فیلم"))
+        video_is_series = any(term in video_title_lower for term in (" season ", " series", "episode", "tv "))
+        if story_is_movie and video_is_series:
+            return False
+
         # A generic franchise name is not enough to call a different installment
         # "current footage". If an official video adds a colon subtitle whose
-        # meaningful words are absent from the story/narration, treat it as
-        # archive/franchise material so the contextual fallback can label it
-        # honestly instead. Example: a Rings of Power teaser for a new LOTR movie.
+        # meaningful words are absent from the actual canonical headline, treat
+        # it as archive/franchise material so the contextual fallback can label
+        # it honestly instead. Example: Rings of Power footage for a new LOTR movie.
         primary_subjects = _story_subjects(story)
         primary_subject = primary_subjects[0] if primary_subjects else ""
         lower_title = title.lower()
@@ -600,7 +607,11 @@ def _matches_actual_story_subject(item: dict, story: dict) -> bool:
                 word for word in _distinctive_subject_words(subtitle)
                 if word not in _distinctive_subject_words(primary_subject)
             ]
-            story_words = set(_normalized_words(_story_context_text(story)))
+            strict_story_text = " ".join([
+                str(story.get("canonical_title") or ""),
+                str(story.get("_narration_text") or ""),
+            ])
+            story_words = set(_normalized_words(strict_story_text))
             if subtitle_words and not all(word in story_words for word in subtitle_words[:3]):
                 return False
 
@@ -851,7 +862,30 @@ def _video_identity_key(item: dict, story: dict) -> str:
     return f"{subject_key}|{coverage_kind}|{kind}|{duration_bucket}"
 
 
-def _result_quality_rank(item: dict, story: dict) -> tuple[int, int, int, int]:
+def _video_editorial_utility(item: dict) -> int:
+    title = str(item.get("title") or "").casefold()
+    # Among different official assets for the same story, a real trailer/clip
+    # is far more useful for a narration edit than a slightly-higher-resolution
+    # logo or title announcement. Quality still decides between copies of the
+    # same kind.
+    if any(term in title for term in ("logo", "fanfare", "ident", "studio intro")):
+        return 0
+    if any(term in title for term in ("title announcement", "date announcement", "announcement teaser")):
+        return 1
+    if "first look" in title or "sneak peek" in title:
+        return 4
+    if "featurette" in title or "behind the scenes" in title or "making of" in title:
+        return 5
+    if "teaser" in title:
+        return 6
+    if "trailer" in title:
+        return 8
+    if "clip" in title or "scene" in title:
+        return 7
+    return 3
+
+
+def _result_quality_rank(item: dict, story: dict) -> tuple[int, int, int, int, int]:
     height = _as_int(item.get("height")) or 0
     provider = str(item.get("provider") or "").lower()
     source = str(item.get("source") or "").lower()
@@ -864,7 +898,7 @@ def _result_quality_rank(item: dict, story: dict) -> tuple[int, int, int, int]:
     elif "reference page" in provider:
         clean = 3
     official_title = 1 if "official" in title else 0
-    return _video_quality_tier(height), height, clean, official_title
+    return _video_editorial_utility(item), _video_quality_tier(height), height, clean, official_title
 
 
 def _dedupe_quality_first_results(items: list[dict], story: dict, limit: int) -> list[dict]:
@@ -1874,15 +1908,15 @@ def _image_search_queries(story: dict) -> list[str]:
     contextual_subject = (_story_subjects(story) or [clean_story_query(story.get("canonical_title", ""))])[0]
     if contextual_kind == "cast/director":
         return list(dict.fromkeys([
-            f'{contextual_subject} official press photo portrait',
-            f'{contextual_subject} premiere red carpet photo',
+            f'{contextual_subject} official press photo 4K landscape',
+            f'{contextual_subject} premiere red carpet photo landscape high resolution',
         ]))
     if _is_corporate_story(story):
         queries: list[str] = []
         for entity in _known_entities(_story_text(story)):
             queries.extend([
-                f'{entity} official logo press kit',
-                f'{entity} studio lot official photo',
+                f'{entity} studio lot official photo 4K landscape',
+                f'{entity} headquarters official press photo landscape',
             ])
         return list(dict.fromkeys(queries))
 
@@ -1890,8 +1924,10 @@ def _image_search_queries(story: dict) -> list[str]:
     year = _story_reference_year(story)
     queries = []
     if year:
-        queries.append(f'{subject} {year} official still press photo poster')
-    queries.append(f'{subject} official still press photo poster')
+        queries.append(f'{subject} {year} official still 4K landscape press photo')
+        queries.append(f'{subject} {year} official first look landscape 3840x2160')
+    queries.append(f'{subject} official still 4K landscape press photo')
+    queries.append(f'{subject} official first look landscape high resolution')
     return list(dict.fromkeys(queries))
 
 
@@ -1924,10 +1960,30 @@ def _image_candidate_score(item: dict, story: dict) -> int:
 
     width = _as_int(item.get("width")) or 0
     height = _as_int(item.get("height")) or 0
-    if max(width, height) >= 1600:
-        score += 12
-    elif max(width, height) >= 1000:
-        score += 8
+    if width > 0 and height > 0:
+        aspect = width / height
+        if 1.5 <= aspect <= 2.4:
+            score += 38
+        elif aspect >= 1.25:
+            score += 20
+        elif aspect < 1.0:
+            score -= 42
+
+        if width >= 3200 and height >= 1600:
+            score += 34
+        elif width >= 1920 and height >= 1000:
+            score += 24
+        elif width >= 1600 and height >= 900:
+            score += 16
+        elif max(width, height) >= 1000:
+            score += 6
+
+        if "poster" in haystack and aspect < 1.0:
+            score -= 18
+    else:
+        # Unknown dimensions remain eligible, but known UHD/landscape results
+        # should outrank them.
+        score -= 4
 
     if not asset_url:
         score -= 20
