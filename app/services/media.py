@@ -424,8 +424,55 @@ def _story_visual_subjects(story: dict) -> list[str]:
     return subjects[:4]
 
 
+
+def _visual_context_beats(story: dict) -> list[dict]:
+    beats: list[dict] = []
+    for index, context in enumerate(story.get("visual_context") or []):
+        if not isinstance(context, dict):
+            continue
+        kind = str(context.get("kind") or "").strip().lower()
+        subjects = [
+            str(value).strip()
+            for value in (context.get("subjects") or [])
+            if str(value).strip()
+        ][:3]
+        label = str(context.get("label") or "").strip()
+        related_title = str(context.get("related_title") or "").strip()
+        if kind in {"related_title", "comparison"} and related_title and related_title not in subjects:
+            subjects.insert(0, related_title)
+        if label and not subjects:
+            subjects = [label]
+        if not subjects:
+            continue
+        group_id = f"visual-context-{index+1}"
+        layout = str(context.get("layout_hint") or "single").strip().lower() or "single"
+        cue = str(context.get("narration_cue") or "").strip()
+        reason = str(context.get("why") or "").strip()
+        preferred_media = [
+            str(value).strip()
+            for value in (context.get("preferred_media") or [])
+            if str(value).strip()
+        ][:5]
+
+        # A people group needs independent searches for each person, then
+        # Resolve can combine the selected stills into one two/three-up shot.
+        expanded_kind = "person" if kind == "people_group" else kind
+        for subject in subjects:
+            beats.append({
+                "label": subject,
+                "kind": expanded_kind,
+                "group_id": group_id,
+                "layout_hint": layout,
+                "narration_cue": cue,
+                "reason": reason,
+                "preferred_media": preferred_media,
+                "context_kind": kind,
+            })
+    return beats
+
+
 def story_visual_plan(story: dict) -> dict:
-    """Estimate how many distinct visual beats the narration needs."""
+    """Build narration-aware coverage beats, including sourced visual context."""
     subjects = _story_visual_subjects(story)
     duration = float(story.get("_voice_duration_seconds") or 0)
     narration = str(story.get("_narration_text") or "").strip()
@@ -448,34 +495,60 @@ def story_visual_plan(story: dict) -> dict:
     if sentence_count >= 6:
         sentence_target = 3
 
+    beats = [{"label": subject, "kind": "title", "layout_hint": "single"} for subject in subjects]
+    visual_context_beats = _visual_context_beats(story)
+    beats.extend(visual_context_beats)
+
     people = _story_people(story) if _story_has_quote_or_person_context(story) else []
-    target_count = max(1, len(subjects), duration_target, sentence_target)
+    known_labels = {str(beat.get("label") or "") for beat in beats}
+    for person in people:
+        if person not in known_labels:
+            beats.append({
+                "label": person,
+                "kind": "person",
+                "layout_hint": "single",
+                "narration_cue": person,
+                "reason": "Named person in narration",
+            })
+            known_labels.add(person)
+
+    # Deduplicate identical semantic requests while keeping their spoken order.
+    deduped = []
+    seen = set()
+    for beat in beats:
+        key = (str(beat.get("kind") or ""), str(beat.get("label") or "").casefold(), str(beat.get("group_id") or ""))
+        if not beat.get("label") or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(beat)
+    beats = deduped[:10]
+
+    target_count = max(1, len(subjects), duration_target, sentence_target, len(beats))
     if people:
         target_count = max(target_count, 2)
-    target_count = min(4, target_count)
-
-    beats = [{"label": subject, "kind": "title"} for subject in subjects]
-    for person in people:
-        if len(beats) >= target_count:
-            break
-        if person not in {beat["label"] for beat in beats}:
-            beats.append({"label": person, "kind": "cast/director"})
+    target_count = min(8, target_count)
 
     return {
         "target_count": target_count,
         "subjects": subjects,
         "people": people,
         "beats": beats,
+        "visual_context_count": len(story.get("visual_context") or []),
         "duration_seconds": duration,
     }
 
 
-def _tag_coverage(items: list[dict], label: str, kind: str) -> list[dict]:
+def _tag_coverage(items: list[dict], label: str, kind: str, beat: dict | None = None) -> list[dict]:
     output: list[dict] = []
+    beat = beat or {}
     for item in items:
         cloned = dict(item)
         cloned["coverage_label"] = label
         cloned["coverage_kind"] = kind
+        cloned["coverage_group"] = str(beat.get("group_id") or "")
+        cloned["coverage_cue"] = str(beat.get("narration_cue") or "")
+        cloned["coverage_reason"] = str(beat.get("reason") or "")
+        cloned["layout_hint"] = str(beat.get("layout_hint") or "single")
         output.append(cloned)
     return output
 
@@ -490,7 +563,14 @@ def _coverage_label_for_item(item: dict, subjects: list[str]) -> str:
 
 def _coverage_relevance_rank(item: dict, story: dict) -> tuple[int, int, int, int, int]:
     kind = str(item.get("coverage_kind") or "")
-    relevance_tier = 3 if kind == "current" else 2 if kind == "cast/director" else 1
+    if kind == "current":
+        relevance_tier = 5
+    elif kind in {"fun_fact", "related_title", "person", "interview", "behind_the_scenes", "comparison", "event_photo"}:
+        relevance_tier = 4
+    elif kind == "cast/director":
+        relevance_tier = 3
+    else:
+        relevance_tier = 2
     return (relevance_tier, *_result_quality_rank(item, story))
 
 
