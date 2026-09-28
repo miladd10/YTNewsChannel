@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.20"
+APP_VERSION = "0.3.21"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Resolve Final Story Mapping"
+APP_RELEASE_NAME = "Resolve-Safe Media Staging"
