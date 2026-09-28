@@ -677,7 +677,14 @@ def _image_candidate(
                     0 if str(item.get("coverage_kind") or "") == "fun_fact" else 1,
                 ),
             )
-    return unused[cursor % len(unused)]
+    # Preserve the original deterministic round-robin order when no semantic
+    # cue exists; tests and existing projects rely on i1 -> i2 -> i3.
+    for offset in range(len(images)):
+        item = images[(cursor + offset) % len(images)]
+        candidate_id = str(item.get("id") or "")
+        if candidate_id and candidate_id not in used_image_ids:
+            return item
+    return None
 
 
 def _visual_slices(
