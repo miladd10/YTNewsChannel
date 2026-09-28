@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Iterable
@@ -410,22 +411,57 @@ def _distributed_style_excerpt(text: str, allowance: int) -> str:
     return joined[:allowance]
 
 
+def _contiguous_style_excerpt(text: str, allowance: int, offset_ratio: float = 0.0) -> str:
+    """Preserve a long uninterrupted stretch so the model can see real spoken flow."""
+    text = str(text or "").strip()
+    if not text or allowance <= 0:
+        return ""
+    if len(text) <= allowance:
+        return text
+    start = int(max(0.0, min(1.0, offset_ratio)) * max(0, len(text) - allowance))
+    return text[start:start + allowance].strip()
+
+
+def style_corpus_hash(transcripts: Iterable[dict]) -> str:
+    enabled = [dict(item) for item in transcripts if int(item.get("enabled", 1) or 0)]
+    payload = [
+        {
+            "id": str(item.get("id") or ""),
+            "name": str(item.get("name") or ""),
+            "content": str(item.get("content") or ""),
+            "updated_at": str(item.get("updated_at") or ""),
+        }
+        for item in enabled
+        if str(item.get("content") or "").strip()
+    ]
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 def build_style_packet(transcripts: Iterable[dict], max_chars: int = 120000) -> str:
     enabled = [dict(item) for item in transcripts if int(item.get("enabled", 1) or 0)]
     enabled = [item for item in enabled if str(item.get("content") or "").strip()]
     if not enabled:
         return "<style_corpus>No style transcripts have been imported yet.</style_corpus>"
 
-    # Every enabled transcript contributes. Do not let the first files consume
-    # the entire budget and silently exclude later references.
-    per_item = max(350, max_chars // max(1, len(enabled)))
+    # Two complementary views are useful:
+    # 1) every transcript contributes distributed samples, so the model learns
+    #    recurring habits instead of one episode's quirks;
+    # 2) a few long contiguous anchors preserve the actual minute-to-minute flow
+    #    that gets destroyed when everything is chopped into small excerpts.
+    anchor_count = min(3, len(enabled))
+    anchor_budget = min(45000, max(9000, int(max_chars * 0.38)))
+    distributed_budget = max(12000, max_chars - anchor_budget)
+    per_item = max(350, distributed_budget // max(1, len(enabled)))
+
     chunks = [
         "<style_corpus>",
-        "These transcripts are STYLE REFERENCES ONLY. Learn the recurring craft across the whole corpus: tone, pacing, section rhythm, transitions, setup length, punchline placement, familiarity context, density, and how the host turns facts into an interesting spoken story.",
-        "Every enabled transcript contributes a distributed sample from across its full episode, not just its opening.",
-        "Never treat facts, dates, names, numbers, claims, or opinions inside these old transcripts as facts for the current episode.",
-        "Do not imitate distinctive sentences verbatim. Reproduce recurring craft and conversational behavior, not copied wording.",
-        "Prefer patterns that recur across multiple transcripts over quirks from a single episode.",
+        "STYLE REFERENCES ONLY. Facts in these transcripts are NEVER factual authority for the current episode.",
+        "Learn recurring spoken behavior: oral register, story expansion, sentence rhythm, causal connectors, mini-explanations, familiarity context, playful asides, transitions, section pacing, and how concrete facts are turned into a small story.",
+        "The packet contains both distributed corpus samples and longer uninterrupted FLOW ANCHORS. Flow anchors are present specifically so you can see how the host moves through several minutes without sounding like article summaries.",
+        "Do not copy distinctive sentences verbatim. Reproduce recurring craft and conversational behavior.",
+        "Prefer patterns repeated across the corpus over a one-off quirk.",
+        "<distributed_samples>",
     ]
     for item in enabled:
         text = str(item.get("content") or "").strip()
@@ -435,16 +471,107 @@ def build_style_packet(transcripts: Iterable[dict], max_chars: int = 120000) -> 
             excerpt,
             "</style_transcript>",
         ])
+    chunks.append("</distributed_samples>")
+
+    anchors = sorted(enabled, key=lambda item: len(str(item.get("content") or "")), reverse=True)[:anchor_count]
+    if anchors:
+        chunks.append("<flow_anchors>")
+        anchor_each = max(2500, anchor_budget // len(anchors))
+        offsets = (0.04, 0.34, 0.64)
+        for index, item in enumerate(anchors):
+            text = str(item.get("content") or "").strip()
+            excerpt = _contiguous_style_excerpt(text, anchor_each, offsets[index % len(offsets)])
+            chunks.extend([
+                f'<flow_anchor name={json.dumps(item.get("name") or "Transcript")} chars={len(text)}>',
+                excerpt,
+                "</flow_anchor>",
+            ])
+        chunks.append("</flow_anchors>")
+
     chunks.append("</style_corpus>")
     return "\n".join(chunks)
 
 
+STYLE_PROFILE_SYSTEM = """You are a style director. Distill a reusable spoken-writing blueprint from the supplied reference transcripts.
+
+The references are STYLE ONLY, never factual authority. Do not preserve their movie names, dates, numbers, claims, opinions, or news as usable facts.
+
+Your profile must describe recurring craft rather than generic advice. Pay special attention to:
+- how colloquial Persian differs from polished written Persian;
+- how a story grows from headline -> explanation -> specific detail -> aside/payoff;
+- how the host explains unfamiliar concepts or reminds viewers where they know a person from;
+- causal connectors and mini turns such as "حالا", "ولی", "برای همین", "یعنی", "مشکل اینجاست", "جالبش اینجاست" and how often they are naturally varied;
+- when rhetorical questions are useful;
+- how humor/irony comes from a fact rather than fake hype;
+- how stories transition into one another without sounding like database rows;
+- how long/deep a normal item, a quick item, and a lead item feel;
+- how release/platform/date information is placed;
+- how box-office/list sections speed up;
+- what would make a draft sound like a formal entertainment-news article or an AI news presenter instead of this host.
+
+Return Markdown using exactly these headings:
+# Voice & Register
+# Story Micro-Arc
+# Rhythm & Connectors
+# Explanation & Familiarity
+# Humor & Asides
+# Transitions & Section Flow
+# Depth & Pacing
+# Anti-Patterns
+# Reviewer Checklist
+
+Be concrete enough that another writer can follow it without seeing the transcripts. Do not quote more than a few common connective words from the references.
+"""
+
+
+CONTENT_PLAN_SYSTEM = """You are the factual story architect for a spoken weekly cinema-news episode.
+
+Use ONLY the supplied approved current-week packet. Do not use outside knowledge and do not use style references.
+
+Return ONLY valid JSON:
+{
+  "intro_hooks": ["..."],
+  "sections": [
+    {
+      "section": "key",
+      "stories": [
+        {
+          "id": "story id",
+          "depth": "lead|normal|quick",
+          "headline_hook": "the concrete current-week development",
+          "setup": ["supported context a casual viewer needs"],
+          "familiarity": ["supported recognition cue if useful"],
+          "interesting_details": ["specific supported facts, numbers, premise details, quotes/reactions"],
+          "why_it_matters": ["ONLY concrete supported consequence; empty generic importance is forbidden"],
+          "optional_spice": ["only safe_to_narrate supported angles"],
+          "ending_fact": "a supported date/platform/number/payoff if useful",
+          "bridge_hint": "how this can naturally connect to adjacent item without inventing a fact"
+        }
+      ]
+    }
+  ]
+}
+
+Rules:
+- Extract as many genuinely useful supported beats as the packet provides. Do not compress a rich source packet into two facts.
+- Do not invent filler to hit length.
+- Mark a story quick when evidence is thin.
+- For an unfamiliar creator/person/company, include one supported recognition cue when available.
+- Prefer concrete oddities, contrasts, production details, plot premise, critic/social reaction, numbers, dates and causal facts over abstract editorial language.
+- Keep rumors explicitly identified as rumor/unconfirmed.
+- Social reaction must preserve its actual platform and scale.
+- Merge planning for multiple story IDs only when they clearly describe the same movie/event; still keep every ID represented.
+"""
+
+
 WRITER_SYSTEM = """You are the cinema weekly-news narration writer inside YT News Studio.
 
-You have three separate inputs:
+You have five separate inputs:
 1. FORMAT BLUEPRINT: structural/editorial expectations for each section.
 2. APPROVED CURRENT-WEEK NEWS: the ONLY factual authority for this episode.
-3. STYLE CORPUS: old reference transcripts used ONLY to learn tone, pacing, transitions, density, and storytelling behavior.
+3. CONTENT PLAN: a fact-locked extraction of useful beats from that approved packet.
+4. STYLE BLUEPRINT: a distilled description of recurring host behavior.
+5. STYLE CORPUS: old reference transcripts used ONLY to learn voice/flow, never facts.
 
 Hard factual rules:
 - Never import a fact, number, date, quote, opinion, event, cast detail, score, rumor, or release date from the style corpus.
@@ -460,7 +587,16 @@ Hard factual rules:
 
 Writing rules:
 - Write in the project's requested language.
+- This is a SPOKEN TRANSCRIPT, not polished entertainment journalism. In Persian, prefer natural colloquial syntax and contractions where the reference style does; do not "correct" the host into formal written Persian.
 - Sound like one conversational host telling the week to a friend, not like a list of article summaries.
+- The CONTENT PLAN exists so you can spend your effort on telling, not re-summarizing. Use its supported beats fully enough to make each item feel like a small story.
+- STORY MICRO-ARC: for a normal/rich item, usually move through 3-7 useful beats: concrete news hook -> just enough setup -> the most interesting specific detail/contrast -> optional explanation/familiarity -> supported aside/reaction -> practical ending fact/payoff. Quick items can be shorter. Never pad thin evidence.
+- Let the host reason out loud when useful: a short "یعنی...", "برای همین...", "مشکل اینجاست...", "حالا چرا این جالبه؟" turn can make facts easier to follow. These are tools, not mandatory catchphrases; vary them naturally.
+- Rhetorical questions are allowed when they genuinely set up an explanation or punchline. Do not ban them merely because generic AI writing can overuse them.
+- Humor should normally come from an actual contrast or odd fact in the packet, not an adjective like "عجیب", "خفن", "سنگین" or "کنجکاوی‌برانگیز" with nothing underneath it.
+- Do NOT write generic abstract sentences such as "برای مخاطب مهمه چون می‌تونه روی آینده فیلم‌ها اثر بذاره" unless the approved evidence gives a concrete consequence you can name. If the evidence is thin, keep the item short instead of adding analysis-shaped filler.
+- A cast list by itself is not a payoff. If the packet has a premise, production detail, history, reaction, creator context or unusual fact, use it to explain why the names are interesting.
+- Section headings are editorial metadata, not host dialogue. If headings are emitted, use the project's language/section labels; never output English headings inside an otherwise Persian narration.
 - Treat the full style corpus as a behavioral reference. Notice recurring Filmbaz patterns across many episodes: how quickly the host reaches the actual news, how background is slipped in without stopping the story, how sections accelerate/decelerate, where a funny aside fits, and how transitions avoid sounding scripted.
 - Make the narration interesting because the FACTS are interesting: lead with the strongest concrete hook, useful comparison, odd detail, consequence, or contrast that is actually supported. Do not manufacture drama, fake excitement, rhetorical questions, or empty hype.
 - STORY SPICE RULE: before writing each story, inspect its safe_to_narrate spice_angles. If there is a genuinely useful rumor, controversy, critic reaction, social reaction, cool fact, production context, or surprising comparison, weave the strongest 1 angle naturally into a quick item and up to 2-3 into a deep Trends story. If there are no strong supported angles, do not pretend there are.
@@ -468,7 +604,7 @@ Writing rules:
 - SOCIAL REACTION: never say "همه دارن می‌گن" or imply consensus from thin evidence. Name the actual platform whenever evidence is platform-specific: "توی ردیت بعضی از کاربرا...", "توی X یکی از بحث‌ها...", "توی تیک‌تاک...". Avoid generic "مردم توی شبکه‌های اجتماعی دارن می‌گن" unless multiple named platforms genuinely support the same pattern.
 - CRITICS: only call something critic reaction when the supplied angle is type=critic_reaction. Do not turn audience/social comments into critic consensus.
 - COOL FACTS / BACKGROUND: use a surprising supported detail when it helps a casual viewer care, but keep it short and clearly contextual.
-- Avoid generic AI/news-presenter filler such as long "this may seem small but..." setups, repeated "the interesting thing is...", repeated "this means...", ceremonial section intros, or commentary that adds no information.
+- Avoid generic AI/news-presenter filler such as long "this may seem small but..." setups, ceremonial section intros, or commentary that adds no information. Common oral connectors like "جالبش اینجاست" or "یعنی" are allowed when they introduce a real new beat; the problem is mechanical repetition, not the phrase itself.
 - Do not end quick stories with empty placeholder commentary such as "حالا باید دید...", "باید زیر نظرش داشت", "زمان مشخص می‌کند", or "این پروژه کم‌کم شکل می‌گیرد" unless the approved evidence gives a concrete unresolved question worth saying. Prefer ending on the strongest supported detail, reaction, comparison, or consequence.
 - Do not mechanically start each item with "خبر بعدی..." / "از دنیای ... هم..." / "اما می‌رسیم به...". Let one story naturally hand off to the next when possible.
 - Prefer specific spoken phrasing over abstract corporate language. Explain a business/industry item in plain language only as much as a casual viewer needs to understand why it matters.
@@ -479,8 +615,9 @@ Writing rules:
 - BOX OFFICE should sound like a compact rundown with movement and comparison, not five disconnected paragraphs that each restate the film title.
 - The INTRO should tease the most intriguing concrete hooks from the actual episode. Avoid template lines like "امروز قراره خیلی سریع بریم سراغ مهم‌ترین خبرها" when they add nothing.
 - Prefer concrete numbers and comparisons when those numbers exist in the approved research.
-- Vary sentence length and transitions naturally. Short sentences are welcome when they give the narration rhythm.
-- Keep section headings for organization, but the spoken prose underneath should flow rather than announcing the template.
+- Vary sentence length and transitions naturally. The reference voice often uses connected spoken chains rather than a sequence of perfectly polished standalone sentences; preserve clarity without making every sentence sound copy-edited.
+- Prefer content-driven transitions such as "حالا که...", "از این یکی بگذریم...", "خب فیلم بسه..." or another natural bridge when appropriate, rather than repeatedly announcing "خبر بعدی".
+- Keep section headings only as quiet organization for the app; the spoken prose underneath should flow rather than announcing the template.
 - Do not mention sources aloud unless the source itself is part of the story.
 - Return only the complete narration in Markdown.
 """
