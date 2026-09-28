@@ -53,6 +53,8 @@ def _resolve_input_signature(voice_rows: list[dict], candidates: list[dict]) -> 
             "approval_status": row.get("approval_status") or "",
             "audio_status": row.get("audio_status") or "",
             "story_id": row.get("story_id") or "",
+            "reserved_tail_seconds": round(float(row.get("reserved_tail_seconds") or 0), 6),
+            "reserved_tail_kind": row.get("reserved_tail_kind") or "",
         }
         for row in sorted(voice_rows, key=lambda x: int(x.get("segment_index") or 0))
     ]
