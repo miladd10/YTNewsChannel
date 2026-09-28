@@ -653,15 +653,31 @@ def _low_variety_video(candidate: dict) -> bool:
 
 
 
-def _image_candidate(images: list[dict], used_image_ids: set[str], cursor: int) -> dict | None:
+def _image_candidate(
+    images: list[dict],
+    used_image_ids: set[str],
+    cursor: int,
+    current_ratio: float | None = None,
+) -> dict | None:
     if not images:
         return None
-    for offset in range(len(images)):
-        item = images[(cursor + offset) % len(images)]
-        candidate_id = str(item.get("id") or "")
-        if candidate_id and candidate_id not in used_image_ids:
-            return item
-    return None
+    unused = [
+        item for item in images
+        if str(item.get("id") or "") and str(item.get("id") or "") not in used_image_ids
+    ]
+    if not unused:
+        return None
+    if current_ratio is not None:
+        semantic = [item for item in unused if item.get("_narration_ratio") is not None]
+        if semantic:
+            return min(
+                semantic,
+                key=lambda item: (
+                    abs(float(item.get("_narration_ratio") or 0) - current_ratio),
+                    0 if str(item.get("coverage_kind") or "") == "fun_fact" else 1,
+                ),
+            )
+    return unused[cursor % len(unused)]
 
 
 def _visual_slices(
@@ -677,11 +693,26 @@ def _visual_slices(
 
     videos = sorted(
         [item for item in candidates if item.get("media_type") == "video"],
-        key=lambda item: str(item.get("title") or ""),
+        key=lambda item: (
+            float(item.get("_narration_ratio")) if item.get("_narration_ratio") is not None else 2.0,
+            str(item.get("title") or ""),
+        ),
     )
-    images = sorted(
+    base_images = sorted(
         [item for item in candidates if item.get("media_type") == "image"],
-        key=lambda item: str(item.get("title") or ""),
+        key=lambda item: (
+            float(item.get("_narration_ratio")) if item.get("_narration_ratio") is not None else 2.0,
+            str(item.get("title") or ""),
+        ),
+    )
+    composites = _semantic_composite_candidates(root, base_images)
+    images = sorted(
+        composites + base_images,
+        key=lambda item: (
+            float(item.get("_narration_ratio")) if item.get("_narration_ratio") is not None else 2.0,
+            0 if str(item.get("coverage_kind") or "") == "multi_panel" else 1,
+            str(item.get("title") or ""),
+        ),
     )
 
     slices: list[dict] = []
@@ -696,6 +727,7 @@ def _visual_slices(
 
     while cursor < end - 0.02:
         remaining = end - cursor
+        current_ratio = max(0.0, min(1.0, (cursor - float(window["start"])) / max(0.001, duration)))
 
         # Prefer moving footage. Use a selected still as a visual reset only
         # after two consecutive video cuts, or when no usable video exists.
@@ -722,6 +754,12 @@ def _visual_slices(
                 if proposal is None:
                     continue
                 score = float(proposal.get("score") or 0)
+                semantic_ratio = video.get("_narration_ratio")
+                if semantic_ratio is not None:
+                    distance = abs(float(semantic_ratio) - current_ratio)
+                    score += max(-20.0, 34.0 - distance * 70.0)
+                    if str(video.get("coverage_kind") or "") == "fun_fact" and distance <= 0.16:
+                        score += 18.0
                 if str(video.get("id") or "") == str(last_candidate_id or ""):
                     score -= 18
                 if use_index >= 1:
@@ -740,7 +778,7 @@ def _visual_slices(
                 uses[key] = use_index + 1
                 used_ranges.setdefault(key, []).append((float(smart["start"]), float(smart["end"])))
         if item is None and unused_images_exist:
-            item = _image_candidate(images, used_image_ids, image_cursor)
+            item = _image_candidate(images, used_image_ids, image_cursor, current_ratio)
             if item is not None:
                 image_cursor += 1
                 used_image_ids.add(str(item.get("id") or ""))
@@ -802,6 +840,12 @@ def _visual_slices(
             "scene_end": scene_end,
             "shot_analysis_mode": analysis_mode,
             "selection_reason": selection_reason,
+            "coverage_label": item.get("coverage_label") or "",
+            "coverage_kind": item.get("coverage_kind") or "",
+            "coverage_group": item.get("coverage_group") or "",
+            "coverage_cue": item.get("coverage_cue") or "",
+            "layout_hint": item.get("layout_hint") or "single",
+            "composite_source_ids": item.get("_composite_source_ids") or [],
             "transition_in_frames": 0,
             "transition_out_frames": 0,
             "transition_type": "cut",
@@ -928,11 +972,22 @@ def build_edit_plan(project: dict, voice_segments: list[dict], candidates: list[
     voice, total_duration = voice_timeline(voice_segments)
     windows = story_windows(voice)
 
+    narration_by_story: dict[str, str] = {}
+    for segment in voice:
+        story_id = str(segment.get("story_id") or "")
+        if story_id:
+            narration_by_story[story_id] = (
+                narration_by_story.get(story_id, "") + " " + str(segment.get("source_text") or "")
+            ).strip()
+
     selected_by_story: dict[str, list[dict]] = {}
     for item in candidates:
         if not item.get("selected") or item.get("download_status") != "downloaded" or not item.get("stored_path"):
             continue
-        selected_by_story.setdefault(str(item.get("story_id") or ""), []).append(item)
+        enriched = dict(item)
+        story_id = str(enriched.get("story_id") or "")
+        enriched["_narration_ratio"] = _semantic_position(enriched, narration_by_story.get(story_id, ""))
+        selected_by_story.setdefault(story_id, []).append(enriched)
 
     visuals = []
     warnings = []
