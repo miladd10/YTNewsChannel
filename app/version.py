@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.30"
+APP_VERSION = "0.3.31"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Cinema Section Intelligence + Social Discovery"
+APP_RELEASE_NAME = "Verified Current-Window Research"
