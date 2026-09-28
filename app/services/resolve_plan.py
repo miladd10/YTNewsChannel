@@ -5,6 +5,7 @@ import json
 import math
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from .media import duration_seconds
@@ -465,11 +466,93 @@ def _stage_file(source: Path, target: Path) -> None:
         shutil.copy2(source, target)
 
 
-def _safe_stage_name(prefix: str, index: int, source: Path) -> str:
-    suffix = source.suffix.lower()
+def _safe_stage_name(prefix: str, index: int, source: Path, suffix: str | None = None) -> str:
+    final_suffix = (suffix or source.suffix or "").lower()
     stem = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in source.stem).strip("_")
     stem = stem[:72] or "media"
-    return f"{prefix}_{index:03d}_{stem}{suffix}"
+    return f"{prefix}_{index:03d}_{stem}{final_suffix}"
+
+
+def _require_ffmpeg() -> str:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError(
+            "FFmpeg is required to build Resolve-safe media. Install ffmpeg, restart YT News Studio, "
+            "and regenerate the Resolve package."
+        )
+    return ffmpeg
+
+
+def _run_ffmpeg(command: list[str]) -> None:
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        tail = "\n".join((result.stderr or "").splitlines()[-10:])
+        raise RuntimeError(f"FFmpeg could not create Resolve-safe media. {tail}".strip())
+
+
+def _stage_resolve_image(source: Path, target: Path) -> None:
+    ffmpeg = _require_ffmpeg()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.unlink(missing_ok=True)
+    _run_ffmpeg([
+        ffmpeg, "-y", "-v", "error",
+        "-i", str(source),
+        "-frames:v", "1",
+        str(target),
+    ])
+    if not target.exists() or target.stat().st_size <= 0:
+        raise RuntimeError(f"Resolve-safe image was not created: {target.name}")
+
+
+def _stage_resolve_video_cut(
+    source: Path,
+    target: Path,
+    *,
+    source_in: float,
+    duration: float,
+    fps: int,
+) -> None:
+    ffmpeg = _require_ffmpeg()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.unlink(missing_ok=True)
+
+    source_in = max(0.0, float(source_in or 0))
+    duration = max(0.05, float(duration or 0.05))
+    fps = max(1, int(fps or DEFAULT_FPS))
+    common = [
+        ffmpeg, "-y", "-v", "error",
+        "-ss", f"{source_in:.6f}",
+        "-i", str(source),
+        "-t", f"{duration:.6f}",
+        "-an",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-r", str(fps),
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+    ]
+    attempts = [
+        common + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", str(target)],
+        common + ["-c:v", "h264_videotoolbox", "-b:v", "20M", str(target)],
+    ]
+    errors: list[str] = []
+    for command in attempts:
+        try:
+            _run_ffmpeg(command)
+            if target.exists() and target.stat().st_size > 0:
+                return
+        except Exception as exc:
+            errors.append(str(exc))
+            target.unlink(missing_ok=True)
+    raise RuntimeError(
+        f"Could not create an H.264 Resolve-safe cut from {source.name}: "
+        + " | ".join(errors[-2:])
+    )
 
 
 def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
@@ -504,26 +587,68 @@ def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
         item["source_audio_path"] = item.get("audio_path") or ""
         item["audio_path"] = relative
 
+    fps = int(staged.get("fps") or DEFAULT_FPS)
     for item in staged.get("visual_clips") or []:
         source = _safe_path(root, item.get("stored_path") or "")
         if not source:
             raise RuntimeError(f"Resolve media is missing: {item.get('stored_path')}")
-        key = str(source)
-        relative = cache.get(key)
-        if not relative:
-            visual_count += 1
-            target = resolve_media / _safe_stage_name("visual", visual_count, source)
-            _stage_file(source, target)
-            relative = target.relative_to(root).as_posix()
-            cache[key] = relative
-        item["source_stored_path"] = item.get("stored_path") or ""
-        item["stored_path"] = relative
+
+        media_type = str(item.get("media_type") or "")
+        original_stored_path = item.get("stored_path") or ""
+        original_source_in = float(item.get("source_in") or 0)
+        original_source_out = item.get("source_out")
+        duration = max(0.05, float(item.get("timeline_duration") or 0.05))
+
+        if media_type == "video":
+            # Stage the exact source slice as a Resolve-safe H.264/30fps clip.
+            # This avoids AV1/VP9/container decoder differences and removes
+            # source-range ambiguity from the OTIO import.
+            key = f"video-cut|{source}|{original_source_in:.6f}|{duration:.6f}|{fps}"
+            relative = cache.get(key)
+            if not relative:
+                visual_count += 1
+                target = resolve_media / _safe_stage_name("visual", visual_count, source, ".mp4")
+                _stage_resolve_video_cut(
+                    source,
+                    target,
+                    source_in=original_source_in,
+                    duration=duration,
+                    fps=fps,
+                )
+                relative = target.relative_to(root).as_posix()
+                cache[key] = relative
+            item["source_stored_path"] = original_stored_path
+            item["original_source_in"] = original_source_in
+            item["original_source_out"] = original_source_out
+            item["stored_path"] = relative
+            item["source_in"] = 0.0
+            item["source_out"] = duration
+            item["source_media_duration"] = duration
+            item["resolve_media_format"] = "H.264 MP4 · yuv420p · timeline fps"
+        else:
+            # Normalize every still to PNG. Resolve can be inconsistent with
+            # WebP/AVIF and with images whose URL extension did not match bytes.
+            key = f"image|{source}"
+            relative = cache.get(key)
+            if not relative:
+                visual_count += 1
+                target = resolve_media / _safe_stage_name("visual", visual_count, source, ".png")
+                _stage_resolve_image(source, target)
+                relative = target.relative_to(root).as_posix()
+                cache[key] = relative
+            item["source_stored_path"] = original_stored_path
+            item["stored_path"] = relative
+            item["source_in"] = 0.0
+            item["source_out"] = None
+            item["source_media_duration"] = None
+            item["resolve_media_format"] = "PNG still"
 
     return staged, {
         "media_folder": str(resolve_media),
         "staged_unique_files": len(cache),
         "staged_voice_files": voice_count,
         "staged_visual_files": visual_count,
+        "resolve_safe_media": True,
     }
 
 
@@ -586,6 +711,9 @@ def write_resolve_package(root: Path, plan: dict) -> dict:
         },
         "media_folder": "resolve/media",
         "staged_unique_files": staged_info["staged_unique_files"],
+        "resolve_safe_media": True,
+        "video_stage_format": "H.264 MP4 · yuv420p · timeline fps · no source audio",
+        "image_stage_format": "PNG",
         "warnings": staged_plan.get("warnings") or [],
     }
     manifest_path = resolve_dir / "package_manifest.json"
@@ -605,7 +733,10 @@ This package uses the generated ElevenLabs narration as the master timeline.
 Import **news_timeline.otio** through File > Import > Timeline.
 
 All media referenced by the OTIO is staged under **resolve/media/** and the OTIO
-uses raw absolute filesystem paths for DaVinci Resolve compatibility. Do not import
+uses raw absolute filesystem paths for DaVinci Resolve compatibility. Video cuts
+are normalized to **H.264 MP4 / yuv420p / timeline fps** with source audio removed,
+and still images are normalized to **PNG**, so Resolve does not depend on the
+original YouTube codec/container or web-image format. Do not import
 an older package after changing/approving voice takes; regenerate this Resolve package first.
 
 The OTIO source ranges trim each downloaded video to the planned source in/out range.
