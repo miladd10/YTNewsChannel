@@ -1,3 +1,3 @@
-APP_VERSION = "0.3.34"
+APP_VERSION = "0.3.35"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Post-Draft Per-Story Enrichment"
+APP_RELEASE_NAME = "Style Blueprint + Story Micro-Arcs"
