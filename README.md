@@ -219,3 +219,19 @@ The local SQLite index lives in `data/ytnews.db` and is intentionally ignored by
 - Related context enrichment is non-blocking: a social/reaction lookup failure does not invalidate otherwise verified weekly research.
 - Narration now treats story IDs as evidence boundaries rather than mandatory paragraph boundaries. Multiple selected rows about the same film/event—especially box-office totals and milestones—may be merged into one flowing spoken item while STORY markers remain next to the claims they support.
 - Writer/reviewer rules explicitly reject empty endings such as generic "we'll have to wait and see" filler and generic intros that could fit any week's episode.
+
+
+### v0.3.34 Post-draft per-story enrichment
+- Narration now follows a deliberate editorial sequence: Generate Baseline Draft → manually enrich selected stories one by one → Rewrite with Enrichment → Reviewer → reviewer-driven revisions → approval.
+- Initial Format Research no longer runs the expensive rumor/reaction/context search automatically. It stays focused on finding and verifying current-week news; deeper context is requested only for stories the editor actually selected and drafted.
+- Step 3 has a Post-Draft Story Enrichment workspace. Every Included story has its own Find Cool Stuff / Search Again action, with search count, usable-angle count, collected-source count, full angle details, and source links.
+- A manual story enrichment search fans out across the publicly searchable web plus dedicated Reddit, X/Twitter, TikTok, Instagram and YouTube queries, alongside rumor/controversy, critics/reviews, interviews/behind-the-scenes, cool-fact and comparison searches.
+- Current rumors/reaction/social searches stay date-aware. Cool-fact/production-context/comparison searches may look farther back so useful background is not lost, but background context is never presented as this week's news.
+- Every search accumulates sources rather than silently replacing the previous search. Search Again can therefore expand the evidence pool for one story.
+- Rewrite with Enrichment is enabled only when one or more stories have new research added after the currently selected draft. Reviewer is disabled while enrichment is pending so review evaluates the rewritten enriched draft rather than an obsolete baseline.
+- Fresh/Baseline Draft intentionally ignores stored post-draft spice, even in older projects. The dedicated enrichment rewrite is the only step that adds those researched angles.
+- The enrichment rewrite preserves good draft structure and STORY traceability, adding only safe_to_narrate angles. Rumors stay explicitly unconfirmed.
+- Social reaction must name the actual platform. Prefer natural phrasing such as "توی ردیت بعضی از کاربرا..." or "توی X یکی از بحث‌ها..." rather than vague "مردم توی شبکه‌های اجتماعی دارن می‌گن" when evidence is platform-specific.
+- Collected enrichment sources are retained in the story packet and automatically handed to Step 5 Media Sources as additional reference pages. Media still runs its own video/image search and relevance/original-source validation, but it can reuse already-discovered interviews, official posts, embedded videos, article images and context pages.
+- Media discovery combines core news sources plus enrichment sources, dedupes them by URL, inspects more reference pages, and includes safe enrichment text in the visual context used for B-roll discovery.
+- Manual enrichment works for any Included, current, verified story regardless of its original ranking score.
