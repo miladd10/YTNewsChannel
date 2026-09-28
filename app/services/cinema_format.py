@@ -460,6 +460,7 @@ def build_style_packet(transcripts: Iterable[dict], max_chars: int = 120000) -> 
         "Learn recurring spoken behavior: oral register, story expansion, sentence rhythm, causal connectors, mini-explanations, familiarity context, playful asides, transitions, section pacing, and how concrete facts are turned into a small story.",
         "The packet contains both distributed corpus samples and longer uninterrupted FLOW ANCHORS. Flow anchors are present specifically so you can see how the host moves through several minutes without sounding like article summaries.",
         "Do not copy distinctive sentences verbatim. Reproduce recurring craft and conversational behavior.",
+        "References may contain automatic-transcript spelling, punctuation, or recognition errors. Learn the spoken rhythm and structure; do NOT imitate ASR mistakes.",
         "Prefer patterns repeated across the corpus over a one-off quirk.",
         "<distributed_samples>",
     ]
@@ -494,7 +495,7 @@ def build_style_packet(transcripts: Iterable[dict], max_chars: int = 120000) -> 
 
 STYLE_PROFILE_SYSTEM = """You are a style director. Distill a reusable spoken-writing blueprint from the supplied reference transcripts.
 
-The references are STYLE ONLY, never factual authority. Do not preserve their movie names, dates, numbers, claims, opinions, or news as usable facts.
+The references are STYLE ONLY, never factual authority. Do not preserve their movie names, dates, numbers, claims, opinions, or news as usable facts. They may contain ASR/transcription mistakes: infer spoken craft, but never treat misspellings or recognition errors as part of the desired style.
 
 Your profile must describe recurring craft rather than generic advice. Pay special attention to:
 - how colloquial Persian differs from polished written Persian;
