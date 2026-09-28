@@ -483,6 +483,51 @@ def _require_ffmpeg() -> str:
     return ffmpeg
 
 
+def _require_ffprobe() -> str:
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        raise RuntimeError(
+            "FFprobe is required to validate Resolve-safe media. Install ffmpeg, restart YT News Studio, "
+            "and regenerate the Resolve package."
+        )
+    return ffprobe
+
+
+def _probe_media_duration(path: Path) -> float | None:
+    ffprobe = _require_ffprobe()
+    result = subprocess.run(
+        [
+            ffprobe, "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        value = float((result.stdout or "").strip())
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) and value > 0 else None
+
+
+def _clamp_video_source_in(source_in: float, requested_duration: float, source_duration: float | None) -> float:
+    source_in = max(0.0, float(source_in or 0))
+    requested_duration = max(0.0, float(requested_duration or 0))
+    if source_duration is None or source_duration <= 0:
+        return source_in
+    # Keep at least one source frame available. If the requested cut is longer
+    # than the source, start at zero and the staging filter will hold the final
+    # frame to fill the requested timeline duration.
+    latest = max(0.0, float(source_duration) - min(requested_duration, float(source_duration)))
+    return min(source_in, latest)
+
+
 def _run_ffmpeg(command: list[str]) -> None:
     result = subprocess.run(
         command,
@@ -517,23 +562,37 @@ def _stage_resolve_video_cut(
     source_in: float,
     duration: float,
     fps: int,
-) -> None:
+    source_duration: float | None = None,
+) -> dict:
     ffmpeg = _require_ffmpeg()
     target.parent.mkdir(parents=True, exist_ok=True)
     target.unlink(missing_ok=True)
 
-    source_in = max(0.0, float(source_in or 0))
     duration = max(0.05, float(duration or 0.05))
     fps = max(1, int(fps or DEFAULT_FPS))
+    source_duration = source_duration if source_duration is not None else _probe_media_duration(source)
+    adjusted_source_in = _clamp_video_source_in(source_in, duration, source_duration)
+
+    # Resolve/OTIO works in frames. Render an exact number of CFR frames instead
+    # of trusting a fractional -t duration. tpad clones the final frame if the
+    # source ends before the requested narration window.
+    frame_count = max(1, int(round(duration * fps)))
+    staged_duration = frame_count / fps
+    filter_chain = (
+        f"scale=trunc(iw/2)*2:trunc(ih/2)*2,"
+        f"fps={fps},"
+        f"tpad=stop_mode=clone:stop_duration={staged_duration + 1.0:.6f}"
+    )
     common = [
         ffmpeg, "-y", "-v", "error",
-        "-ss", f"{source_in:.6f}",
         "-i", str(source),
-        "-t", f"{duration:.6f}",
-        "-an",
-        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-        "-r", str(fps),
+        "-ss", f"{adjusted_source_in:.6f}",
+        "-map", "0:v:0",
+        "-an", "-sn", "-dn",
+        "-vf", filter_chain,
+        "-frames:v", str(frame_count),
         "-pix_fmt", "yuv420p",
+        "-tag:v", "avc1",
         "-movflags", "+faststart",
     ]
     attempts = [
@@ -544,15 +603,31 @@ def _stage_resolve_video_cut(
     for command in attempts:
         try:
             _run_ffmpeg(command)
-            if target.exists() and target.stat().st_size > 0:
-                return
+            if not target.exists() or target.stat().st_size <= 0:
+                raise RuntimeError("FFmpeg returned success but no usable MP4 was written.")
+            measured = _probe_media_duration(target)
+            tolerance = max(0.12, 2.0 / fps)
+            if measured is None or measured + tolerance < staged_duration:
+                raise RuntimeError(
+                    f"Staged MP4 is shorter than planned: expected {staged_duration:.3f}s, "
+                    f"got {measured if measured is not None else 'unknown'}."
+                )
+            return {
+                "source_duration": source_duration,
+                "requested_source_in": max(0.0, float(source_in or 0)),
+                "adjusted_source_in": adjusted_source_in,
+                "frame_count": frame_count,
+                "staged_duration": staged_duration,
+                "measured_duration": measured,
+            }
         except Exception as exc:
             errors.append(str(exc))
             target.unlink(missing_ok=True)
     raise RuntimeError(
-        f"Could not create an H.264 Resolve-safe cut from {source.name}: "
+        f"Could not create a validated H.264 Resolve-safe cut from {source.name}: "
         + " | ".join(errors[-2:])
     )
+
 
 
 def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
@@ -569,6 +644,8 @@ def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
 
     staged = json.loads(json.dumps(plan))
     cache: dict[str, str] = {}
+    video_stage_meta: dict[str, dict] = {}
+    source_duration_cache: dict[str, float | None] = {}
     voice_count = 0
     visual_count = 0
 
@@ -600,31 +677,54 @@ def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
         duration = max(0.05, float(item.get("timeline_duration") or 0.05))
 
         if media_type == "video":
-            # Stage the exact source slice as a Resolve-safe H.264/30fps clip.
-            # This avoids AV1/VP9/container decoder differences and removes
-            # source-range ambiguity from the OTIO import.
-            key = f"video-cut|{source}|{original_source_in:.6f}|{duration:.6f}|{fps}"
+            # Use the duration of the file that was actually downloaded, not
+            # discovery metadata. Some providers report trailer durations that
+            # differ from the downloaded asset; unbounded source-in values can
+            # otherwise create header-only MP4s that Resolve shows as Offline.
+            source_key = str(source)
+            if source_key not in source_duration_cache:
+                source_duration_cache[source_key] = _probe_media_duration(source)
+            actual_source_duration = source_duration_cache[source_key]
+            adjusted_source_in = _clamp_video_source_in(
+                original_source_in,
+                duration,
+                actual_source_duration,
+            )
+            frame_count = max(1, int(round(duration * fps)))
+            planned_stage_duration = frame_count / fps
+            key = (
+                f"video-cut|{source}|{adjusted_source_in:.6f}|"
+                f"{frame_count}|{fps}"
+            )
             relative = cache.get(key)
+            stage_meta = video_stage_meta.get(key)
             if not relative:
                 visual_count += 1
                 target = resolve_media / _safe_stage_name("visual", visual_count, source, ".mp4")
-                _stage_resolve_video_cut(
+                stage_meta = _stage_resolve_video_cut(
                     source,
                     target,
-                    source_in=original_source_in,
-                    duration=duration,
+                    source_in=adjusted_source_in,
+                    duration=planned_stage_duration,
                     fps=fps,
+                    source_duration=actual_source_duration,
                 )
                 relative = target.relative_to(root).as_posix()
                 cache[key] = relative
+                video_stage_meta[key] = stage_meta
             item["source_stored_path"] = original_stored_path
             item["original_source_in"] = original_source_in
             item["original_source_out"] = original_source_out
+            item["actual_source_duration"] = actual_source_duration
+            item["adjusted_source_in"] = (stage_meta or {}).get("adjusted_source_in", adjusted_source_in)
             item["stored_path"] = relative
             item["source_in"] = 0.0
-            item["source_out"] = duration
-            item["source_media_duration"] = duration
-            item["resolve_media_format"] = "H.264 MP4 · yuv420p · timeline fps"
+            item["source_out"] = planned_stage_duration
+            item["source_media_duration"] = planned_stage_duration
+            item["timeline_duration"] = planned_stage_duration
+            item["resolve_frame_count"] = frame_count
+            item["resolve_measured_duration"] = (stage_meta or {}).get("measured_duration")
+            item["resolve_media_format"] = "H.264 MP4 · yuv420p · CFR · validated frames"
         else:
             # Normalize every still to PNG. Resolve can be inconsistent with
             # WebP/AVIF and with images whose URL extension did not match bytes.
@@ -712,7 +812,7 @@ def write_resolve_package(root: Path, plan: dict) -> dict:
         "media_folder": "resolve/media",
         "staged_unique_files": staged_info["staged_unique_files"],
         "resolve_safe_media": True,
-        "video_stage_format": "H.264 MP4 · yuv420p · timeline fps · no source audio",
+        "video_stage_format": "H.264 MP4 · yuv420p · CFR exact frames · avc1 · no source audio",
         "image_stage_format": "PNG",
         "warnings": staged_plan.get("warnings") or [],
     }
@@ -734,9 +834,11 @@ Import **news_timeline.otio** through File > Import > Timeline.
 
 All media referenced by the OTIO is staged under **resolve/media/** and the OTIO
 uses raw absolute filesystem paths for DaVinci Resolve compatibility. Video cuts
-are normalized to **H.264 MP4 / yuv420p / timeline fps** with source audio removed,
+are normalized to **H.264 MP4 / yuv420p / CFR exact frames** with source audio removed,
 and still images are normalized to **PNG**, so Resolve does not depend on the
-original YouTube codec/container or web-image format. Do not import
+original YouTube codec/container or web-image format. Source-in values are clamped against the
+actual downloaded-file duration, and every staged MP4 is probed before the OTIO is written.
+Do not import
 an older package after changing/approving voice takes; regenerate this Resolve package first.
 
 The OTIO source ranges trim each downloaded video to the planned source in/out range.
