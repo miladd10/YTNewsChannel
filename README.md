@@ -189,3 +189,15 @@ The local SQLite index lives in `data/ytnews.db` and is intentionally ignored by
 - Include is disabled and the API rejects the action unless the story has: a current/follow-up status, a specific current-window news hook, at least one in-window source, a passing temporal gate, and a passing verification gate.
 - The narration writer receives only stories that pass those gates. The narration reviewer now has a separate Freshness Audit and must catch any draft that turns older background context into this week's development.
 - Existing research runs from older versions should be rerun once after upgrading; their old story rows intentionally do not inherit trust they never earned under the new freshness/verification schema.
+
+
+### v0.3.32 Visible review + Filmbaz style fidelity
+- Narration Reviewer feedback is now rendered in a dedicated full-width Review Feedback panel immediately after the reviewer finishes, rather than relying only on a later workspace re-fetch/right-column render. The UI keeps the returned review in state, shows gate + audit badges + issue counts + full reviewer text, and scrolls the panel into view.
+- Review API responses now include narration/project identity so the browser can attach feedback to the exact draft immediately and still persist it normally for refresh/reload.
+- The Filmbaz style corpus now distributes its prompt budget across every enabled transcript and samples multiple evenly spaced parts of each episode. Large libraries no longer silently let early transcripts consume the entire style budget.
+- Writer/reviewer instructions now use the reference corpus for recurring craft: spoken rhythm, fast entry into the real news, compact background, section pacing, natural transitions, light humor placement, and fact-driven hooks—without copying wording or importing old facts.
+- Added a casual-audience familiarity rule for directors, actors, creators, and companies that are important but not immediately recognizable. The narration can add one brief supported recognition cue (for example a best-known work) on first important mention, while skipping household names and avoiding biographies/credit dumps.
+- Research ranking can generate `familiarity_needed` + `familiarity_anchor` only when the supplied evidence supports the cue. Existing older story rows may use one cue only when the approved article/background snippets explicitly support it; memory/guesswork is forbidden.
+- Section Selection surfaces the proposed familiarity cue so it is inspectable before narration.
+- Reviewer Style Audit explicitly checks for fake enthusiasm, empty hype, generic AI/news-presenter phrasing, overlong "why this matters" setups, weak hooks, missing/overdone familiarity context, and whether the result actually reflects recurring Filmbaz reference behavior.
+- Revision instructions remove empty hype rather than replacing it with different hype and preserve already-good material while applying reviewer fixes.
