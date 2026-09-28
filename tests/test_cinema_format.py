@@ -467,3 +467,11 @@ def test_reviewer_must_fail_overcompressed_article_like_drafts():
     assert "FORMAL WRITTEN-PERSIAN DRIFT" in REVIEWER_SYSTEM
     assert "EMPTY ADJECTIVE PAYOFFS" in REVIEWER_SYSTEM
     assert "headline-summary draft should be NEEDS_WORK" in REVIEWER_SYSTEM
+
+
+
+def test_persian_spoken_section_labels_are_available_to_writer():
+    by_key = {item["key"]: item for item in format_packet()}
+    assert by_key["industry"]["spoken_label_fa"] == "صنعت سینما"
+    assert by_key["upcoming_films"]["spoken_label_fa"] == "فیلم‌های جدید"
+    assert by_key["box_office"]["spoken_label_fa"] == "گیشه"
