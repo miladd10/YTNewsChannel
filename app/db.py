@@ -110,8 +110,13 @@ def init_db() -> None:
                 rationale TEXT NOT NULL DEFAULT '',
                 score REAL NOT NULL DEFAULT 0,
                 decision TEXT NOT NULL DEFAULT 'maybe',
+                section_fit TEXT NOT NULL DEFAULT 'medium',
                 article_ids_json TEXT NOT NULL DEFAULT '[]',
                 source_count INTEGER NOT NULL DEFAULT 0,
+                source_platforms_json TEXT NOT NULL DEFAULT '[]',
+                source_kinds_json TEXT NOT NULL DEFAULT '[]',
+                reddit_only INTEGER NOT NULL DEFAULT 0,
+                primary_social_count INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -257,6 +262,16 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_media_candidates_selected ON media_candidates(project_id, selected);
             """
         )
+        if not _column_exists(conn, "stories", "section_fit"):
+            conn.execute("ALTER TABLE stories ADD COLUMN section_fit TEXT NOT NULL DEFAULT 'medium'")
+        if not _column_exists(conn, "stories", "source_platforms_json"):
+            conn.execute("ALTER TABLE stories ADD COLUMN source_platforms_json TEXT NOT NULL DEFAULT '[]'")
+        if not _column_exists(conn, "stories", "source_kinds_json"):
+            conn.execute("ALTER TABLE stories ADD COLUMN source_kinds_json TEXT NOT NULL DEFAULT '[]'")
+        if not _column_exists(conn, "stories", "reddit_only"):
+            conn.execute("ALTER TABLE stories ADD COLUMN reddit_only INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists(conn, "stories", "primary_social_count"):
+            conn.execute("ALTER TABLE stories ADD COLUMN primary_social_count INTEGER NOT NULL DEFAULT 0")
         if not _column_exists(conn, "narrations", "parent_narration_id"):
             conn.execute("ALTER TABLE narrations ADD COLUMN parent_narration_id TEXT NOT NULL DEFAULT ''")
         if not _column_exists(conn, "narrations", "revision_review_id"):
