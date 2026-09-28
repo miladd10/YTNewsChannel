@@ -117,15 +117,15 @@ function storyEnrichmentHtml(stories,draft){
             <strong>${esc(s.canonical_title)}</strong>
             <div class="story-meta">
               <span class="pill">${esc(sectionLabel(s.category))}</span>
-              ${searchedAt?`<span class="signal high">searched ${Number(s.context_search_count||1)}Ã</span>`:'<span class="signal">not searched yet</span>'}
+              ${searchedAt?`<span class="signal high">searched ${Number(s.context_search_count||1)}x</span>`:'<span class="signal">not searched yet</span>'}
               <span class="signal">${safe.length} usable angle${safe.length===1?'':'s'}</span>
               <span class="signal">${sources.length} collected source${sources.length===1?'':'s'}</span>
             </div>
           </div>
           <button class="btn secondary" data-search-story-context="${s.id}">${searchedAt?'Search Again':'Find Cool Stuff'}</button>
         </div>
-        ${angles.length?`<div class="enrichment-angle-list">${angles.map(a=>`<div class="spice-angle ${a.safe_to_narrate?'safe':'unsafe'}"><div class="spice-angle-head"><span class="spice-type ${esc(a.type||'')}">${esc(String(a.type||'').replaceAll('_',' '))}</span><span class="spice-evidence">${esc(a.evidence_status||'weak')}${a.safe_to_narrate?' Â· usable':' Â· reference only'}</span></div><div class="spice-text">${esc(a.text||'')}</div>${a.usage_note?`<small>${esc(a.usage_note)}</small>`:''}</div>`).join('')}</div>`:''}
-        ${sources.length?`<details class="enrichment-sources"><summary>Collected sources (${sources.length}) Â· also passed to Media Sources</summary>${sources.map(src=>`<a href="${esc(src.url)}" target="_blank" rel="noreferrer"><span class="source-kind-badge ${esc(src.platform||src.source_kind||'web')}">${esc(src.platform==='x'?'X/Twitter':src.platform==='reddit'?'Reddit':src.platform==='tiktok'?'TikTok':src.platform==='instagram'?'Instagram':src.platform==='youtube'?'YouTube':'Web')}</span> ${esc(src.source||'Source')} - ${esc(src.title||src.url)}</a>`).join('')}</details>`:''}
+        ${angles.length?`<div class="enrichment-angle-list">${angles.map(a=>`<div class="spice-angle ${a.safe_to_narrate?'safe':'unsafe'}"><div class="spice-angle-head"><span class="spice-type ${esc(a.type||'')}">${esc(String(a.type||'').replaceAll('_',' '))}</span><span class="spice-evidence">${esc(a.evidence_status||'weak')}${a.safe_to_narrate?' - usable':' - reference only'}</span></div><div class="spice-text">${esc(a.text||'')}</div>${a.usage_note?`<small>${esc(a.usage_note)}</small>`:''}</div>`).join('')}</div>`:''}
+        ${sources.length?`<details class="enrichment-sources"><summary>Collected sources (${sources.length}) - also passed to Media Sources</summary>${sources.map(src=>`<a href="${esc(src.url)}" target="_blank" rel="noreferrer"><span class="source-kind-badge ${esc(src.platform||src.source_kind||'web')}">${esc(src.platform==='x'?'X/Twitter':src.platform==='reddit'?'Reddit':src.platform==='tiktok'?'TikTok':src.platform==='instagram'?'Instagram':src.platform==='youtube'?'YouTube':'Web')}</span> ${esc(src.source||'Source')} - ${esc(src.title||src.url)}</a>`).join('')}</details>`:''}
         ${s.context_search_error?`<div class="run-note warn">${esc(s.context_search_error)}</div>`:''}
       </article>`;
     }).join('')}</div>
