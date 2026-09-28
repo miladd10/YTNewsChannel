@@ -203,9 +203,9 @@ def test_resolve_package_renders_stills_as_exact_duration_mp4_holds(tmp_path, mo
     assert (tmp_path / staged_path).exists()
     clip = saved_plan["visual_clips"][0]
     assert clip["source_in"] == 0.0
-    assert clip["source_out"] == 5.0
-    assert clip["source_media_duration"] == 5.0
-    assert clip["resolve_frame_count"] == 150
+    assert clip["source_out"] == 3.0
+    assert clip["source_media_duration"] == 3.0
+    assert clip["resolve_frame_count"] == 90
     assert clip["resolve_media_format"].startswith("H.264 MP4 still hold")
 
 
@@ -282,7 +282,7 @@ def test_resolve_stage_uses_actual_download_duration_not_candidate_metadata(tmp_
 
 
 
-def test_image_only_story_changes_image_about_every_five_seconds():
+def test_image_only_story_uses_each_still_once_for_three_seconds_max():
     window = {"story_id": "story", "start": 0.0, "end": 12.0, "duration": 12.0}
     images = [
         {"id": "i1", "media_type": "image", "title": "A", "stored_path": "a.jpg", "width": 1920, "height": 1080},
@@ -290,8 +290,9 @@ def test_image_only_story_changes_image_about_every_five_seconds():
         {"id": "i3", "media_type": "image", "title": "C", "stored_path": "c.jpg", "width": 1920, "height": 1080},
     ]
     clips = _visual_slices(window, images)
-    assert [round(x["timeline_duration"], 1) for x in clips] == [5.0, 5.0, 2.0]
+    assert [round(x["timeline_duration"], 1) for x in clips] == [3.0, 3.0, 3.0]
     assert [x["candidate_id"] for x in clips] == ["i1", "i2", "i3"]
+    assert round(sum(x["timeline_duration"] for x in clips), 1) == 9.0
 
 
 def test_same_trailer_scene_changes_use_hard_cuts_but_image_change_dissolves():
@@ -360,3 +361,53 @@ def test_otio_contains_dissolve_with_real_still_handles(tmp_path, monkeypatch):
     left, right = saved["visual_clips"]
     assert left["source_media_duration"] > left["timeline_duration"]
     assert right["source_in"] > 0
+
+
+
+def test_one_image_is_never_repeated_to_fill_story():
+    window = {"story_id": "story", "start": 0.0, "end": 11.0, "duration": 11.0}
+    images = [
+        {"id": "only", "media_type": "image", "title": "Only", "stored_path": "only.jpg", "width": 1920, "height": 1080},
+    ]
+    clips = _visual_slices(window, images)
+    assert len(clips) == 1
+    assert clips[0]["candidate_id"] == "only"
+    assert clips[0]["timeline_duration"] == 3.0
+
+
+def test_logo_or_fanfare_video_is_used_only_once():
+    window = {"story_id": "story", "start": 0.0, "end": 20.0, "duration": 20.0}
+    media = [
+        {
+            "id": "logo", "media_type": "video",
+            "title": "Paramount Pictures Logo with Fanfare Official (1080p, HD)",
+            "page_url": "https://example.com/logo", "duration": "0:15",
+            "stored_path": "logo.mp4", "width": 1920, "height": 1080,
+        },
+        {
+            "id": "img", "media_type": "image", "title": "Paramount studio",
+            "stored_path": "studio.jpg", "width": 1920, "height": 1080,
+        },
+    ]
+    clips = _visual_slices(window, media)
+    assert sum(1 for clip in clips if clip["candidate_id"] == "logo") == 1
+    assert sum(1 for clip in clips if clip["candidate_id"] == "img") == 1
+
+
+def test_story_windows_reserve_aligned_outro_tail():
+    rows = [{
+        "id": "v1", "segment_index": 1, "story_id": "ray",
+        "duration_seconds": 36.0, "audio_path": "audio/ray.mp3",
+        "alignment_json": "{}",
+        "reserved_tail_seconds": 15.0,
+        "reserved_tail_kind": "outro",
+    }]
+    voice, total = voice_timeline(rows)
+    assert total == 36.0
+    windows = story_windows(voice)
+    assert len(windows) == 2
+    assert windows[0]["story_id"] == "ray"
+    assert windows[0]["duration"] == 21.0
+    assert windows[1]["story_id"] == ""
+    assert windows[1]["duration"] == 15.0
+    assert windows[1]["reserved_kind"] == "outro"
