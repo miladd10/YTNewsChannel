@@ -144,11 +144,13 @@ narrationHtml=async function(){
   const sectionSummary=(w.sections||[]).filter(x=>x.stories?.length).map(x=>`<div class="writer-section-row"><strong>${esc(x.label)}</strong><span>${x.stories.length} selected</span><small>${esc(x.writer_role||'')}</small></div>`).join('');
   const familiarityCount=(w.sections||[]).flatMap(x=>x.stories||[]).filter(x=>x.familiarity_needed&&x.familiarity_anchor).length;
   const styles=(w.style_transcripts||[]).map(t=>`<div class="style-transcript-row"><div><strong>${esc(t.name)}</strong><span>${fmt(t.char_count)} chars - ${Number(t.enabled)?'used by writer/reviewer':'disabled'}</span></div><div class="top-actions"><button class="btn ghost small-link" data-toggle-style-transcript="${t.id}" data-enabled="${Number(t.enabled)?1:0}">${Number(t.enabled)?'Disable':'Enable'}</button><button class="btn ghost small-link" data-delete-style-transcript="${t.id}">Delete</button></div></div>`).join('');
+  const styleProfile=w.style_profile||{};
+  const styleProfileHtml=`<div class="style-profile-card ${styleProfile.current?'current':styleProfile.stale?'stale':'missing'}"><div class="style-profile-head"><div><strong>Style Blueprint</strong><span>${styleProfile.current?'Current':styleProfile.stale?'Stale - references changed':'Not built yet'} · ${Number(styleProfile.enabled_transcript_count||0)} enabled transcript${Number(styleProfile.enabled_transcript_count||0)===1?'':'s'}</span></div><button id="rebuildStyleProfileBtn" class="btn secondary small-link">${styleProfile.current?'Rebuild Blueprint':'Build Blueprint'}</button></div>${styleProfile.profile_text?`<details><summary>What the app learned from the references</summary><pre class="editor style-profile-text">${esc(styleProfile.profile_text)}</pre></details>`:''}</div>`;
   const draftOptions=drafts.map(d=>`<option value="${d.id}" ${d.id===state.narrationDraftId?'selected':''}>Draft V${d.version_number}${Number(d.approved)?' - APPROVED':''} - ${esc(d.model)}</option>`).join('');
   const selectedStories=(w.sections||[]).flatMap(x=>x.stories||[]);
   const draftTime=draft?(Date.parse(draft.created_at||'')||0):0;
   const pendingEnrichment=draft?selectedStories.some(s=>(Date.parse(s.context_searched_at||'')||0)>draftTime):false;
-  return `<div class="section-head"><div><div class="eyebrow">STEP 03</div><h2>Narration Writer - Review Loop</h2><p>Selected current-week news is factual authority. The full Filmbaz library teaches recurring tone, pacing, compact context and storytelling behavior. Non-obvious people/companies can use one short verified familiarity cue.</p></div><button id="generateNarrationBtn" class="btn primary">Generate Baseline Draft</button></div>${metrics()}<div class="writer-grid"><section class="card writer-panel"><div class="writer-panel-head"><div><div class="eyebrow">APPROVED NEWS INPUT</div><h3>Section plan</h3><p>${familiarityCount} selected story/stories include a casual-audience familiarity anchor.</p></div></div>${sectionSummary||'<div class="muted">No Included stories yet.</div>'}</section><section class="card writer-panel"><div class="writer-panel-head"><div><div class="eyebrow">STYLE CORPUS</div><h3>Filmbaz transcript library</h3><p>${enabledStyles.length} enabled transcript${enabledStyles.length===1?'':'s'} - all enabled references contribute distributed samples across their full episodes.</p></div><button id="importStyleTranscriptsBtn" class="btn secondary">Import transcripts</button><input id="styleTranscriptFiles" type="file" accept=".txt,.md,text/plain,text/markdown" multiple class="hidden" /></div>${styles||'<div class="muted">Import Filmbaz transcript files. They are reusable across cinema weekly projects.</div>'}</section></div>${storyEnrichmentHtml(selectedStories,draft)}${draft?`<section class="card narration-workbench"><div class="narration-toolbar"><select id="narrationDraftSelect">${draftOptions}</select><div class="top-actions">${narrationGateBadge(review)}<button id="reviewNarrationBtn" class="btn secondary" ${pendingEnrichment?'disabled title="Rewrite with Enrichment first"':''}>Run Reviewer</button>${review?`<button id="reviseNarrationBtn" class="btn secondary" ${review.gate_status==='pass'?'disabled':''}>Revise from Review</button>`:''}<button id="approveNarrationBtn" class="btn primary" ${Number(draft.approved)||!review||review.gate_status==='revision_required'?'disabled':''}>${Number(draft.approved)?'Approved':'Approve Draft'}</button></div></div>${reviewFeedbackHtml(review)}<div class="draft-feedback-panel"><div class="eyebrow">DRAFT V${draft.version_number}</div><pre class="editor narration-editor">${esc(draft.content)}</pre></div></section>`:'<div class="card placeholder">Select news in Step 2, import style transcripts if available, then generate Draft V1.</div>'}`;
+  return `<div class="section-head"><div><div class="eyebrow">STEP 03</div><h2>Narration Writer - Review Loop</h2><p>Selected current-week news is factual authority. The full Filmbaz library teaches recurring tone, pacing, compact context and storytelling behavior. Non-obvious people/companies can use one short verified familiarity cue.</p></div><button id="generateNarrationBtn" class="btn primary">Generate Baseline Draft</button></div>${metrics()}<div class="writer-grid"><section class="card writer-panel"><div class="writer-panel-head"><div><div class="eyebrow">APPROVED NEWS INPUT</div><h3>Section plan</h3><p>${familiarityCount} selected story/stories include a casual-audience familiarity anchor.</p></div></div>${sectionSummary||'<div class="muted">No Included stories yet.</div>'}</section><section class="card writer-panel"><div class="writer-panel-head"><div><div class="eyebrow">STYLE CORPUS</div><h3>Filmbaz transcript library</h3><p>${enabledStyles.length} enabled transcript${enabledStyles.length===1?'':'s'} - the app now distills them into a reusable Style Blueprint and also preserves long flow anchors from complete episodes.</p></div><button id="importStyleTranscriptsBtn" class="btn secondary">Import transcripts</button><input id="styleTranscriptFiles" type="file" accept=".txt,.md,text/plain,text/markdown" multiple class="hidden" /></div>${styleProfileHtml}${styles||'<div class="muted">Import Filmbaz transcript files. They are reusable across cinema weekly projects.</div>'}</section></div>${storyEnrichmentHtml(selectedStories,draft)}${draft?`<section class="card narration-workbench"><div class="narration-toolbar"><select id="narrationDraftSelect">${draftOptions}</select><div class="top-actions">${narrationGateBadge(review)}<button id="reviewNarrationBtn" class="btn secondary" ${pendingEnrichment?'disabled title="Rewrite with Enrichment first"':''}>Run Reviewer</button>${review?`<button id="reviseNarrationBtn" class="btn secondary" ${review.gate_status==='pass'?'disabled':''}>Revise from Review</button>`:''}<button id="approveNarrationBtn" class="btn primary" ${Number(draft.approved)||!review||review.gate_status==='revision_required'?'disabled':''}>${Number(draft.approved)?'Approved':'Approve Draft'}</button></div></div>${reviewFeedbackHtml(review)}<div class="draft-feedback-panel"><div class="eyebrow">DRAFT V${draft.version_number}</div><pre class="editor narration-editor">${esc(draft.content)}</pre></div></section>`:'<div class="card placeholder">Select news in Step 2, import style transcripts if available, then generate Draft V1.</div>'}`;
 };
 
 
@@ -163,6 +165,26 @@ generateNarration=async function(){
     toast(`Draft V${r.version_number} generated - ${r.style_transcript_count} style transcript(s) used`);
   }catch(e){finishRunStatus(false,e.message);toast(e.message,true);if(b){b.disabled=false;b.textContent='Generate Fresh Draft'}}
 };
+async function rebuildStyleProfile(){
+  const b=$('#rebuildStyleProfileBtn');if(b){b.disabled=true;b.textContent='Analyzing...'}
+  const s=state.settings?.ai||{};
+  startRunStatus({title:'Building narration style blueprint',meta:'Analyzing all enabled Filmbaz references',steps:['Loading full reference library','Comparing recurring oral patterns','Studying long flow anchors','Distilling story micro-arcs + transitions','Saving style blueprint']});
+  try{
+    const r=await api(`/api/projects/${state.project.id}/style-profile/rebuild`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({provider:s.writer_provider,model:s.writer_model})
+    });
+    await renderStage();
+    finishRunStatus(true,'',`Style Blueprint rebuilt from ${r.transcript_count} transcript(s)`);
+    toast(`Style Blueprint rebuilt from ${r.transcript_count} transcript(s)`);
+    setTimeout(()=>document.querySelector('.style-profile-card')?.scrollIntoView({behavior:'smooth',block:'center'}),60);
+  }catch(e){
+    finishRunStatus(false,e.message);toast(e.message,true);
+    if(b){b.disabled=false;b.textContent='Build Blueprint'}
+  }
+}
+
 async function searchStoryContext(storyId){
   const b=document.querySelector(`[data-search-story-context="${storyId}"]`);
   if(b){b.disabled=true;b.textContent='Searching...'}
@@ -243,6 +265,7 @@ const baseWireStageEditorial=wireStage;
 wireStage=function(){
   baseWireStageEditorial();
   const nr=$('#reviewNarrationBtn');if(nr)nr.onclick=reviewNarration;
+  const sp=$('#rebuildStyleProfileBtn');if(sp)sp.onclick=rebuildStyleProfile;
   const re=$('#rewriteEnrichedBtn');if(re)re.onclick=rewriteWithEnrichment;
   document.querySelectorAll('[data-search-story-context]').forEach(b=>b.onclick=()=>searchStoryContext(b.dataset.searchStoryContext));
   const nv=$('#reviseNarrationBtn');if(nv)nv.onclick=reviseNarration;
