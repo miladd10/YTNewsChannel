@@ -9,9 +9,9 @@ DATA_DIR = BASE_DIR / "data"
 DB_PATH = DATA_DIR / "ytnews.db"
 
 PIPELINE = [
-    (1, "research", "Research"),
-    (2, "pick-news", "Pick News"),
-    (3, "narration", "Narration"),
+    (1, "research", "Format Research"),
+    (2, "pick-news", "Section Selection"),
+    (3, "narration", "Narration Writer"),
     (4, "voice", "Voice"),
     (5, "media-sources", "Media Sources"),
     (6, "downloads", "Downloads"),
@@ -132,6 +132,42 @@ def init_db() -> None:
                 FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS style_transcripts (
+                id TEXT PRIMARY KEY,
+                channel TEXT NOT NULL DEFAULT 'cinema',
+                content_type TEXT NOT NULL DEFAULT 'weekly_news',
+                name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                char_count INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_style_transcripts_format
+                ON style_transcripts(channel, content_type, enabled);
+
+            CREATE TABLE IF NOT EXISTS narration_reviews (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                narration_id TEXT NOT NULL,
+                review_number INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                gate_status TEXT NOT NULL DEFAULT 'revision_required',
+                blocking_count INTEGER NOT NULL DEFAULT 0,
+                major_count INTEGER NOT NULL DEFAULT 0,
+                minor_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(narration_id, review_number),
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY(narration_id) REFERENCES narrations(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_narration_reviews_project
+                ON narration_reviews(project_id, created_at);
+
             CREATE TABLE IF NOT EXISTS media_plans (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL,
@@ -221,6 +257,10 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_media_candidates_selected ON media_candidates(project_id, selected);
             """
         )
+        if not _column_exists(conn, "narrations", "parent_narration_id"):
+            conn.execute("ALTER TABLE narrations ADD COLUMN parent_narration_id TEXT NOT NULL DEFAULT ''")
+        if not _column_exists(conn, "narrations", "revision_review_id"):
+            conn.execute("ALTER TABLE narrations ADD COLUMN revision_review_id TEXT NOT NULL DEFAULT ''")
         if not _column_exists(conn, "projects", "media_chunk_minutes"):
             conn.execute("ALTER TABLE projects ADD COLUMN media_chunk_minutes REAL NOT NULL DEFAULT 1.0")
         if not _column_exists(conn, "voice_segments", "take1_path"):
