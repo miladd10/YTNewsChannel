@@ -1688,6 +1688,14 @@ def generate_narration(project_id: str, body: GenerateBody):
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    text, fact_check, _, _ = _run_narration_fact_check(
+        project,
+        stories,
+        text,
+        actual_provider,
+        actual_model,
+    )
+
     narration_id = str(uuid.uuid4())
     stamp = now()
     with db() as conn:
@@ -1704,6 +1712,23 @@ def generate_narration(project_id: str, body: GenerateBody):
             ),
         )
         _write_narration_file(project, version, text)
+        conn.execute(
+            """UPDATE narrations
+               SET fact_check_status=?,fact_check_issue_count=?,fact_check_json=?
+               WHERE id=?""",
+            (
+                str(fact_check.get("status") or "needs_human_check"),
+                int(fact_check.get("issue_count") or 0),
+                json.dumps(fact_check, ensure_ascii=False),
+                narration_id,
+            ),
+        )
+        fact_folder = Path(project["root_path"]) / "narration" / "fact-checks"
+        fact_folder.mkdir(parents=True, exist_ok=True)
+        (fact_folder / f"v{version:02d}_fact_check.json").write_text(
+            json.dumps(fact_check, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
         plan_folder = Path(project["root_path"]) / "narration" / "plans"
         plan_folder.mkdir(parents=True, exist_ok=True)
         (plan_folder / f"v{version:02d}_content_plan.json").write_text(
@@ -1722,6 +1747,9 @@ def generate_narration(project_id: str, body: GenerateBody):
         "style_profile_current": bool(style_profile.get("current")),
         "style_profile_transcript_count": int(style_profile.get("enabled_transcript_count") or 0),
         "content_plan_error": content_plan_error,
+        "fact_check_status": fact_check.get("status") or "needs_human_check",
+        "fact_check_issue_count": int(fact_check.get("issue_count") or 0),
+        "fact_check_issues": fact_check.get("issues") or [],
     }
 
 
