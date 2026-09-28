@@ -469,10 +469,15 @@ Writing rules:
 - CRITICS: only call something critic reaction when the supplied angle is type=critic_reaction. Do not turn audience/social comments into critic consensus.
 - COOL FACTS / BACKGROUND: use a surprising supported detail when it helps a casual viewer care, but keep it short and clearly contextual.
 - Avoid generic AI/news-presenter filler such as long "this may seem small but..." setups, repeated "the interesting thing is...", repeated "this means...", ceremonial section intros, or commentary that adds no information.
+- Do not end quick stories with empty placeholder commentary such as "حالا باید دید...", "باید زیر نظرش داشت", "زمان مشخص می‌کند", or "این پروژه کم‌کم شکل می‌گیرد" unless the approved evidence gives a concrete unresolved question worth saying. Prefer ending on the strongest supported detail, reaction, comparison, or consequence.
+- Do not mechanically start each item with "خبر بعدی..." / "از دنیای ... هم..." / "اما می‌رسیم به...". Let one story naturally hand off to the next when possible.
 - Prefer specific spoken phrasing over abstract corporate language. Explain a business/industry item in plain language only as much as a casual viewer needs to understand why it matters.
 - CASUAL-AUDIENCE FAMILIARITY RULE: on the first important mention of a director, actor, creator, or company that a general movie viewer may not immediately place, use the story's familiarity_anchor once when available: a very short natural reminder of the best-known relevant work/identity ("Brad Bird, the director many people know from The Incredibles"). Do not turn it into a biography. Skip the reminder for globally obvious household names/entities. For older story rows that do not yet have familiarity_anchor, you may use ONE recognition cue only when that credit/identity is explicitly supported by the story's approved article/background snippets. Never invent an anchor; never fill it from memory or guesswork.
 - Usually one familiarity anchor is enough for the entire story. Do not stack multiple credits/titles.
 - Trends can breathe and go deeper; Upcoming/TV/Celebrities/AI/Viral/HD/Toxic should generally move faster.
+- STORY MERGING: database story IDs are evidence boundaries, not mandatory paragraph boundaries. When two or more selected items clearly concern the same film/company/event (especially multiple Box Office totals/milestones), combine them into one coherent spoken item instead of repeating the setup. Keep each <!-- STORY:id --> marker immediately before the sentence(s) supported by that story so traceability survives.
+- BOX OFFICE should sound like a compact rundown with movement and comparison, not five disconnected paragraphs that each restate the film title.
+- The INTRO should tease the most intriguing concrete hooks from the actual episode. Avoid template lines like "امروز قراره خیلی سریع بریم سراغ مهم‌ترین خبرها" when they add nothing.
 - Prefer concrete numbers and comparisons when those numbers exist in the approved research.
 - Vary sentence length and transitions naturally. Short sentences are welcome when they give the narration rhythm.
 - Keep section headings for organization, but the spoken prose underneath should flow rather than announcing the template.
@@ -508,6 +513,9 @@ Check:
 - whether any rumor was added without an explicit safe type=rumor angle, or was phrased as fact instead of clearly unconfirmed;
 - whether critic reaction, social buzz, controversy, or "people are talking about..." claims actually match the supplied spice evidence and its scale;
 - whether the draft overuses spice: quick stories usually need at most one strong extra angle, not every available fact/reaction;
+- repetitive one-story-per-paragraph structure when several selected IDs belong to the same film/event and should read as one spoken item;
+- empty endings such as "حالا باید دید..." / "باید زیر نظرش داشت" that could be replaced by a concrete supported hook or simply removed;
+- generic intro language that could fit any week's episode instead of teasing this week's specific intrigue;
 - whether the draft reflects recurring patterns across the full style corpus rather than generic YouTube-news prose or quirks copied from one reference;
 - whether Trends receives appropriate depth while quick sections remain quick;
 - whether Intro hooks the actual episode and Outro closes briefly;
