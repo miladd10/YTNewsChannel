@@ -151,6 +151,119 @@ CINEMA_WEEKLY_FORMAT = [
     },
 ]
 
+SECTION_CONTRACTS = {
+    "intro": {
+        "mission": "Open the episode, establish the week, and tease the strongest current stories.",
+        "include": ["short greeting", "episode hook", "brief tease of selected stories"],
+        "exclude": ["new factual claims not present in selected news", "long setup", "news item that belongs in another section"],
+        "evidence": ["approved episode selection only"],
+        "preferred_sources": [],
+        "social_sources": [],
+    },
+    "trend": {
+        "mission": "Cover the single biggest conversation-driving cinema story of the week in more depth than any other section.",
+        "include": ["major film trend", "box-office performance tied to the lead story", "critic/audience response", "controversy or production change", "director/star follow-up when directly connected"],
+        "exclude": ["minor trailer announcements with little attention", "generic celebrity gossip", "unrelated box-office chart items"],
+        "evidence": ["multiple reputable reports when possible", "official studio/filmmaker statements", "box-office/ratings data from attributable sources"],
+        "preferred_sources": ["official studio/filmmaker", "trade press", "major entertainment press", "box-office/ratings sources"],
+        "social_sources": ["x", "tiktok", "reddit"],
+    },
+    "industry": {
+        "mission": "Explain studio, streaming, legal, regulatory, finance, executive, or labor stories and why they matter to audiences/production.",
+        "include": ["mergers/acquisitions", "lawsuits/regulation", "studio finance", "executive moves", "platform strategy", "production commitments"],
+        "exclude": ["ordinary casting", "celebrity personal life", "box-office chart unless it materially drives the business story"],
+        "evidence": ["company/regulator filings or statements", "trade press", "reputable business reporting"],
+        "preferred_sources": ["official company/regulator", "trade press", "major business press"],
+        "social_sources": ["x"],
+    },
+    "upcoming_films": {
+        "mission": "Cover meaningful developments for unreleased or newly announced films.",
+        "include": ["official trailer/teaser", "first look", "casting", "production start", "festival/critic first reactions", "release date", "sequel/film announcement"],
+        "exclude": ["TV-only stories", "old trailers resurfacing with no new development", "fan rumor with no reporting"],
+        "evidence": ["official studio/filmmaker post", "trade press", "festival source", "reputable entertainment press"],
+        "preferred_sources": ["official studio/filmmaker", "trade press", "festival", "major entertainment press"],
+        "social_sources": ["x", "tiktok"],
+    },
+    "tv_series": {
+        "mission": "Cover meaningful television/streaming-series developments.",
+        "include": ["renewal", "cancellation", "delay", "premiere", "showrunner change", "platform strategy tied to a series"],
+        "exclude": ["feature-film news", "celebrity-only personal news", "generic platform corporate news better suited to Industry"],
+        "evidence": ["network/platform statement", "trade press", "reputable entertainment press"],
+        "preferred_sources": ["official network/platform", "trade press", "major entertainment press"],
+        "social_sources": ["x"],
+    },
+    "celebrities": {
+        "mission": "People-focused cinema/entertainment news: significant events, honors, personal announcements, unusual incidents, and strong interview anecdotes.",
+        "include": ["awards/honors", "museum/opening/event", "marriage/family announcement", "verified personal announcement", "detention/legal incident", "press-tour anecdote/interview", "notable public post"],
+        "exclude": ["unsupported relationship gossip", "anonymous rumor presented as fact", "fan speculation", "appearance/health speculation"],
+        "evidence": ["celebrity/representative's own public post", "verified interview", "official event/award source", "reputable entertainment reporting"],
+        "preferred_sources": ["official X/TikTok/Instagram post", "direct interview", "official event", "reputable entertainment press"],
+        "social_sources": ["x", "tiktok", "reddit"],
+        "social_policy": "Own-account X/TikTok posts may be primary evidence for what the person posted. Reddit is discovery/reaction only unless the story itself is about Reddit reaction; corroborate factual claims elsewhere.",
+    },
+    "ai_tech": {
+        "mission": "Cover AI/technology developments that meaningfully intersect with film, performers, production, VFX, or entertainment culture.",
+        "include": ["AI actors", "generative production tools", "VFX/production tech", "robots/virtual performers when cinema-relevant", "viral tech demonstration with a reality check"],
+        "exclude": ["general tech news with no entertainment connection", "obviously staged viral content presented as real"],
+        "evidence": ["original demo/post", "company/research source", "reputable reporting", "independent reality-check source when needed"],
+        "preferred_sources": ["original source", "company/research source", "reputable tech/entertainment press"],
+        "social_sources": ["x", "tiktok", "reddit"],
+    },
+    "viral_images": {
+        "mission": "Fast visual stories centered on a specific image/post that became notable during the week.",
+        "include": ["celebrity/studio post", "award image", "on-set/photo reveal", "widely shared image with clear provenance"],
+        "exclude": ["generic publicity still with no viral/news hook", "unverified repost", "appearance/health speculation"],
+        "evidence": ["original social post preferred", "official account", "reputable reporting that embeds/identifies original post"],
+        "preferred_sources": ["original X/TikTok/Instagram post", "official account", "reputable entertainment press"],
+        "social_sources": ["x", "tiktok", "reddit"],
+        "social_policy": "Prefer the original post. Reddit can show community reaction but should not replace the original image/post or independent verification.",
+    },
+    "box_office": {
+        "mission": "Give the week's compact box-office rundown and one useful milestone.",
+        "include": ["domestic weekend top five", "worldwide/total when notable", "days/weeks in release", "major milestone or studio record"],
+        "exclude": ["unverified forecast presented as actual gross", "social-media estimates without a box-office source"],
+        "evidence": ["recognized box-office reporting/data", "studio release when appropriate"],
+        "preferred_sources": ["box-office data/reporting", "trade press"],
+        "social_sources": [],
+    },
+    "channel_polls": {
+        "mission": "Report the channel's own prior audience poll results.",
+        "include": ["actual supplied poll results", "viewer count/sample when supplied", "good/average/bad split", "brief verdict"],
+        "exclude": ["invented poll data", "third-party public polls substituted for channel polls"],
+        "evidence": ["user/channel supplied poll data only"],
+        "preferred_sources": ["channel data"],
+        "social_sources": [],
+    },
+    "now_available": {
+        "mission": "Tell viewers which relevant films became available for home viewing during the week.",
+        "include": ["digital/PVOD/VOD release", "streaming availability", "brief premise/context"],
+        "exclude": ["theatrical-only release", "rumored digital date without confirmation"],
+        "evidence": ["platform/studio listing", "reputable release-date reporting"],
+        "preferred_sources": ["official platform/studio", "reputable entertainment press"],
+        "social_sources": ["x"],
+    },
+    "toxic_news": {
+        "mission": "End the news portion with a light, weird, embarrassing, or absurd but still verifiable entertainment story.",
+        "include": ["odd celebrity incident", "weird production/location story", "funny social-media mishap", "low-stakes verified gossip"],
+        "exclude": ["serious allegation treated as a joke", "unverified rumor", "private-person harassment", "health/appearance speculation"],
+        "evidence": ["primary public post when applicable", "reputable report", "official record/source for incidents"],
+        "preferred_sources": ["original social post", "reputable entertainment press", "local/official source"],
+        "social_sources": ["x", "tiktok", "reddit"],
+        "social_policy": "Reddit can suggest a lead or provide reaction, but factual claims require a primary/reputable source before narration.",
+    },
+    "outro": {
+        "mission": "Close briefly and invite engagement.",
+        "include": ["short goodbye", "like/subscribe/comment call", "viewer submission prompt when desired"],
+        "exclude": ["new news item", "unverified factual claim"],
+        "evidence": ["none"],
+        "preferred_sources": [],
+        "social_sources": [],
+    },
+}
+
+for _section in CINEMA_WEEKLY_FORMAT:
+    _section.update(SECTION_CONTRACTS.get(_section["key"], {}))
+
 FORMAT_BY_KEY = {item["key"]: item for item in CINEMA_WEEKLY_FORMAT}
 RESEARCH_SECTIONS = [item for item in CINEMA_WEEKLY_FORMAT if item.get("research")]
 SECTION_ORDER = {item["key"]: index for index, item in enumerate(CINEMA_WEEKLY_FORMAT)}
@@ -177,6 +290,13 @@ def format_packet() -> list[dict]:
             "min_items": int(item.get("min_items") or 0),
             "max_items": int(item.get("max_items") or 0),
             "writer_role": item.get("writer_role") or "",
+            "mission": item.get("mission") or "",
+            "include": item.get("include") or [],
+            "exclude": item.get("exclude") or [],
+            "evidence": item.get("evidence") or [],
+            "preferred_sources": item.get("preferred_sources") or [],
+            "social_sources": item.get("social_sources") or [],
+            "social_policy": item.get("social_policy") or "",
         }
         for item in CINEMA_WEEKLY_FORMAT
     ]
