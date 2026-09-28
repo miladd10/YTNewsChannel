@@ -724,7 +724,11 @@ def _assign_transitions(clips: list[dict], fps: int) -> None:
 
 
 
-def _media_quality_warnings(story_id: str, candidates: list[dict]) -> list[str]:
+def _media_quality_warnings(
+    story_id: str,
+    candidates: list[dict],
+    story_duration: float = 0.0,
+) -> list[str]:
     warnings: list[str] = []
     for item in candidates:
         title = str(item.get("title") or item.get("id") or "media")
@@ -764,6 +768,22 @@ def _media_quality_warnings(story_id: str, candidates: list[dict]) -> list[str]:
                 f"Story {story_id} uses contextual {coverage_kind} footage: {title}. "
                 "It is not footage from the current title/story."
             )
+    videos = [item for item in candidates if item.get("media_type") == "video"]
+    images = [item for item in candidates if item.get("media_type") == "image"]
+    known_video_seconds = [
+        float(value)
+        for value in (duration_seconds(item.get("duration")) for item in videos)
+        if value is not None and value > 0
+    ]
+    if story_duration > 0 and videos and not images and known_video_seconds:
+        total_unique_video = sum(known_video_seconds)
+        if total_unique_video + 0.5 < story_duration:
+            warnings.append(
+                f"Story {story_id} has {story_duration:.2f}s narration but only about "
+                f"{total_unique_video:.2f}s of selected video source duration. Regenerate B-roll and "
+                "select/download a longer official trailer or additional relevant footage."
+            )
+
     return list(dict.fromkeys(warnings))
 
 
@@ -790,7 +810,7 @@ def build_edit_plan(project: dict, voice_segments: list[dict], candidates: list[
                 + f" ({window['duration']:.2f}s)."
             )
             continue
-        warnings.extend(_media_quality_warnings(story_id, story_candidates))
+        warnings.extend(_media_quality_warnings(story_id, story_candidates, float(window.get("duration") or 0)))
         root_value = project.get("root_path")
         root = Path(root_value) if root_value else None
         cache_dir = (root / "media" / "analysis") if root else None
