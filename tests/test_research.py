@@ -1,4 +1,4 @@
-from app.services.research import _fact_check_queries, _fact_check_trust_tier, cluster_articles, normalize_title
+from app.services.research import _fact_check_queries, _fact_check_query_scope, _fact_check_trust_tier, cluster_articles, normalize_title
 
 def test_normalize_title_removes_noise():
     assert "movie" in normalize_title("The Movie: First Trailer - Variety")
@@ -35,3 +35,10 @@ def test_fact_check_prefers_recognized_box_office_and_official_sources():
     assert _fact_check_trust_tier("https://www.boxofficemojo.com/title/tt123") == "preferred"
     assert _fact_check_trust_tier("https://www.sonypictures.com/movies/residentevil") == "preferred"
     assert _fact_check_trust_tier("https://random-movie-blog.example/post") == "supplemental"
+
+
+
+def test_fact_check_query_scopes_keep_weekly_weekend_daily_separate():
+    assert _fact_check_query_scope('"Movie" domestic box office weekend rank weekend gross') == "weekend_domestic"
+    assert _fact_check_query_scope('"Movie" domestic box office weekly chart weekly gross') == "weekly_domestic"
+    assert _fact_check_query_scope('"Movie" domestic box office daily rank daily gross') == "daily_domestic"
