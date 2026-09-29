@@ -2488,6 +2488,9 @@ def generate_narration(project_id: str, body: GenerateBody):
         "claim_attributed_count": int(claim_audit.get("attributed_count") or 0),
         "claim_blocked_count": int(claim_audit.get("blocked_count") or 0),
         "claim_ledger_summary": ledger_summary(claim_ledger),
+        "structure_audit": structure_audit,
+        "repair_count": repair_count,
+        "repair_error": repair_error,
     }
 
 
