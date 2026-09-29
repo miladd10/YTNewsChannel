@@ -74,3 +74,15 @@ def test_resolve_refuses_stale_voice_and_downloads_skip_old_runs(client):
     assert r.status_code == 409 and "no longer approved" in r.json()["detail"]
     r = client.post("/api/projects/p/media/download-selected")
     assert r.status_code == 400 and "older research runs" in r.json()["detail"]
+
+
+def test_timeline_links_outside_project_are_detected(tmp_path):
+    from app.main import _timeline_links_outside
+    root = tmp_path / "proj"; (root / "resolve" / "media").mkdir(parents=True)
+    good = root / "resolve" / "media" / "a.mp4"; good.write_bytes(b"x")
+    otio = root / "resolve" / "news_timeline.otio"
+    otio.write_text('{"target_url": "%s"}' % good, encoding="utf-8")
+    assert _timeline_links_outside(otio, root) is None
+    otio.write_text('{"target_url": "/Users/someone/Old Folder/resolve/media/a.mp4"}', encoding="utf-8")
+    moved = _timeline_links_outside(otio, root)
+    assert moved and moved["count"] == 1 and "Old Folder" in moved["example_folder"]

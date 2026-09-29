@@ -4086,6 +4086,30 @@ def download_selected_media(project_id: str):
     }
 
 
+def _timeline_links_outside(otio_path: Path, root: Path) -> dict | None:
+    """Media in the OTIO is linked by absolute path (Resolve requires it).
+    Report links that point outside this project folder or to missing files."""
+    if not otio_path.exists():
+        return None
+    try:
+        text = otio_path.read_text(encoding="utf-8")
+    except Exception:
+        return None
+    root_resolved = root.expanduser().resolve()
+    bad = []
+    for url in re.findall(r'"target_url"\s*:\s*"([^"]+)"', text):
+        path = Path(url[7:] if url.startswith("file://") else url)
+        try:
+            inside = path.resolve().is_relative_to(root_resolved)
+        except Exception:
+            inside = False
+        if not inside or not path.exists():
+            bad.append(path)
+    if not bad:
+        return None
+    return {"count": len(bad), "example_folder": str(bad[0].parent)}
+
+
 @app.get("/api/projects/{project_id}/resolve-plan")
 def get_resolve_plan(project_id: str):
     with db() as conn:
@@ -4159,11 +4183,20 @@ def get_resolve_plan(project_id: str):
 
     package_signature = str((plan or {}).get("input_signature") or "")
     stale = not package_signature or package_signature != current_signature
+    moved = _timeline_links_outside(root / "resolve" / "news_timeline.otio", root)
+    if moved:
+        stale = True
     files_complete = bool(plan and manifest_path.exists() and all(item["exists"] for item in files))
     ready = bool(files_complete and prerequisites["ready"] and not stale)
 
     message = ""
-    if prerequisites["voice_pending"]:
+    if moved:
+        message = (
+            f"The timeline links {moved['count']} media file(s) by full path to a different or missing location "
+            f"({moved['example_folder']}). The project folder was probably moved or renamed; regenerate the package here "
+            "so DaVinci Resolve does not show them as Media Offline."
+        )
+    elif prerequisites["voice_pending"]:
         message = f"{prerequisites['voice_pending']} voice segment(s) still need an approved aligned take in Step 4."
     elif prerequisites["stories_missing_downloaded_media"]:
         details = prerequisites.get("missing_story_details") or []
