@@ -693,6 +693,7 @@ SPOKEN QUALITY RULES (shared by writer, reviser, enrichment writer and fact chec
 - Speak numbers the way a host says them: round to natural spoken precision within the ledger value ("حدود ۱۰۸ میلیون دلار"، "نزدیک ۲ میلیارد و ۹۰۰ میلیون دلار"). Avoid decimals unless the decimal itself is the point.
 - Keep ONE spoken register for the whole episode. In Persian use conversational forms consistently («رو» not «را»، «داره» not «دارد»، «اومده» not «آمده»، «ـه/هست» not «است»، «شدن» not «شده‌اند»). Names, titles and exact numbers stay as they are.
 - Organization, guild and union names: say them in plain Persian description when a transliteration would be unfamiliar or would sound like another name or word in the same passage. Never let two different organizations sound alike within one story.
+- Greeting: use the channel name from project.channel_name only when it is set; otherwise greet without a channel name. Never borrow a channel name from the style references.
 - Every sentence must add a new beat. Do not recap what was just said ("پس ... هم ..." summaries), and do not end an item with low-value evaluation ("اطلاعات بدی نیست"، "جالبه").
 """
 

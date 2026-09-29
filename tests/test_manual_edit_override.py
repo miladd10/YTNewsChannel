@@ -86,3 +86,12 @@ def test_timeline_links_outside_project_are_detected(tmp_path):
     otio.write_text('{"target_url": "/Users/someone/Old Folder/resolve/media/a.mp4"}', encoding="utf-8")
     moved = _timeline_links_outside(otio, root)
     assert moved and moved["count"] == 1 and "Old Folder" in moved["example_folder"]
+
+
+def test_channel_name_is_saved_and_reaches_the_greeting_rule(client):
+    r = client.patch("/api/projects/p", json={"channel_name": "Cine Notes"})
+    assert r.status_code == 200
+    assert client.get("/api/projects/p").json()["channel_name"] == "Cine Notes"
+    from app.services.cinema_format import WRITER_SYSTEM, REVISION_SYSTEM, ENRICHMENT_REWRITE_SYSTEM
+    for prompt in (WRITER_SYSTEM, REVISION_SYSTEM, ENRICHMENT_REWRITE_SYSTEM):
+        assert "project.channel_name" in prompt and "Never borrow a channel name" in prompt

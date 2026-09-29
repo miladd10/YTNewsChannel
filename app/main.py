@@ -649,6 +649,7 @@ class ProjectCreate(BaseModel):
     geographic_focus: str = "Worldwide"
     editorial_focus: str = "Balanced"
     notes: str = ""
+    channel_name: str = Field(default="", max_length=80)
     parent_path: str = Field(min_length=1)
 
 
@@ -662,6 +663,7 @@ class ProjectUpdate(BaseModel):
     geographic_focus: str | None = None
     editorial_focus: str | None = None
     notes: str | None = None
+    channel_name: str | None = Field(default=None, max_length=80)
 
 
 @app.get("/api/projects")
@@ -685,12 +687,12 @@ def create_project(body: ProjectCreate):
         conn.execute(
             """INSERT INTO projects(
                 id,name,channel,content_type,language,target_minutes,media_chunk_minutes,date_start,date_end,
-                geographic_focus,editorial_focus,notes,root_path,created_at,updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                geographic_focus,editorial_focus,notes,root_path,created_at,updated_at,channel_name
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 project_id, body.name.strip(), body.channel, body.content_type, body.language,
                 body.target_minutes, body.media_chunk_minutes, body.date_start or start, body.date_end or end,
-                body.geographic_focus, body.editorial_focus, body.notes, str(root), stamp, stamp,
+                body.geographic_focus, body.editorial_focus, body.notes, str(root), stamp, stamp, body.channel_name.strip(),
             ),
         )
         save_manifest(conn, project_id)
@@ -709,7 +711,7 @@ def update_project(project_id: str, body: ProjectUpdate):
     if not values:
         with db() as conn:
             return project_payload(conn, project_id)
-    allowed = {"name","language","target_minutes","media_chunk_minutes","date_start","date_end","geographic_focus","editorial_focus","notes"}
+    allowed = {"name","language","target_minutes","media_chunk_minutes","date_start","date_end","geographic_focus","editorial_focus","notes","channel_name"}
     values = {k:v for k,v in values.items() if k in allowed}
     with db() as conn:
         project_or_404(conn, project_id)
@@ -2048,6 +2050,7 @@ def generate_narration(project_id: str, body: GenerateBody):
     packet = {
         "project": {
             "name": project.get("name"),
+            "channel_name": project.get("channel_name") or "",
             "channel": project.get("channel"),
             "content_type": project.get("content_type"),
             "language": project.get("language"),
@@ -2374,6 +2377,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         json.dumps({
             "project": {
                 "language": project.get("language"),
+                "channel_name": project.get("channel_name") or "",
                 "date_start": project.get("date_start"),
                 "date_end": project.get("date_end"),
             },
@@ -2568,6 +2572,7 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
         json.dumps({
             "project": {
                 "language": project.get("language"),
+                "channel_name": project.get("channel_name") or "",
                 "target_minutes": project.get("target_minutes"),
                 "date_start": project.get("date_start"),
                 "date_end": project.get("date_end"),
@@ -2680,6 +2685,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
     user = "\n".join([
         "<current_week_authoritative_packet>",
         json.dumps({
+            "project": {"language": project.get("language"), "channel_name": project.get("channel_name") or ""},
             "format_blueprint": format_packet(),
             "length_target": length_target(project, draft["content"]),
             "spoken_lint": spoken_lint(draft["content"]),

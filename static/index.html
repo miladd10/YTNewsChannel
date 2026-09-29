@@ -64,6 +64,7 @@
       <div class="two-col"><label>Language<input id="pLanguage" value="Persian" /></label><label>Target duration<input id="pDuration" type="number" min="1" max="180" value="15" /></label></div>
       <div class="two-col"><label>B-roll search chunk (minutes)<input id="pMediaChunk" type="number" min="0.25" max="10" step="0.25" value="1" /><small class="field-help">Each Media Search request covers about this much approved narration. Default: 1 minute.</small></label><div></div></div>
       <div class="two-col"><label>Geographic focus<input id="pGeo" value="Worldwide" /></label><label>Editorial focus<select id="pFocus"><option>Balanced</option><option>Mainstream</option><option>Industry-heavy</option><option>Viral-heavy</option></select></label></div>
+      <label>Channel name (used in the host's greeting)<input id="pChannelName" dir="auto" maxlength="80" placeholder="Leave empty to greet without a channel name" /></label>
       <label>Notes<textarea id="pNotes" rows="3" placeholder="Optional channel/style notes"></textarea></label>
       <div id="folderField"><label>Save projects inside</label><div class="folder-row"><input id="pParent" readonly placeholder="Choose a folder…" /><button id="chooseFolderBtn" class="btn secondary" type="button">Choose…</button></div></div>
       <div class="dialog-actions"><button type="button" class="btn ghost" data-close="projectDialog">Cancel</button><button class="btn primary" type="submit">Save Project</button></div>
@@ -89,7 +90,7 @@
     </form>
   </dialog>
 
-  <script src="/static/app.js?v=43"></script>
-  <script src="/static/editorial.js?v=12"></script>
+  <script src="/static/app.js?v=44"></script>
+  <script src="/static/editorial.js?v=13"></script>
 </body>
 </html>
