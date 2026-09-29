@@ -2714,11 +2714,27 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         fresh_sources=fresh_claim_sources,
         claim_ledger=claim_ledger,
     )
+    audit_provider = settings.get("reviewer_provider") or actual_provider
+    audit_model = settings.get("reviewer_model") or actual_model
     claim_audit, _, _ = audit_narration_claims(
         rewritten_text,
         claim_ledger,
-        settings.get("reviewer_provider") or actual_provider,
-        settings.get("reviewer_model") or actual_model,
+        audit_provider,
+        audit_model,
+    )
+    rewritten_text, fact_check, claim_audit, structure_audit, repair_count, repair_error = _repair_narration_until_stable(
+        project,
+        stories,
+        rewritten_text,
+        claim_ledger,
+        fresh_claim_sources,
+        fact_check,
+        claim_audit,
+        actual_provider,
+        actual_model,
+        audit_provider,
+        audit_model,
+        style_profile.get("profile_text") or "",
     )
 
     new_id = str(uuid.uuid4())
@@ -2779,6 +2795,9 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         "claim_verified_count": int(claim_audit.get("verified_count") or 0),
         "claim_attributed_count": int(claim_audit.get("attributed_count") or 0),
         "claim_blocked_count": int(claim_audit.get("blocked_count") or 0),
+        "structure_audit": structure_audit,
+        "repair_count": repair_count,
+        "repair_error": repair_error,
     }
 
 
