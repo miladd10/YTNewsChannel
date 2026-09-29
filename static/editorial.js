@@ -223,12 +223,12 @@ narrationHtml=async function(){
 generateNarration=async function(){
   const b=$('#generateNarrationBtn');if(b){b.disabled=true;b.textContent='Writing...'}
   const s=state.settings?.ai||{};
-  startRunStatus({title:'Writing + validating baseline narration',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading selected sections','Building verified atomic Claim Ledger','Planning only ledger-backed facts','Writing spoken draft','Fresh-search fact check','Extracting every narration claim','Comparing claims to ledger','Draft saved']});
+  startRunStatus({title:'Writing + validating baseline narration',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading selected sections','Building verified atomic Claim Ledger','Planning only ledger-backed facts','Writing spoken draft','Fresh-search fact check','Extracting every narration claim','Checking selected-story coverage + length','Repairing coverage / claims if needed','Draft saved']});
   try{
     const r=await api(`/api/projects/${state.project.id}/narration`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:s.writer_provider,model:s.writer_model})});
     state.narrationDraftId=r.id;state.lastNarrationReview=null;state.project=await api(`/api/projects/${state.project.id}`);await renderStage();
-    finishRunStatus(true,'',`Draft V${r.version_number} generated`);
-    toast(r.content_plan_error?`Draft V${r.version_number} generated, but the fact-plan pass fell back: ${r.content_plan_error}`:`Draft V${r.version_number} · fact check ${String(r.fact_check_status||'unknown').replaceAll('_',' ')} · claims ${r.claim_verified_count||0} verified / ${r.claim_attributed_count||0} attributed / ${r.claim_blocked_count||0} blocked`,!!r.content_plan_error||r.fact_check_status==='needs_human_check'||r.claim_audit_status!=='pass');
+    finishRunStatus(true,'',`Draft V${r.version_number} generated${Number(r.repair_count||0)?` · auto-repaired ${r.repair_count}x`:''}`);
+    toast(r.content_plan_error?`Draft V${r.version_number} generated, but the fact-plan pass fell back: ${r.content_plan_error}`:`Draft V${r.version_number}${Number(r.repair_count||0)?` · repaired ${r.repair_count}x`:''} · fact check ${String(r.fact_check_status||'unknown').replaceAll('_',' ')} · claims ${r.claim_verified_count||0} verified / ${r.claim_attributed_count||0} attributed / ${r.claim_blocked_count||0} blocked`,!!r.content_plan_error||r.fact_check_status==='needs_human_check'||r.claim_audit_status!=='pass');
   }catch(e){finishRunStatus(false,e.message);toast(e.message,true);if(b){b.disabled=false;b.textContent='Generate Fresh Draft'}}
 };
 async function rebuildStyleProfile(){
@@ -306,7 +306,7 @@ async function rewriteWithEnrichment(){
   const id=state.narrationDraftId;if(!id)return;
   const b=$('#rewriteEnrichedBtn');if(b){b.disabled=true;b.textContent='Rewriting...'}
   const s=state.settings?.ai||{};
-  startRunStatus({title:'Rewriting + fact-checking enriched draft',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading per-story searches','Using only safe evidence-backed angles','Preserving good draft structure','Fresh-search fact check','Saving enriched draft']});
+  startRunStatus({title:'Rewriting + fact-checking enriched draft',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading per-story searches','Using only safe evidence-backed angles','Preserving every selected story','Fresh-search fact check','Checking coverage + claim audit','Repairing if needed','Saving enriched draft']});
   try{
     const r=await api(`/api/projects/${state.project.id}/narrations/${id}/enrich-rewrite`,{
       method:'POST',
@@ -357,7 +357,7 @@ async function reviewNarration(){
 }
 async function reviseNarration(){
   const id=state.narrationDraftId;if(!id)return;const review=latestReviewForDraft(state.narrationWorkspace,id);if(!review)return toast('Run Reviewer first',true);const s=state.settings?.ai||{};
-  startRunStatus({title:'Applying review + rechecking facts',meta:'Targeted revision',steps:['Loading review change list','Applying required fixes','Preserving correct material','Fresh-search fact check','New draft saved']});
+  startRunStatus({title:'Applying review + rechecking facts',meta:'Targeted revision',steps:['Loading review change list','Applying required fixes','Preserving correct material','Fresh-search fact check','Checking coverage + claim audit','Repairing if needed','New draft saved']});
   try{const r=await api(`/api/projects/${state.project.id}/narrations/${id}/revise`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({review_id:review.id,provider:s.writer_provider,model:s.writer_model})});state.narrationDraftId=r.id;state.lastNarrationReview=null;state.project=await api(`/api/projects/${state.project.id}`);await renderStage();finishRunStatus(true,'',`Draft V${r.version_number} revised`);toast(`Draft V${r.version_number} created from review feedback`)}catch(e){finishRunStatus(false,e.message);toast(e.message,true)}
 }
 function toggleDraftEdit(on){$('#narrationDraftView')?.classList.toggle('hidden',on);$('#narrationDraftEdit')?.classList.toggle('hidden',!on);$('#editDraftBtn')?.classList.toggle('hidden',on);$('#saveDraftEditBtn')?.classList.toggle('hidden',!on);$('#cancelDraftEditBtn')?.classList.toggle('hidden',!on);if(on)$('#narrationDraftEdit')?.focus()}
