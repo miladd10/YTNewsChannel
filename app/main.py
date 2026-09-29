@@ -42,6 +42,7 @@ from .services.cinema_format import (
     CONTENT_PLAN_SYSTEM,
     ENRICHMENT_REWRITE_SYSTEM,
     FACT_CHECK_SYSTEM,
+    NARRATION_ASSEMBLY_REPAIR_SYSTEM,
     REVISION_SYSTEM,
     REVIEWER_SYSTEM,
     SECTION_ORDER,
@@ -2008,6 +2009,135 @@ def _build_verified_claim_ledger(
             "Refresh/research those stories or change their selection instead of silently omitting them.",
         )
     return ledger, fresh_sources, actual_provider, actual_model
+
+
+def _claim_audit_with_structure(claim_audit: dict, structure_audit: dict) -> dict:
+    audit = dict(claim_audit or {})
+    audit["structure_audit"] = structure_audit
+    structure_issues = [
+        *(structure_audit.get("blocking_issues") or []),
+        *(structure_audit.get("major_issues") or []),
+    ]
+    if structure_issues:
+        existing = list(audit.get("system_issues") or [])
+        existing.extend(f"Narration assembly: {issue}" for issue in structure_issues)
+        audit["system_issues"] = existing
+        audit["status"] = "blocked"
+        audit["blocked_count"] = int(audit.get("blocked_count") or 0) + len(structure_issues)
+    return audit
+
+
+def _repair_narration_until_stable(
+    project: dict,
+    stories: list[dict],
+    text: str,
+    claim_ledger: list[dict],
+    fresh_sources: dict[str, list[dict]] | None,
+    fact_check: dict,
+    claim_audit: dict,
+    writer_provider: str,
+    writer_model: str,
+    reviewer_provider: str,
+    reviewer_model: str,
+    style_profile_text: str = "",
+    max_repairs: int = 2,
+) -> tuple[str, dict, dict, dict, int, str]:
+    """Repair deterministic assembly/claim failures before exposing a draft.
+
+    The older flow saved the first writer output even when it omitted selected
+    stories, was far below the requested duration, or still had blocked claims.
+    Run up to two tightly-scoped repair passes against the SAME verified ledger.
+    """
+    repair_error = ""
+    repairs = 0
+    structure = narration_structure_audit(text, stories, project)
+
+    for _ in range(max_repairs):
+        needs_repair = (
+            structure.get("status") != "pass"
+            or str((claim_audit or {}).get("status") or "blocked") != "pass"
+            or str((fact_check or {}).get("status") or "needs_human_check") == "needs_human_check"
+        )
+        if not needs_repair:
+            break
+
+        repair_packet = {
+            "project": {
+                "language": project.get("language"),
+                "channel_name": project.get("channel_name") or "",
+                "target_minutes": project.get("target_minutes"),
+                "date_start": project.get("date_start"),
+                "date_end": project.get("date_end"),
+            },
+            "format_blueprint": format_packet(),
+            "length_target": length_target(project, text),
+            "approved_sections": _sectioned_story_packet(stories),
+            "verified_claim_ledger": ledger_for_writer(claim_ledger),
+            "structure_audit": structure,
+            "automatic_fact_check": {
+                "status": fact_check.get("status") if fact_check else "not_run",
+                "issues": (fact_check or {}).get("issues") or [],
+            },
+            "claim_audit": {
+                "status": (claim_audit or {}).get("status") or "blocked",
+                "blocked_count": int((claim_audit or {}).get("blocked_count") or 0),
+                "claims": [
+                    item for item in ((claim_audit or {}).get("claims") or [])
+                    if item.get("status") == "blocked"
+                ],
+                "system_issues": (claim_audit or {}).get("system_issues") or [],
+            },
+        }
+        user = "\n".join([
+            "<authoritative_packet>",
+            json.dumps(repair_packet, ensure_ascii=False),
+            "</authoritative_packet>",
+            "",
+            "<style_blueprint>",
+            style_profile_text or "",
+            "</style_blueprint>",
+            "",
+            "<draft_to_repair>",
+            text,
+            "</draft_to_repair>",
+        ])
+        try:
+            repaired, actual_provider, actual_model = generate_text(
+                writer_provider,
+                writer_model,
+                NARRATION_ASSEMBLY_REPAIR_SYSTEM,
+                user,
+            )
+        except Exception as exc:
+            repair_error = str(exc)
+            break
+
+        repaired = str(repaired or "").strip()
+        if not repaired or repaired == str(text or "").strip():
+            repair_error = "Repair pass returned no meaningful change."
+            break
+
+        text = repaired
+        repairs += 1
+        text, fact_check, _, _ = _run_narration_fact_check(
+            project,
+            stories,
+            text,
+            actual_provider,
+            actual_model,
+            fresh_sources=fresh_sources,
+            claim_ledger=claim_ledger,
+        )
+        claim_audit, _, _ = audit_narration_claims(
+            text,
+            claim_ledger,
+            reviewer_provider,
+            reviewer_model,
+        )
+        structure = narration_structure_audit(text, stories, project)
+
+    claim_audit = _claim_audit_with_structure(claim_audit, structure)
+    return text, fact_check, claim_audit, structure, repairs, repair_error
 
 
 def _fact_check_summary(draft) -> dict:
