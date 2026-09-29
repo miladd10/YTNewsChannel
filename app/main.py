@@ -51,6 +51,7 @@ from .services.cinema_format import (
     build_style_packet,
     format_packet,
     length_target,
+    narration_structure_audit,
     parse_review_gate,
     spoken_lint,
     style_corpus_hash,
@@ -1983,6 +1984,28 @@ def _build_verified_claim_ledger(
         raise HTTPException(
             400,
             "Claim Ledger produced no verified claims. Refresh research/source verification before writing narration.",
+        )
+
+    usable_story_ids = {
+        str(claim.get("story_id") or "")
+        for claim in ledger
+        if claim.get("verification_status") in {"verified", "verified_with_attribution"}
+    }
+    missing_story_claims = [
+        story for story in stories
+        if str(story.get("id") or "") not in usable_story_ids
+    ]
+    if missing_story_claims:
+        titles = "; ".join(
+            str(story.get("canonical_title") or story.get("id") or "Untitled")
+            for story in missing_story_claims[:8]
+        )
+        extra = "" if len(missing_story_claims) <= 8 else f" (+{len(missing_story_claims)-8} more)"
+        raise HTTPException(
+            400,
+            "Claim Ledger could not verify any usable narration claim for "
+            f"{len(missing_story_claims)} selected story/stories: {titles}{extra}. "
+            "Refresh/research those stories or change their selection instead of silently omitting them.",
         )
     return ledger, fresh_sources, actual_provider, actual_model
 
