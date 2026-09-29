@@ -322,3 +322,93 @@ def test_ledger_input_carries_familiarity_anchor():
     packet = _ledger_input([{"id": "a", "familiarity_anchor": "director of Glass Harbor", "search_subject": "Moth Kingdom"}], {}, {})
     assert packet["stories"][0]["familiarity_anchor"] == "director of Glass Harbor"
     assert "familiarity_anchor" in CLAIM_LEDGER_SYSTEM
+
+
+
+def test_opening_weekend_is_not_generic_weekend_scope():
+    from app.services.claim_ledger import _field_equal
+    assert _field_equal("opening weekend", "opening_weekend", "period_type")
+    assert not _field_equal("opening weekend", "weekend", "period_type")
+    assert not _field_equal("second weekend", "opening_weekend", "period_type")
+
+
+def test_box_office_extraction_cannot_omit_scope_fields():
+    ledger = {
+        "C001": {
+            "id": "C001",
+            "story_id": "s1",
+            "claim_type": "box_office",
+            "numeric_value": 40,
+            "unit": "million",
+            "market": "worldwide",
+            "period_type": "opening_weekend",
+            "verification_status": "verified",
+            "attribution_required": False,
+        }
+    }
+    checked = _validate_spoken_claim({
+        "story_id": "s1",
+        "sentence": "فیلم ۴۰ میلیون دلار فروخت.",
+        "claim_type": "box_office",
+        "numeric_value": 40,
+        "unit": "million",
+        "ledger_claim_ids": ["C001"],
+        "semantic_match": "equivalent",
+    }, ledger)
+    assert checked["status"] == "blocked"
+    assert "missing market or period" in checked["issue"].lower()
+
+
+def test_ranking_extraction_cannot_omit_date_range():
+    ledger = {
+        "C001": {
+            "id": "C001",
+            "story_id": "s1",
+            "claim_type": "ranking",
+            "rank": 1,
+            "chart_type": "weekend",
+            "market": "domestic",
+            "date_start": "2026-09-25",
+            "date_end": "2026-09-27",
+            "verification_status": "verified",
+            "attribution_required": False,
+        }
+    }
+    checked = _validate_spoken_claim({
+        "story_id": "s1",
+        "sentence": "در گیشه آخرهفته آمریکای شمالی اول شد.",
+        "claim_type": "ranking",
+        "rank": 1,
+        "chart_type": "weekend",
+        "market": "domestic",
+        "ledger_claim_ids": ["C001"],
+        "semantic_match": "equivalent",
+    }, ledger)
+    assert checked["status"] == "blocked"
+    assert "exact date range" in checked["issue"].lower()
+
+
+def test_financial_extraction_cannot_omit_metric():
+    ledger = {
+        "C001": {
+            "id": "C001",
+            "story_id": "s1",
+            "claim_type": "deal_value",
+            "numeric_value": 110,
+            "unit": "billion",
+            "metric": "transaction_value",
+            "verification_status": "verified",
+            "attribution_required": False,
+        }
+    }
+    checked = _validate_spoken_claim({
+        "story_id": "s1",
+        "sentence": "ارزش معامله ۱۱۰ میلیارد دلار بود.",
+        "claim_type": "deal_value",
+        "numeric_value": 110,
+        "unit": "billion",
+        "ledger_claim_ids": ["C001"],
+        "semantic_match": "equivalent",
+    }, ledger)
+    assert checked["status"] == "blocked"
+    assert "missing the metric" in checked["issue"].lower()
