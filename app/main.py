@@ -3211,153 +3211,16 @@ def prepare_narrator_voice(project_id: str):
 
 @app.post("/api/projects/{project_id}/voice/generate")
 def generate_narrator_voice(project_id: str):
-    if not get_api_key("elevenlabs"):
-        raise HTTPException(400, "Connect ElevenLabs first.")
-    with db() as conn:
-        project = project_or_404(conn, project_id)
-        narration = _latest_narration(conn, project_id)
-        settings = conn.execute("SELECT * FROM voice_settings WHERE project_id=?", (project_id,)).fetchone()
-        rows = [dict(row) for row in conn.execute(
-            "SELECT * FROM voice_segments WHERE project_id=? ORDER BY segment_index",
-            (project_id,),
-        ).fetchall()]
-    if not narration:
-        raise HTTPException(400, "Generate narration first.")
-    if not settings or not settings["voice_id"]:
-        raise HTTPException(400, "Choose one ElevenLabs narrator voice first.")
-    if not rows or any(row["narration_id"] != narration["id"] for row in rows):
-        raise HTTPException(400, "Prepare the latest narration for voice first.")
+    """Retired bulk generator (pre take-based workflow).
 
-    root = Path(project["root_path"])
-    audio_dir = root / "audio" / "narration"
-    audio_dir.mkdir(parents=True, exist_ok=True)
-    generated = 0
-    aligned = 0
-    reused_audio = 0
-    errors = []
-    output_format = settings["output_format"] or "mp3_44100_192"
-
-    for row in rows:
-        if row.get("audio_status") == "aligned" and row.get("audio_path"):
-            continue
-
-        filename = f"{int(row['segment_index']):04d}_narration.mp3"
-        expected_path = audio_dir / filename
-        stored_path = str(row.get("audio_path") or "")
-        existing_path = (root / stored_path).resolve() if stored_path else expected_path.resolve()
-        can_reuse_audio = bool(
-            existing_path.exists()
-            and existing_path.is_file()
-            and root.resolve() in existing_path.parents
-            and row.get("duration_seconds")
-        )
-
-        try:
-            if can_reuse_audio:
-                path = existing_path
-                duration = float(row["duration_seconds"])
-                reused_audio += 1
-            else:
-                audio = text_to_speech(
-                    settings["voice_id"],
-                    row["performance_text"] or row["source_text"],
-                )
-                output_format = "mp3_44100_128"
-                path = expected_path
-                path.write_bytes(audio)
-                duration = mp3_duration_seconds(path)
-                if duration is None:
-                    raise RuntimeError("Could not measure generated MP3 duration.")
-                rel = path.relative_to(root).as_posix()
-                with db() as conn:
-                    conn.execute(
-                        """UPDATE voice_segments
-                           SET voice_id=?,audio_path=?,duration_seconds=?,alignment_json='{}',
-                               audio_status='generated',updated_at=? WHERE id=?""",
-                        (
-                            settings["voice_id"], rel, float(duration),
-                            now(), row["id"],
-                        ),
-                    )
-                generated += 1
-
-            # Alignment is a separate phase. A failure here leaves the paid
-            # generated MP3 and measured duration intact, so retrying does not
-            # synthesize the voice again.
-            alignment = forced_alignment(path, row["source_text"])
-            words = []
-            for item in alignment.get("words") or []:
-                if not isinstance(item, dict):
-                    continue
-                try:
-                    word_start = float(item.get("start"))
-                    word_end = float(item.get("end"))
-                except Exception:
-                    continue
-                if word_end < word_start:
-                    continue
-                words.append({
-                    "text": str(item.get("text") or ""),
-                    "start": word_start,
-                    "end": word_end,
-                    "loss": item.get("loss"),
-                })
-            if not words:
-                raise RuntimeError("ElevenLabs Forced Alignment returned no word timestamps.")
-
-            rel = path.relative_to(root).as_posix()
-            with db() as conn:
-                conn.execute(
-                    """UPDATE voice_segments
-                       SET voice_id=?,audio_path=?,duration_seconds=?,alignment_json=?,
-                           audio_status='aligned',updated_at=? WHERE id=?""",
-                    (
-                        settings["voice_id"], rel, float(duration),
-                        json.dumps({"words": words, "loss": alignment.get("loss")}, ensure_ascii=False),
-                        now(), row["id"],
-                    ),
-                )
-            aligned += 1
-        except Exception as exc:
-            errors.append({
-                "segment_id": row["id"],
-                "segment_index": row["segment_index"],
-                "error": str(exc),
-            })
-            # Keep a successfully generated source file reusable even when only
-            # alignment failed. Never convert it back to a state that forces TTS.
-            with db() as conn:
-                current = conn.execute(
-                    "SELECT audio_path,duration_seconds FROM voice_segments WHERE id=?",
-                    (row["id"],),
-                ).fetchone()
-                keep_generated = bool(
-                    current
-                    and current["audio_path"]
-                    and current["duration_seconds"]
-                    and (root / current["audio_path"]).exists()
-                )
-                conn.execute(
-                    "UPDATE voice_segments SET audio_status=?,updated_at=? WHERE id=?",
-                    ("generated" if keep_generated else "failed", now(), row["id"]),
-                )
-
-    with db() as conn:
-        conn.execute(
-            "UPDATE voice_settings SET output_format=?,updated_at=? WHERE project_id=?",
-            (output_format, now(), project_id),
-        )
-        conn.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
-        save_manifest(conn, project_id)
-        payload = _voice_payload(conn, project_id)
-    payload.update({
-        "generated_this_run": generated,
-        "aligned_this_run": aligned,
-        "reused_audio_for_alignment": reused_audio,
-        "errors": errors,
-    })
-    return payload
-
+    It wrote separate NNNN_narration.mp3 files alongside the take files and
+    spent ElevenLabs credits outside the Take 1 / Take 2 review flow. The UI
+    generates and approves per take instead.
+    """
+    raise HTTPException(
+        410,
+        "Bulk voice generation was retired. Use Generate Take 1/2 and Approve for each segment in Step 4.",
+    )
 
 @app.get("/api/projects/{project_id}/voice/{segment_id}/audio")
 def narration_audio(project_id: str, segment_id: str):

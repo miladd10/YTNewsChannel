@@ -38,3 +38,10 @@ def test_list_voices_follows_pages(monkeypatch):
     monkeypatch.setattr(el, "request", fake)
     voices = el.list_voices()
     assert len(voices) == 101 and voices[-1]["name"] == "last"
+
+
+def test_retired_bulk_voice_endpoint_spends_nothing():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    r = TestClient(app).post("/api/projects/any/voice/generate")
+    assert r.status_code == 410
