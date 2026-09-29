@@ -3969,6 +3969,24 @@ def set_media_candidate_selected(project_id: str, candidate_id: str, body: Media
     return {"ok": True, "selected": body.selected}
 
 
+def _current_episode_story_ids(conn, project_id: str) -> set[str]:
+    """Stories the current episode can use: the latest run's Included stories
+    plus the stories the approved draft's voice segments refer to."""
+    ids = {str(story["id"]) for story in selected_story_packet(conn, project_id)}
+    approved = conn.execute(
+        "SELECT id FROM narrations WHERE project_id=? AND approved=1 ORDER BY version_number DESC LIMIT 1",
+        (project_id,),
+    ).fetchone()
+    if approved:
+        ids.update(
+            str(row["story_id"]) for row in conn.execute(
+                "SELECT DISTINCT story_id FROM voice_segments WHERE project_id=? AND narration_id=? AND story_id<>''",
+                (project_id, approved["id"]),
+            ).fetchall()
+        )
+    return ids
+
+
 @app.post("/api/projects/{project_id}/media/download-selected")
 def download_selected_media(project_id: str):
     with db() as conn:
@@ -3982,8 +4000,16 @@ def download_selected_media(project_id: str):
             (project_id,),
         ).fetchall()
         candidates = [dict(row) for row in rows]
+        episode_story_ids = _current_episode_story_ids(conn, project_id)
+    skipped_other_runs = [c for c in candidates if c["story_id"] not in episode_story_ids]
+    candidates = [c for c in candidates if c["story_id"] in episode_story_ids]
     if not candidates:
-        raise HTTPException(400, "Select at least one image or video first.")
+        raise HTTPException(
+            400,
+            "Select at least one image or video for the current episode's stories first."
+            + (f" ({len(skipped_other_runs)} selected item(s) belong to stories from older research runs and were skipped.)"
+               if skipped_other_runs else ""),
+        )
 
     results = []
     root = Path(project["root_path"])
@@ -4051,6 +4077,7 @@ def download_selected_media(project_id: str):
     with db() as conn:
         save_manifest(conn, project_id)
     return {
+        "skipped_other_runs": len(skipped_other_runs),
         "ok": all(item["ok"] for item in results),
         "downloaded": sum(1 for item in results if item["ok"]),
         "failed": sum(1 for item in results if not item["ok"]),
@@ -4180,6 +4207,12 @@ def generate_resolve_plan(project_id: str):
                ORDER BY story_id,media_type,created_at""",
             (project_id,),
         ).fetchall()]
+        voice_status = _voice_draft_status(conn, project_id, voice_rows)
+        if voice_status["stale"]:
+            raise HTTPException(
+                409,
+                voice_status["message"] + " The Resolve package is built from the voice, so it would not match the approved script.",
+            )
         current_stories = selected_story_packet(conn, project_id)
         historical_stories = _load_historical_voice_stories(conn, project_id, voice_rows)
         resolved_voice_rows, reconciliation = _reconcile_voice_story_rows(

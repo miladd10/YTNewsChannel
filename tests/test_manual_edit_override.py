@@ -58,3 +58,19 @@ def test_voice_status_flags_voice_from_unapproved_or_older_draft(client):
         conn.execute("UPDATE voice_segments SET narration_id='n2'")
         segs = [dict(r) for r in conn.execute("SELECT * FROM voice_segments")]
         assert not main._voice_draft_status(conn, "p", segs)["stale"]
+
+
+def test_resolve_refuses_stale_voice_and_downloads_skip_old_runs(client):
+    import app.db as dbmod
+    with dbmod.db() as conn:
+        conn.execute("""INSERT INTO voice_segments(id,project_id,narration_id,segment_index,source_text,created_at,updated_at)
+                        VALUES ('v1','p','n1',1,'x','x','x')""")
+        conn.execute("INSERT INTO research_runs(id,project_id,created_at) VALUES ('old','p','2000')")
+        conn.execute("""INSERT INTO stories(id,project_id,run_id,canonical_title,decision,created_at,updated_at)
+                        VALUES ('s_old','p','old','Old story','include','x','x')""")
+        conn.execute("""INSERT INTO media_candidates(id,project_id,story_id,media_type,page_url,selected,created_at,updated_at)
+                        VALUES ('m1','p','s_old','video','https://example.com/v',1,'x','x')""")
+    r = client.post("/api/projects/p/resolve-plan/generate")
+    assert r.status_code == 409 and "no longer approved" in r.json()["detail"]
+    r = client.post("/api/projects/p/media/download-selected")
+    assert r.status_code == 400 and "older research runs" in r.json()["detail"]
