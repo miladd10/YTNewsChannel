@@ -15,15 +15,24 @@ IDEAL_SHOT_MAX = 6.0
 MAX_SCENE_PIECE = 6.0
 
 
-def _run(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        args,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        errors="replace",
-        check=False,
-    )
+def _run(args: list[str], timeout: int = 600) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors="replace",
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=124,
+            stdout=str(exc.stdout or ""),
+            stderr=f"Media analysis timed out after {timeout}s. {exc.stderr or ''}".strip(),
+        )
 
 
 def _probe_duration(path: Path) -> float | None:
