@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import uuid
 from pathlib import Path
 
 from PIL import Image, ImageOps
@@ -1433,16 +1434,19 @@ def _stage_resolve_video_cut(
 
 
 def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
-    """Create a Resolve-local media folder and rewrite plan paths to it.
+    """Build Resolve-local media transactionally and rewrite plan paths to it.
 
-    Resolve's OTIO importer can ignore/lose file:// targets and then search only
-    by filename. Keeping every referenced file together under resolve/media and
-    emitting raw absolute paths makes the handoff deterministic.
+    New media is rendered into a temporary sibling first. The previous
+    resolve/media folder is not touched until every staged asset succeeds.
+    A backup is kept until write_resolve_package finishes the rest of the
+    package, so a later OTIO/CSV failure can roll the previous media back.
     """
-    resolve_media = root / "resolve" / "media"
-    if resolve_media.exists():
-        shutil.rmtree(resolve_media)
-    resolve_media.mkdir(parents=True, exist_ok=True)
+    resolve_dir = root / "resolve"
+    resolve_dir.mkdir(parents=True, exist_ok=True)
+    resolve_media = resolve_dir / "media"
+    build_media = resolve_dir / f".media-build-{uuid.uuid4().hex}"
+    backup_media = resolve_dir / f".media-backup-{uuid.uuid4().hex}"
+    build_media.mkdir(parents=True, exist_ok=False)
 
     staged = json.loads(json.dumps(plan))
     cache: dict[str, str] = {}
@@ -1460,9 +1464,9 @@ def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
         relative = cache.get(key)
         if not relative:
             voice_count += 1
-            target = resolve_media / _safe_stage_name("voice", int(item.get("segment_index") or voice_count), source)
+            target = build_media / _safe_stage_name("voice", int(item.get("segment_index") or voice_count), source)
             _stage_file(source, target)
-            relative = target.relative_to(root).as_posix()
+            relative = (resolve_media / target.name).relative_to(root).as_posix()
             cache[key] = relative
         item["source_audio_path"] = item.get("audio_path") or ""
         item["audio_path"] = relative
@@ -1518,7 +1522,7 @@ def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
             stage_meta = video_stage_meta.get(key)
             if not relative:
                 visual_count += 1
-                target = resolve_media / _safe_stage_name("visual", visual_count, source, ".mp4")
+                target = build_media / _safe_stage_name("visual", visual_count, source, ".mp4")
                 stage_meta = _stage_resolve_video_cut(
                     source,
                     target,
@@ -1527,7 +1531,7 @@ def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
                     fps=fps,
                     source_duration=actual_source_duration,
                 )
-                relative = target.relative_to(root).as_posix()
+                relative = (resolve_media / target.name).relative_to(root).as_posix()
                 cache[key] = relative
                 video_stage_meta[key] = stage_meta
 
@@ -1557,14 +1561,14 @@ def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
             stage_meta = image_stage_meta.get(key)
             if not relative:
                 visual_count += 1
-                target = resolve_media / _safe_stage_name("visual", visual_count, source, ".mp4")
+                target = build_media / _safe_stage_name("visual", visual_count, source, ".mp4")
                 stage_meta = _stage_resolve_image_hold(
                     source,
                     target,
                     duration=planned_stage_duration,
                     fps=fps,
                 )
-                relative = target.relative_to(root).as_posix()
+                relative = (resolve_media / target.name).relative_to(root).as_posix()
                 cache[key] = relative
                 image_stage_meta[key] = stage_meta
             item["source_stored_path"] = original_stored_path
@@ -1579,20 +1583,56 @@ def _stage_resolve_media(root: Path, plan: dict) -> tuple[dict, dict]:
             item["resolve_media_format"] = "H.264 MP4 still hold · yuv420p · CFR · validated frames + transition handles"
 
 
+    # Publish only after every voice/visual asset has staged successfully.
+    try:
+        if resolve_media.exists():
+            resolve_media.replace(backup_media)
+        build_media.replace(resolve_media)
+    except Exception:
+        if build_media.exists():
+            shutil.rmtree(build_media, ignore_errors=True)
+        if backup_media.exists() and not resolve_media.exists():
+            backup_media.replace(resolve_media)
+        raise
+
     return staged, {
         "media_folder": str(resolve_media),
         "staged_unique_files": len(cache),
         "staged_voice_files": voice_count,
         "staged_visual_files": visual_count,
         "resolve_safe_media": True,
+        "_backup_media_folder": str(backup_media) if backup_media.exists() else "",
     }
+
+
+def _restore_resolve_media_after_failure(resolve_media: Path, backup_value: str) -> None:
+    backup = Path(backup_value) if backup_value else None
+    if backup is None or not backup.exists():
+        return
+    if resolve_media.exists():
+        shutil.rmtree(resolve_media, ignore_errors=True)
+    backup.replace(resolve_media)
 
 
 def write_resolve_package(root: Path, plan: dict) -> dict:
     resolve_dir = root / "resolve"
     resolve_dir.mkdir(parents=True, exist_ok=True)
     staged_plan, staged_info = _stage_resolve_media(root, plan)
+    backup_media = str(staged_info.pop("_backup_media_folder", "") or "")
+    resolve_media = resolve_dir / "media"
 
+    try:
+        result = _write_resolve_package_files(root, plan, staged_plan, staged_info)
+    except Exception:
+        _restore_resolve_media_after_failure(resolve_media, backup_media)
+        raise
+    if backup_media:
+        shutil.rmtree(Path(backup_media), ignore_errors=True)
+    return result
+
+
+def _write_resolve_package_files(root: Path, plan: dict, staged_plan: dict, staged_info: dict) -> dict:
+    resolve_dir = root / "resolve"
     plan_path = root / "timing" / "resolve_plan.json"
     plan_path.parent.mkdir(parents=True, exist_ok=True)
     plan_path.write_text(json.dumps(staged_plan, indent=2, ensure_ascii=False), encoding="utf-8")
