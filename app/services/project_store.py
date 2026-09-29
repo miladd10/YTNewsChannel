@@ -6,6 +6,7 @@ import json
 import platform
 import re
 import subprocess
+import uuid
 from pathlib import Path
 
 PROJECT_SCHEMA_VERSION = 13
@@ -154,5 +155,10 @@ def save_manifest(conn, project_id: str) -> Path:
         "media_candidates": media_candidates,
     }
     path = root / "project.json"
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    temp_path = root / f".project.{uuid.uuid4().hex}.tmp"
+    try:
+        temp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        temp_path.replace(path)
+    finally:
+        temp_path.unlink(missing_ok=True)
     return path
