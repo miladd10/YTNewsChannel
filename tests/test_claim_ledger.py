@@ -522,3 +522,14 @@ def test_opening_weekend_matches_generic_weekend_only_with_same_dates():
     assert not _period_compatible({"period_type": "second weekend", "date_start": "2031-03-07", "date_end": "2031-03-09"},
                                   {"period_type": "opening weekend", "date_start": "2031-03-07", "date_end": "2031-03-09"})
     assert not _period_compatible({"period_type": "cumulative"}, ledger)
+
+
+def test_evidence_quote_tolerates_punctuation_and_ellipsis_but_not_word_changes():
+    from app.services.claim_ledger import _source_supports_exact_quote
+    source = {"title": "‘Moth Kingdom’ Trailer: Studio X Sets Limited Run — Opens March 3",
+              "excerpt": "The animated feature from Ana Ruiz will open in select theaters on March 3, then stream two weeks later."}
+    assert _source_supports_exact_quote(source, "'Moth Kingdom' Trailer: Studio X Sets Limited Run - Opens March 3")
+    assert _source_supports_exact_quote(source, "The animated feature from Ana Ruiz … open in select theaters on March 3")
+    assert not _source_supports_exact_quote(source, "open in select theaters on March 4")
+    assert not _source_supports_exact_quote(source, "open in select theaters … from Ana Ruiz")  # wrong order
+    assert not _source_supports_exact_quote(source, "March")  # too short

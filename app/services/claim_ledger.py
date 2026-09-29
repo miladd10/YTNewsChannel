@@ -297,19 +297,33 @@ def _ledger_input(stories: list[dict], fresh_sources: dict[str, list[dict]], pro
 
 
 def _normalized_evidence_text(value: str) -> str:
-    text = _clean(value).casefold()
-    text = text.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
-    return text
+    """Word sequence of a text: case, quotes, dashes and other punctuation are
+    ignored, so a quote differing from its source only in punctuation still
+    matches, while any change to the words themselves does not."""
+    words = re.findall(r"[^\W_]+", _clean(value).casefold().translate(PERSIAN_DIGITS))
+    return " " + " ".join(words) + " "
 
 
 def _source_supports_exact_quote(source: dict, quote: str) -> bool:
-    needle = _normalized_evidence_text(quote)
-    if len(needle) < 8:
-        return False
     haystack = _normalized_evidence_text(" ".join(
         str(source.get(key) or "") for key in ("title", "snippet", "description", "excerpt")
     ))
-    return bool(haystack and needle in haystack)
+    if not haystack.strip():
+        return False
+    # A quote may skip words with an ellipsis; every fragment must then be
+    # found, in order, in the source.
+    fragments = [part for part in re.split(r"\.{3,}|…", str(quote or "")) if part.strip()]
+    normalized = [_normalized_evidence_text(part) for part in fragments]
+    normalized = [part for part in normalized if part.strip()]
+    if not normalized or len("".join(normalized).replace(" ", "")) < 8:
+        return False
+    position = 0
+    for part in normalized:
+        found = haystack.find(part, position)
+        if found < 0:
+            return False
+        position = found + len(part) - 1
+    return True
 
 
 def normalize_ledger_claims(
