@@ -7,6 +7,7 @@ def test_regenerating_other_take_keeps_approved_take(tmp_path, monkeypatch):
     with dbmod.db() as conn:
         conn.execute("INSERT INTO projects(id,name,root_path,created_at,updated_at) VALUES ('p','P',?,'x','x')", (str(root),))
         conn.execute("INSERT INTO voice_settings(project_id,voice_id,updated_at) VALUES ('p','voice','x')")
+        conn.execute("INSERT INTO narrations(id,project_id,version_number,content,provider,model,created_at) VALUES ('n','p',1,'x','m','m','x')")
         conn.execute("""INSERT INTO voice_segments(id,project_id,narration_id,segment_index,source_text,performance_text,
                         take2_path,audio_path,selected_take,approval_status,audio_status,duration_seconds,created_at,updated_at)
                         VALUES ('s','p','n',1,'متن','متن','audio/narration/0001_narration_take2.mp3',
