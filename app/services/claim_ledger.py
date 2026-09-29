@@ -673,6 +673,37 @@ def high_risk_sentences(draft_text: str) -> list[dict]:
     return [item for item in _story_sentences(draft_text) if HIGH_RISK_RE.search(item["sentence"])]
 
 
+def _financial_values_in_sentence(sentence: str) -> list[tuple[float, str]]:
+    """Extract money/percentage magnitudes without treating years/title numbers as amounts."""
+    plain = str(sentence or "").translate(PERSIAN_DIGITS)
+    matches: list[tuple[float, str]] = []
+    patterns = (
+        r"(?P<currency>[$€£¥])\s*(?P<num>\d+(?:[.,]\d+)?)\s*(?P<unit>million|billion|thousand|m|bn|b)?",
+        r"(?P<num>\d+(?:[.,]\d+)?)\s*(?P<unit>million|billion|thousand|میلیون|میلیارد|هزار)\s*(?:دلار|یورو|پوند|dollars?|usd|eur|gbp)?",
+        r"(?P<num>\d+(?:[.,]\d+)?)\s*(?P<unit>%|percent|درصد)",
+    )
+    seen: set[tuple[float, str]] = set()
+    for pattern in patterns:
+        for match in re.finditer(pattern, plain, flags=re.IGNORECASE):
+            try:
+                number = float(match.group("num").replace(",", "."))
+            except (TypeError, ValueError):
+                continue
+            unit = _normalize_unit(match.groupdict().get("unit") or "")
+            value = (number, unit)
+            if value not in seen:
+                seen.add(value)
+                matches.append(value)
+    return matches
+
+
+def _claim_covers_financial_value(claim: dict, number: float, unit: str) -> bool:
+    if _float(claim.get("numeric_value")) is None:
+        return False
+    probe = {"numeric_value": number, "unit": unit}
+    return _same_number(probe, claim)
+
+
 def _covered_by_extraction(high_risk: dict, claims: list[dict]) -> bool:
     target = _plain_sentence(high_risk["sentence"])
     for claim in claims:
@@ -701,17 +732,42 @@ def audit_narration_claims(draft_text, ledger, provider, model):
         }, provider, model
     ledger_by_id = {str(claim.get("id")): claim for claim in ledger}
     claims = [_validate_spoken_claim(item, ledger_by_id) for item in raw_claims if isinstance(item, dict)]
-    uncovered = [item for item in high_risk_sentences(draft_text) if not _covered_by_extraction(item, claims)]
+    risky = high_risk_sentences(draft_text)
+    uncovered = [item for item in risky if not _covered_by_extraction(item, claims)]
     system_issues = [
         f"High-risk sentence was not extracted into the claim audit: {item['sentence']}" for item in uncovered
     ]
+
+    # Sentence-level coverage alone is not enough when one sentence contains
+    # several amounts. Require every money/percentage magnitude to appear in at
+    # least one extracted atomic claim for that same sentence/story.
+    uncovered_amounts = []
+    for item in risky:
+        amounts = _financial_values_in_sentence(item["sentence"])
+        if not amounts:
+            continue
+        sentence_key = _plain_sentence(item["sentence"])
+        sentence_claims = [
+            claim for claim in claims
+            if claim.get("story_id") == item.get("story_id")
+            and _plain_sentence(claim.get("sentence") or "") == sentence_key
+        ]
+        for number, unit in amounts:
+            if not any(_claim_covers_financial_value(claim, number, unit) for claim in sentence_claims):
+                uncovered_amounts.append((item, number, unit))
+                system_issues.append(
+                    f"Financial amount was not extracted as an atomic claim: {number:g} {unit or 'units'} · {item['sentence']}"
+                )
+
     verified = sum(1 for claim in claims if claim["status"] == "verified")
     attributed = sum(1 for claim in claims if claim["status"] == "verified_with_attribution")
-    blocked = sum(1 for claim in claims if claim["status"] == "blocked") + len(uncovered)
+    blocked = sum(1 for claim in claims if claim["status"] == "blocked") + len(uncovered) + len(uncovered_amounts)
     return {
         "status": "pass" if blocked == 0 else "blocked", "claim_count": len(claims),
         "verified_count": verified, "attributed_count": attributed, "blocked_count": blocked,
-        "uncovered_high_risk_count": len(uncovered), "claims": claims,
+        "uncovered_high_risk_count": len(uncovered),
+        "uncovered_financial_amount_count": len(uncovered_amounts),
+        "claims": claims,
         "system_issues": system_issues,
     }, actual_provider, actual_model
 
