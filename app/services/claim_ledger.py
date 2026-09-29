@@ -458,7 +458,7 @@ _SCOPE_CANON = {
         ("revenue", r"revenue|sales|درآمد"),
     ),
     "title_identity": (
-        ("re_release", r"re[\\s-]?release|re[\\s-]?issue|remaster|anniversary|بازاکران|اکران\s+مجدد"),
+        ("re_release", r"re[\s-]?release|re[\s-]?issue|remaster|anniversary|بازاکران|اکران\s+مجدد"),
         ("extended_cut", r"extended|director'?s\s+cut|new\s+cut|نسخه\s+کامل"),
         ("sequel", r"sequel|دنباله"),
         ("prequel", r"prequel|پیش\s*[‌ ]?درآمد"),
