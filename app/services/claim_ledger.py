@@ -26,6 +26,7 @@ Return ONLY JSON:
 HARD RULES:
 - Every claim is atomic. Split different numbers/scopes into separate claims.
 - Use only supplied evidence. Never use memory.
+- FAMILIARITY: when a story has a familiarity_anchor (a short recognition cue such as a person's best-known work), create one person_credit claim stating that credit if any supplied source for the story supports it, citing that source. If nothing supplied supports it, create the claim with verification_status=blocked. Never support it from memory.
 - Read each article's title, snippet, description and excerpt. Extract every useful checkable fact the excerpts support (premise, credits, dates, formats, figures, context), not only the headline fact.
 - source_urls must be exact supplied URLs for that same story. No source means blocked.
 - Numeric meaning is inseparable from scope.
@@ -272,6 +273,8 @@ def _ledger_input(stories: list[dict], fresh_sources: dict[str, list[dict]], pro
             "summary": story.get("summary"),
             "news_hook": story.get("news_hook"),
             "news_hook_date": story.get("news_hook_date"),
+            "search_subject": story.get("search_subject") or "",
+            "familiarity_anchor": story.get("familiarity_anchor") or "",
             "verification_status": story.get("verification_status"),
             "articles": [{
                 "title": source.get("title"), "url": source.get("url"), "source": source.get("source"),

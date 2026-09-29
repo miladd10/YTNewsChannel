@@ -315,3 +315,10 @@ def test_all_time_ranking_needs_no_date_window():
             "chart_type": "weekend box office", "market": "domestic", "source_urls": ["u"], "verification_status": "verified"}]
     out = normalize_ledger_claims(raw, stories, {})
     assert out[0]["verification_status"] != "blocked" and out[1]["verification_status"] == "blocked"
+
+
+def test_ledger_input_carries_familiarity_anchor():
+    from app.services.claim_ledger import _ledger_input, CLAIM_LEDGER_SYSTEM
+    packet = _ledger_input([{"id": "a", "familiarity_anchor": "director of Glass Harbor", "search_subject": "Moth Kingdom"}], {}, {})
+    assert packet["stories"][0]["familiarity_anchor"] == "director of Glass Harbor"
+    assert "familiarity_anchor" in CLAIM_LEDGER_SYSTEM
