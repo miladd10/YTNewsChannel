@@ -1476,8 +1476,7 @@ def _resolve_reference_article_url(article: dict, client: httpx.Client) -> tuple
         return "", ""
     try:
         _assert_public_http_url(original)
-        response = client.get(original)
-        response.raise_for_status()
+        response = _safe_http_get(client, original)
         final_url = str(response.url)
         final_host = (urlparse(final_url).hostname or "").lower()
 
@@ -1523,8 +1522,7 @@ def _resolve_reference_article_url(article: dict, client: httpx.Client) -> tuple
         for candidate, _score in sorted(ranked_by_url.items(), key=lambda row: row[1], reverse=True):
             try:
                 _assert_public_http_url(candidate)
-                response = client.get(candidate)
-                response.raise_for_status()
+                response = _safe_http_get(client, candidate)
                 return str(response.url), response.text
             except Exception:
                 continue
@@ -2460,6 +2458,29 @@ def _assert_public_http_url(url: str) -> None:
     for address in addresses:
         if address.is_private or address.is_loopback or address.is_link_local or address.is_multicast or address.is_reserved or address.is_unspecified:
             raise RuntimeError("Refusing to download media from a local or private network address.")
+
+
+def _safe_http_get(client: httpx.Client, url: str, max_redirects: int = 6) -> httpx.Response:
+    """GET a public page while validating every redirect target.
+
+    httpx follow_redirects=True validates only the initial URL at our layer;
+    manual redirects prevent a public search result from bouncing the local app
+    into localhost or another private-network service.
+    """
+    current = str(url or "").strip()
+    for _ in range(max_redirects + 1):
+        _assert_public_http_url(current)
+        response = client.get(current, follow_redirects=False)
+        if response.status_code in {301, 302, 303, 307, 308}:
+            location = response.headers.get("location")
+            if not location:
+                raise RuntimeError("Page redirected without a location.")
+            current = urljoin(current, location)
+            continue
+        response.raise_for_status()
+        _assert_public_http_url(str(response.url))
+        return response
+    raise RuntimeError("Too many redirects while fetching reference page.")
 
 
 def _extension_from_response(url: str, content_type: str, fallback: str = ".bin") -> str:
