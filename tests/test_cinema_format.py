@@ -540,3 +540,10 @@ def test_spoken_lint_flags_written_or_pipeline_speech_and_passes_clean_text():
     clean = "<!-- STORY:a --> این فیلم تو آخرهفتهٔ اولش حدود ۴۳ میلیون دلار فروخت. حالا بریم سراغ سریال‌ها که خبرای خوبی داره."
     assert spoken_lint(clean) == []
     assert SPOKEN_QUALITY_RULES in WRITER_SYSTEM and SPOKEN_QUALITY_RULES in FACT_CHECK_SYSTEM
+
+
+def test_content_plan_asks_for_english_notes_with_ledger_ids():
+    from app.services.cinema_format import CONTENT_PLAN_SYSTEM
+    assert "terse ENGLISH fact note" in CONTENT_PLAN_SYSTEM
+    assert "[C002]" in CONTENT_PLAN_SYSTEM
+    assert "never restate the hook" in CONTENT_PLAN_SYSTEM
