@@ -679,16 +679,23 @@ def _financial_values_in_sentence(sentence: str) -> list[tuple[float, str]]:
     """Extract money/percentage magnitudes without treating years/title numbers as amounts."""
     plain = str(sentence or "").translate(PERSIAN_DIGITS)
     matches: list[tuple[float, str]] = []
+    number = r"(?P<num>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?)"
     patterns = (
-        r"(?P<currency>[$€£¥])\s*(?P<num>\d+(?:[.,]\d+)?)\s*(?P<unit>million|billion|thousand|m|bn|b)?",
-        r"(?P<num>\d+(?:[.,]\d+)?)\s*(?P<unit>million|billion|thousand|میلیون|میلیارد|هزار)\s*(?:دلار|یورو|پوند|dollars?|usd|eur|gbp)?",
-        r"(?P<num>\d+(?:[.,]\d+)?)\s*(?P<unit>%|percent|درصد)",
+        rf"(?P<currency>[$€£¥])\s*{number}\s*(?P<unit>million|billion|thousand|m|bn|b)?",
+        rf"{number}\s*(?P<unit>million|billion|thousand|میلیون|میلیارد|هزار)\s*(?:دلار|یورو|پوند|dollars?|usd|eur|gbp)?",
+        rf"{number}\s*(?P<unit>%|percent|درصد)",
     )
     seen: set[tuple[float, str]] = set()
     for pattern in patterns:
         for match in re.finditer(pattern, plain, flags=re.IGNORECASE):
+            raw_number = match.group("num")
+            # "1,788" / «۱٬۷۸۸» are thousands groups; a lone comma is a decimal mark.
+            if re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?", raw_number):
+                raw_number = raw_number.replace(",", "")
+            else:
+                raw_number = raw_number.replace(",", ".")
             try:
-                number = float(match.group("num").replace(",", "."))
+                number = float(raw_number)
             except (TypeError, ValueError):
                 continue
             unit = _normalize_unit(match.groupdict().get("unit") or "")

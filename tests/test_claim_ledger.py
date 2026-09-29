@@ -497,3 +497,11 @@ def test_audit_blocks_when_second_financial_amount_in_sentence_is_not_extracted(
     assert audit["status"] == "blocked"
     assert audit["uncovered_financial_amount_count"] == 1
     assert any("86 million" in issue for issue in audit["system_issues"])
+
+
+def test_financial_amounts_read_thousands_groups_and_decimal_marks():
+    from app.services.claim_ledger import _financial_values_in_sentence as amounts
+    assert amounts("فروش ۱٬۷۸۸ میلیون دلار بود") == [(1788.0, "million")]
+    assert amounts("It made $1,788 million") == [(1788.0, "million")]
+    assert amounts("۲٫۸۸۵ میلیارد دلار") == [(2.885, "billion")]
+    assert amounts("حدود ۴۲,۷ میلیون دلار") == [(42.7, "million")]
