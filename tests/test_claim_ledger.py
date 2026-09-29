@@ -288,3 +288,30 @@ def test_confirmed_routine_facts_do_not_require_spoken_attribution():
     out = normalize_ledger_claims(raw, stories, {})
     assert [(c["attribution_required"], c["verification_status"]) for c in out] == [
         (False, "verified"), (True, "verified_with_attribution"), (True, "verified_with_attribution")]
+
+
+def test_sources_of_duplicate_stories_about_same_subject_are_accepted():
+    from app.services.claim_ledger import normalize_ledger_claims
+    stories = [
+        {"id": "a", "search_subject": "Moth Kingdom", "articles": [{"url": "ua"}]},
+        {"id": "b", "search_subject": "moth kingdom", "articles": [{"url": "ub"}]},
+        {"id": "c", "search_subject": "Salt Choir", "articles": [{"url": "uc"}]},
+    ]
+    raw = [
+        {"story_id": "a", "claim_type": "person_credit", "canonical_text": "Ana Ruiz directed Moth Kingdom.", "source_urls": ["ub"], "verification_status": "verified"},
+        {"story_id": "a", "claim_type": "person_credit", "canonical_text": "Ana Ruiz directed Moth Kingdom.", "source_urls": ["uc"], "verification_status": "verified"},
+    ]
+    out = normalize_ledger_claims(raw, stories, {})
+    assert out[0]["verification_status"] == "verified" and out[0]["source_urls"] == ["ub"]
+    assert out[1]["verification_status"] == "blocked"
+
+
+def test_all_time_ranking_needs_no_date_window():
+    from app.services.claim_ledger import normalize_ledger_claims
+    stories = [{"id": "a", "articles": [{"url": "u"}]}]
+    raw = [{"story_id": "a", "claim_type": "ranking", "canonical_text": "Moth Kingdom is No. 2 all time worldwide.", "rank": 2,
+            "chart_type": "all-time worldwide box office", "market": "worldwide", "source_urls": ["u"], "verification_status": "verified"},
+           {"story_id": "a", "claim_type": "ranking", "canonical_text": "Moth Kingdom was No. 1 on the weekend chart.", "rank": 1,
+            "chart_type": "weekend box office", "market": "domestic", "source_urls": ["u"], "verification_status": "verified"}]
+    out = normalize_ledger_claims(raw, stories, {})
+    assert out[0]["verification_status"] != "blocked" and out[1]["verification_status"] == "blocked"

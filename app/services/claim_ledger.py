@@ -231,6 +231,33 @@ def _source_index(stories: list[dict], fresh_sources: dict[str, list[dict]]) -> 
     return output
 
 
+def _sibling_source_index(stories: list[dict], sources: dict[str, dict[str, dict]]) -> dict[str, dict[str, dict]]:
+    from .research import story_subject_key
+
+    def key_for(story: dict) -> str:
+        subject = str(story.get("search_subject") or "").strip()
+        if not subject:
+            subject = re.sub(r"\s+-\s+[^-]{2,80}$", "", str(story.get("canonical_title") or ""))
+        return story_subject_key(subject)
+
+    by_key: dict[str, list[str]] = {}
+    keys: dict[str, str] = {}
+    for story in stories:
+        sid = str(story.get("id") or "")
+        key = key_for(story) if str(story.get("search_subject") or "").strip() else ""
+        keys[sid] = key
+        if key:
+            by_key.setdefault(key, []).append(sid)
+    output: dict[str, dict[str, dict]] = {}
+    for sid, own in sources.items():
+        merged = dict(own)
+        for sibling in by_key.get(keys.get(sid, ""), []) if keys.get(sid) else []:
+            for url, source in sources.get(sibling, {}).items():
+                merged.setdefault(url, source)
+        output[sid] = merged
+    return output
+
+
 def _ledger_input(stories: list[dict], fresh_sources: dict[str, list[dict]], project: dict) -> dict:
     return {
         "project_window": {
@@ -268,6 +295,7 @@ def normalize_ledger_claims(raw_claims: object, stories: list[dict], fresh_sourc
         return []
     story_ids = {str(story.get("id") or "") for story in stories}
     sources = _source_index(stories, fresh_sources)
+    sibling_sources = _sibling_source_index(stories, sources)
     output = []
     for index, raw in enumerate(raw_claims):
         if not isinstance(raw, dict):
@@ -278,7 +306,10 @@ def normalize_ledger_claims(raw_claims: object, stories: list[dict], fresh_sourc
         claim_type = _clean(raw.get("claim_type")).lower()
         if claim_type not in CLAIM_TYPES:
             claim_type = "other"
-        allowed_urls = sources.get(story_id, {})
+        # A story's own sources plus those of other approved stories about the
+        # same subject (duplicate coverage of one event), so a fact is not
+        # blocked just because its article was filed under the sibling story.
+        allowed_urls = sibling_sources.get(story_id, {})
         source_urls = []
         for url in raw.get("source_urls") or []:
             url = _clean(url)
@@ -315,9 +346,13 @@ def normalize_ledger_claims(raw_claims: object, stories: list[dict], fresh_sourc
         period_type = _clean(raw.get("period_type")).lower()
         date_start = _clean(raw.get("date_start"))
         date_end = _clean(raw.get("date_end"))
-        if claim_type == "ranking" and (rank is None or not chart_type or not market or not date_start or not date_end):
+        all_time_chart = bool(re.search(r"all[\s-]?time|lifetime|highest[\s-]grossing|record", chart_type))
+        if claim_type == "ranking" and (
+            rank is None or not chart_type or not market
+            or (not all_time_chart and (not date_start or not date_end))
+        ):
             status = "blocked"
-            reasons.append("Ranking requires rank, chart type, market, and exact date range.")
+            reasons.append("Ranking requires rank, chart type, market, and an exact date range (all-time charts excepted).")
         if claim_type == "box_office" and numeric_value is not None and (not market or not period_type):
             status = "blocked"
             reasons.append("Box-office number requires market and period type.")
