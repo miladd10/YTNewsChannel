@@ -27,7 +27,7 @@ No images are generated. The app does not clear reuse rights for downloaded medi
 ## Requirements
 
 - Python 3.11+
-- FFmpeg and FFprobe on your PATH (needed for Step 7)
+- FFmpeg and FFprobe on your PATH (needed for highest-quality Step 6 video downloads and Step 7 Resolve packaging)
 - An AI provider for research, writing and review — either signed-in local CLIs (**Codex** for a ChatGPT subscription, **Claude Code** for a Claude subscription) or OpenAI / Anthropic API keys
 - An ElevenLabs API key for Step 4
 
