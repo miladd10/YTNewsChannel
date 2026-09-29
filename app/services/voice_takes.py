@@ -101,17 +101,30 @@ def generate_take(project_id: str, segment_id: str, take_number: int, stamp: str
     rel = path.relative_to(root).as_posix()
     column = "take1_path" if take_number == 1 else "take2_path"
 
+    approved_other_take = (
+        str(row.get("approval_status") or "") == "approved"
+        and int(row.get("selected_take") or 0) not in (0, take_number)
+    )
     with db() as conn:
-        conn.execute(
-            f"""UPDATE voice_segments
-                SET voice_id=?,{column}=?,audio_path='',duration_seconds=NULL,alignment_json='{{}}',
-                    audio_status='generated',selected_take=0,approval_status='pending',updated_at=?
-                WHERE id=?""",
-            (settings["voice_id"], rel, stamp, segment_id),
-        )
+        if approved_other_take:
+            # Regenerating the alternative take must not discard the take the
+            # editor already approved (and its measured duration/alignment).
+            conn.execute(
+                f"UPDATE voice_segments SET {column}=?,updated_at=? WHERE id=?",
+                (rel, stamp, segment_id),
+            )
+        else:
+            conn.execute(
+                f"""UPDATE voice_segments
+                    SET voice_id=?,{column}=?,audio_path='',duration_seconds=NULL,alignment_json='{{}}',
+                        audio_status='generated',selected_take=0,approval_status='pending',updated_at=?
+                    WHERE id=?""",
+                (settings["voice_id"], rel, stamp, segment_id),
+            )
 
     return {
         "ok": True,
+        "kept_approved_take": int(row.get("selected_take") or 0) if approved_other_take else 0,
         "take_number": take_number,
         "audio_path": rel,
         "segment_index": row["segment_index"],
