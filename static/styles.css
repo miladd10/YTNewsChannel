@@ -278,3 +278,4 @@
   font-family:Vazirmatn,Tahoma,"Segoe UI","Noto Sans Arabic",sans-serif;font-size:15px;line-height:1.95}
 .narration-view{white-space:normal}.narration-view p{margin:0 0 14px;text-align:start}.nv-heading{margin:18px 0 8px;color:#bdb6ff;text-align:start}.nv-tags{direction:ltr;text-align:left;margin-bottom:3px}.nv-story{display:inline-block;font:10px/1.4 ui-monospace,Menlo,monospace;color:#8591a1;background:#151c26;border:1px solid #283140;border-radius:6px;padding:1px 6px;margin-right:5px}
 [dir=rtl].narration-editor,[dir=rtl].voice-performance-editor,[dir=rtl].voice-source-text,#pronunciationText[dir=rtl]{text-align:right}
+.claim-system-issues ul{margin:6px 0 0 18px;padding:0}.claim-system-issues li{margin:3px 0;unicode-bidi:plaintext}
