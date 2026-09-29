@@ -473,6 +473,11 @@ def _canonical_scope(field: str, value) -> str:
     text = _clean(value).casefold()
     if not text:
         return ""
+    # Structured AI output often uses snake_case while narration/excerpts use
+    # ordinary spaces or hyphens. Canonicalize those separators before matching
+    # so opening_weekend == "opening weekend" without collapsing it to the
+    # broader generic-weekend scope.
+    text = re.sub(r"[_-]+", " ", text)
     for canonical, pattern in _SCOPE_CANON.get(field, ()):
         if re.search(pattern, text, flags=re.IGNORECASE):
             return canonical
