@@ -2827,6 +2827,8 @@ def run_claim_audit(project_id: str, narration_id: str, body: NarrationReviewBod
         provider,
         model,
     )
+    structure_audit = narration_structure_audit(str(draft["content"] or ""), stories, project)
+    claim_audit = _claim_audit_with_structure(claim_audit, structure_audit)
 
     with db() as conn:
         project = project_or_404(conn, project_id)
@@ -2850,6 +2852,7 @@ def run_claim_audit(project_id: str, narration_id: str, body: NarrationReviewBod
         "claim_blocked_count": int(claim_audit.get("blocked_count") or 0),
         "uncovered_high_risk_count": int(claim_audit.get("uncovered_high_risk_count") or 0),
         "system_issues": claim_audit.get("system_issues") or [],
+        "structure_audit": structure_audit,
         "ledger_summary": ledger_summary(claim_ledger),
         "ledger_reused": ledger_reused,
         "provider": actual_provider,
@@ -2902,6 +2905,7 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
             "length_target": length_target(project, draft["content"]),
             "spoken_lint": spoken_lint(draft["content"]),
             "automatic_fact_check": _fact_check_summary(draft),
+            "structure_audit": narration_structure_audit(str(draft["content"] or ""), stories, project),
             "approved_sections": _sectioned_story_packet(stories),
         }, ensure_ascii=False),
         "</current_week_authoritative_packet>",
