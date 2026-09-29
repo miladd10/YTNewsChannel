@@ -51,17 +51,31 @@ def request(method: str, path: str, json_body: dict | None = None, timeout: int 
         raise ElevenLabsError(f"Could not reach ElevenLabs: {exc}") from exc
 
 
-def list_voices() -> list[dict]:
-    raw, _ = request("GET", "/v2/voices?page_size=100&include_total_count=true")
-    payload = json.loads(raw.decode("utf-8"))
-    result = []
-    for item in payload.get("voices") or []:
-        result.append({
-            "voice_id": item.get("voice_id", ""),
-            "name": item.get("name", "Unnamed voice"),
-            "category": item.get("category", ""),
-            "is_owner": bool(item.get("is_owner")),
-        })
+def list_voices(max_pages: int = 20) -> list[dict]:
+    """All account voices; the v2 endpoint returns at most 100 per page."""
+    result: list[dict] = []
+    seen: set[str] = set()
+    token = ""
+    for _ in range(max_pages):
+        query = {"page_size": "100", "include_total_count": "true"}
+        if token:
+            query["next_page_token"] = token
+        raw, _ = request("GET", "/v2/voices?" + urllib.parse.urlencode(query))
+        payload = json.loads(raw.decode("utf-8"))
+        for item in payload.get("voices") or []:
+            voice_id = item.get("voice_id", "")
+            if not voice_id or voice_id in seen:
+                continue
+            seen.add(voice_id)
+            result.append({
+                "voice_id": voice_id,
+                "name": item.get("name", "Unnamed voice"),
+                "category": item.get("category", ""),
+                "is_owner": bool(item.get("is_owner")),
+            })
+        token = str(payload.get("next_page_token") or "")
+        if not payload.get("has_more") or not token:
+            break
     return result
 
 

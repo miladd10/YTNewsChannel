@@ -23,3 +23,18 @@ def test_regenerating_other_take_keeps_approved_take(tmp_path, monkeypatch):
     vt.generate_take("p", "s", 2, "now")  # regenerating the approved take resets approval
     with dbmod.db() as conn:
         assert conn.execute("SELECT approval_status FROM voice_segments WHERE id='s'").fetchone()[0] == "pending"
+
+
+def test_list_voices_follows_pages(monkeypatch):
+    import json
+    import app.services.elevenlabs_client as el
+    pages = {
+        "": {"voices": [{"voice_id": f"v{i}", "name": f"n{i}"} for i in range(100)], "has_more": True, "next_page_token": "t2"},
+        "t2": {"voices": [{"voice_id": "v100", "name": "last"}], "has_more": False},
+    }
+    def fake(method, path, *a, **k):
+        token = path.split("next_page_token=")[1].split("&")[0] if "next_page_token=" in path else ""
+        return json.dumps(pages[token]).encode(), "application/json"
+    monkeypatch.setattr(el, "request", fake)
+    voices = el.list_voices()
+    assert len(voices) == 101 and voices[-1]["name"] == "last"
