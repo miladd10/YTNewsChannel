@@ -439,7 +439,7 @@ _SCOPE_CANON = {
         ("daily", r"daily|\bday\b|روزانه"),
     ),
     "release_scope": (
-        ("re_release", r"re[\\s-]?release|re[\\s-]?issue|بازاکران|اکران\s+مجدد"),
+        ("re_release", r"re[\s-]?release|re[\s-]?issue|remaster|anniversary|بازاکران|اکران\s+مجدد"),
         ("limited_theatrical", r"limited|select|special|event|festival|imax|محدود|انتخابی|ویژه"),
         ("wide_theatrical", r"wide|nationwide|general|سراسری|عمومی"),
         ("streaming", r"stream|svod|platform|استریم"),
