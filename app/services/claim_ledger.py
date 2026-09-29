@@ -426,6 +426,8 @@ _SCOPE_CANON = {
         ("domestic", r"domestic|north\s+america|us\s*(?:/|&|and)\s*canada|\bu\.?s\.?\b|united\s+states|داخلی|آمریکای\s+شمالی|آمریکا"),
     ),
     "period_type": (
+        ("opening_weekend", r"opening\s+weekend|debut\s+weekend|افتتاحیه|آخر\s*[‌ ]?هفته(?:ٔ|‌ی)?\s+افتتاحیه"),
+        ("second_weekend", r"second\s+weekend|2nd\s+weekend|دومین\s+آخر\s*[‌ ]?هفته|آخر\s*[‌ ]?هفته(?:ٔ|‌ی)?\s+دوم"),
         ("cumulative", r"cumulative|running\s+total|to[\s-]date|lifetime|تجمعی"),
         ("weekend", r"weekend|fri(?:day)?\s*[-–]\s*sun(?:day)?|آخر\s*[‌ ]?هفته"),
         ("weekly", r"weekly|\bweek\b|7[\s-]day|هفتگی"),
@@ -518,30 +520,56 @@ def _validate_spoken_claim(raw: dict, ledger_by_id: dict[str, dict]) -> dict:
         reasons.append("Numeric value/unit does not match the supporting ledger claim.")
     claim_type = _clean(raw.get("claim_type")).lower() or "other"
     if matched and claim_type == "ranking":
-        compatible = [claim for claim in matched if claim.get("claim_type") == "ranking"
-                      and (_int(raw.get("rank")) is None or _int(raw.get("rank")) == claim.get("rank"))
-                      and _field_equal(raw.get("chart_type"), claim.get("chart_type"), "chart_type")
-                      and _field_equal(raw.get("market"), claim.get("market"), "market")
-                      and _field_equal(raw.get("date_start"), claim.get("date_start"))
-                      and _field_equal(raw.get("date_end"), claim.get("date_end"))]
-        if not compatible:
-            reasons.append("Ranking scope/date does not match the ledger.")
+        rank_value = _int(raw.get("rank"))
+        chart_value = _clean(raw.get("chart_type"))
+        market_value = _clean(raw.get("market"))
+        dated_ledger = any(
+            claim.get("claim_type") == "ranking"
+            and (claim.get("date_start") or claim.get("date_end"))
+            for claim in matched
+        )
+        if rank_value is None or not chart_value or not market_value:
+            reasons.append("Ranking extraction is missing rank, chart type, or market.")
+        elif dated_ledger and (not _clean(raw.get("date_start")) or not _clean(raw.get("date_end"))):
+            reasons.append("Ranking extraction is missing the exact date range.")
+        else:
+            compatible = [claim for claim in matched if claim.get("claim_type") == "ranking"
+                          and rank_value == claim.get("rank")
+                          and _field_equal(chart_value, claim.get("chart_type"), "chart_type")
+                          and _field_equal(market_value, claim.get("market"), "market")
+                          and _field_equal(raw.get("date_start"), claim.get("date_start"))
+                          and _field_equal(raw.get("date_end"), claim.get("date_end"))]
+            if not compatible:
+                reasons.append("Ranking scope/date does not match the ledger.")
     if matched and claim_type == "box_office":
-        if not any(claim.get("claim_type") in {"box_office", "ranking"}
-                   and _field_equal(raw.get("market"), claim.get("market"), "market")
-                   and _field_equal(raw.get("period_type"), claim.get("period_type"), "period_type") for claim in matched):
+        market_value = _clean(raw.get("market"))
+        period_value = _clean(raw.get("period_type"))
+        if not market_value or not period_value:
+            reasons.append("Box-office extraction is missing market or period scope.")
+        elif not any(claim.get("claim_type") in {"box_office", "ranking"}
+                     and _field_equal(market_value, claim.get("market"), "market")
+                     and _field_equal(period_value, claim.get("period_type"), "period_type") for claim in matched):
             reasons.append("Box-office market/period scope does not match the ledger.")
     if matched and claim_type in {"budget", "revenue", "deal_value"}:
-        if not any(claim.get("claim_type") == claim_type
-                   and _field_equal(raw.get("metric"), claim.get("metric"), "metric") for claim in matched):
+        metric_value = _clean(raw.get("metric"))
+        if not metric_value:
+            reasons.append("Financial extraction is missing the metric/valuation definition.")
+        elif not any(claim.get("claim_type") == claim_type
+                     and _field_equal(metric_value, claim.get("metric"), "metric") for claim in matched):
             reasons.append("Financial metric/valuation definition does not match the ledger.")
     if matched and claim_type == "release":
-        if not any(claim.get("claim_type") == "release"
-                   and _field_equal(raw.get("release_scope"), claim.get("release_scope"), "release_scope") for claim in matched):
+        release_value = _clean(raw.get("release_scope"))
+        if not release_value:
+            reasons.append("Release extraction is missing release scope.")
+        elif not any(claim.get("claim_type") == "release"
+                     and _field_equal(release_value, claim.get("release_scope"), "release_scope") for claim in matched):
             reasons.append("Release scope does not match the ledger.")
     if matched and claim_type == "title_identity":
-        if not any(claim.get("claim_type") == "title_identity"
-                   and _field_equal(raw.get("title_identity"), claim.get("title_identity"), "title_identity") for claim in matched):
+        identity_value = _clean(raw.get("title_identity"))
+        if not identity_value:
+            reasons.append("Title-identity extraction is missing the identity type.")
+        elif not any(claim.get("claim_type") == "title_identity"
+                     and _field_equal(identity_value, claim.get("title_identity"), "title_identity") for claim in matched):
             reasons.append("Title identity does not match the ledger.")
     attribution_needed = any(claim.get("attribution_required") for claim in matched)
     if attribution_needed and not any(
