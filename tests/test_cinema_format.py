@@ -547,3 +547,27 @@ def test_content_plan_asks_for_english_notes_with_ledger_ids():
     assert "terse ENGLISH fact note" in CONTENT_PLAN_SYSTEM
     assert "[C002]" in CONTENT_PLAN_SYSTEM
     assert "never restate the hook" in CONTENT_PLAN_SYSTEM
+
+
+def _new_format_review(issues: str) -> str:
+    audits = "\n\n".join(f"{h}\n- Status: {st}\n- Notes: n" for h, st in (
+        ("# Format Audit", "PASS"), ("# Style Audit", "PASS"), ("# Factual / Source Audit", "PASS"),
+        ("# Freshness Audit", "PASS"), ("# Context / Spice Audit", "PASS"), ("# Storytelling Audit", "PASS")))
+    return ("# Review Summary\nReady to voice: yes\nGood.\n\n# Keep\n- «حالا برسیم به گیشه» (Status: keep)\n\n"
+            + audits + f"\n\n# Issues\n{issues}\n\n# Review Gate\n- Recommendation: POLISH_OPTIONAL")
+
+
+def test_reviewer_minor_issues_do_not_block_and_keep_section_is_ignored_by_gate():
+    from app.services.cinema_format import parse_review_gate
+    minor = "## ISSUE 1 — x\n- Severity: minor\n- Section: s\n- Problem: «a»\n- Fix: b"
+    gate = parse_review_gate(_new_format_review(minor))
+    assert gate["minor_count"] == 1 and gate["gate_status"] == "polish_optional"
+    major = minor.replace("minor", "major")
+    assert parse_review_gate(_new_format_review(major))["gate_status"] == "revision_required"
+
+
+def test_reviewer_prompt_defines_severity_and_audit_status():
+    from app.services.cinema_format import REVIEWER_SYSTEM, REVISION_SYSTEM
+    assert "Minor issues never fail an audit" in REVIEWER_SYSTEM
+    assert "At most 8 issues" in REVIEWER_SYSTEM and "# Keep" in REVIEWER_SYSTEM
+    assert '"# Keep"' in REVISION_SYSTEM
