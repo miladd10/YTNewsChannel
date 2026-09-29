@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ..version import APP_VERSION
+
 import json
 import platform
 import re
@@ -97,9 +99,21 @@ def save_manifest(conn, project_id: str) -> Path:
     latest_run = conn.execute(
         "SELECT * FROM research_runs WHERE project_id=? ORDER BY created_at DESC LIMIT 1", (project_id,)
     ).fetchone()
+    # Only the latest run's stories plus any older story still referenced by
+    # voice segments or media. Every run's full story list is already saved
+    # under research/stories/<run_id>.json, so nothing is lost; this keeps
+    # project.json small instead of repeating every run.
+    referenced = {
+        str(row[0]) for row in conn.execute(
+            """SELECT story_id FROM voice_segments WHERE project_id=? AND story_id<>''
+               UNION SELECT story_id FROM media_candidates WHERE project_id=?""",
+            (project_id, project_id),
+        ).fetchall()
+    }
+    latest_run_id = latest_run["id"] if latest_run else ""
     stories = [dict(row) for row in conn.execute(
         "SELECT * FROM stories WHERE project_id=? ORDER BY score DESC, created_at", (project_id,)
-    ).fetchall()]
+    ).fetchall() if row["run_id"] == latest_run_id or row["id"] in referenced]
     narrations = [dict(row) for row in conn.execute(
         "SELECT * FROM narrations WHERE project_id=? ORDER BY version_number", (project_id,)
     ).fetchall()]
@@ -126,6 +140,7 @@ def save_manifest(conn, project_id: str) -> Path:
     ).fetchall()]
     payload = {
         "schema_version": PROJECT_SCHEMA_VERSION,
+        "app_version": APP_VERSION,
         "project": dict(project),
         "latest_research_run": dict(latest_run) if latest_run else None,
         "stories": stories,
