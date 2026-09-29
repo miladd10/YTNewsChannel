@@ -5,6 +5,7 @@ import os
 import json
 import re
 import uuid
+from contextlib import asynccontextmanager
 from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -72,7 +73,15 @@ from .services.secrets import delete_api_key, get_api_key, masked_status, save_a
 from .version import APP_RELEASE_NAME, APP_VERSION
 
 STATIC_DIR = BASE_DIR / "static"
-app = FastAPI(title="YT News Studio", version=APP_VERSION)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(title="YT News Studio", version=APP_VERSION, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -619,11 +628,6 @@ def project_payload(conn, project_id: str) -> dict:
     project["counts"] = counts
     project["pipeline"] = PIPELINE
     return project
-
-
-@app.on_event("startup")
-def startup() -> None:
-    init_db()
 
 
 @app.get("/")
