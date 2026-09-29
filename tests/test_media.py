@@ -1,3 +1,4 @@
+import httpx
 import app.services.media as media_module
 from app.services.media import _contextual_fallback_stories, _dedupe_quality_first_results, _extract_reference_image_urls, _extract_reference_video_urls, _image_candidate_score, _matches_actual_story_subject, _reference_resolution_queries, _result_quality_rank, _story_reference_sources, _story_subjects, _youtube_search_queries, search_story_media, story_allows_interview_or_podcast, story_media_key, story_visual_plan, suggested_clip_range, video_is_usable_broll
 
@@ -788,3 +789,29 @@ def test_original_language_copy_beats_localized_copy_of_same_asset():
     assert _language_fit(original) == 1 and _language_fit(italian) == 0 and _language_fit(dutch) == 0
     assert _result_quality_rank(original, story) > _result_quality_rank(italian, story)
     assert _language_fit({"title": "Subject: Official Teaser", "channel": "Subterranean Films"}) == 1
+
+
+
+def test_safe_http_get_revalidates_redirect_targets(monkeypatch):
+    checked = []
+
+    def guard(url):
+        checked.append(url)
+        if "127.0.0.1" in url:
+            raise RuntimeError("private target")
+
+    monkeypatch.setattr(media_module, "_assert_public_http_url", guard)
+
+    def handler(request):
+        assert request.url.host == "public.example"
+        return httpx.Response(302, headers={"location": "http://127.0.0.1/private"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True) as client:
+        try:
+            media_module._safe_http_get(client, "https://public.example/story")
+        except RuntimeError as exc:
+            assert "private target" in str(exc)
+        else:
+            raise AssertionError("private redirect should be rejected")
+
+    assert checked == ["https://public.example/story", "http://127.0.0.1/private"]
