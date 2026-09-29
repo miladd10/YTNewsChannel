@@ -541,3 +541,41 @@ def test_evidence_quote_may_be_cut_mid_word_at_its_edges():
     assert _source_supports_exact_quote(source, "Studio X settles lawsu")
     assert _source_supports_exact_quote(source, "udio X settles lawsuit")
     assert not _source_supports_exact_quote(source, "Studio X settled lawsuit")
+
+
+
+def test_attribution_text_overrides_extractor_false_negative():
+    ledger = {
+        "C001": {
+            "id": "C001",
+            "story_id": "s1",
+            "claim_type": "box_office",
+            "numeric_value": 26,
+            "unit": "million",
+            "market": "domestic",
+            "period_type": "opening_weekend",
+            "verification_status": "verified_with_attribution",
+            "attribution_required": True,
+        }
+    }
+    checked = _validate_spoken_claim({
+        "story_id": "s1",
+        "sentence": "طبق برآوردها، فیلم در آخرهفته افتتاحیه داخلی حدود ۲۶ میلیون دلار فروخت.",
+        "claim_type": "box_office",
+        "numeric_value": 26,
+        "unit": "million",
+        "market": "domestic",
+        "period_type": "opening_weekend",
+        "ledger_claim_ids": ["C001"],
+        "semantic_match": "equivalent",
+        "attribution_present": False,
+    }, ledger)
+    assert checked["status"] == "verified_with_attribution"
+
+
+def test_generic_transition_with_release_word_is_not_deterministic_high_risk():
+    draft = """
+<!-- STORY:s1 -->
+این یکی برای فیلم‌بازها مهمه چون تعداد فیلم‌هایی که قراره اکران بشه رو مستقیم گذاشتن تو دل همین توافق.
+"""
+    assert high_risk_sentences(draft) == []
