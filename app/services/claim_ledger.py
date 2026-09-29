@@ -246,7 +246,9 @@ def _sibling_source_index(stories: list[dict], sources: dict[str, dict[str, dict
     keys: dict[str, str] = {}
     for story in stories:
         sid = str(story.get("id") or "")
-        key = key_for(story) if str(story.get("search_subject") or "").strip() else ""
+        # key_for already has a canonical-title fallback for older projects
+        # created before search_subject was stored.
+        key = key_for(story)
         keys[sid] = key
         if key:
             by_key.setdefault(key, []).append(sid)
