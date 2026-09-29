@@ -4,6 +4,7 @@ import html as html_lib
 import ipaddress
 import mimetypes
 import re
+import shutil
 import socket
 import uuid
 from html.parser import HTMLParser
@@ -2531,6 +2532,8 @@ def download_image(url: str, target_stem: Path, max_bytes: int = 80 * 1024 * 102
 
 def download_video(url: str, target_stem: Path) -> Path:
     _assert_public_http_url(url)
+    if not shutil.which("ffmpeg"):
+        raise RuntimeError("FFmpeg is required for video stream merging. Install FFmpeg, restart YT News Studio, then retry.")
     from yt_dlp import YoutubeDL
 
     target_stem.parent.mkdir(parents=True, exist_ok=True)
