@@ -2412,6 +2412,20 @@ def generate_narration(project_id: str, body: GenerateBody):
         audit_provider,
         audit_model,
     )
+    text, fact_check, claim_audit, structure_audit, repair_count, repair_error = _repair_narration_until_stable(
+        project,
+        stories,
+        text,
+        claim_ledger,
+        fresh_claim_sources,
+        fact_check,
+        claim_audit,
+        actual_provider,
+        actual_model,
+        audit_provider,
+        audit_model,
+        style_profile.get("profile_text") or "",
+    )
 
     narration_id = str(uuid.uuid4())
     stamp = now()
