@@ -132,6 +132,21 @@ def default_week() -> tuple[str, str]:
     return start.isoformat(), end.isoformat()
 
 
+def _validate_project_date_range(date_start: str, date_end: str) -> tuple[str, str]:
+    start_text = str(date_start or "").strip()
+    end_text = str(date_end or "").strip()
+    try:
+        start = date.fromisoformat(start_text)
+        end = date.fromisoformat(end_text)
+    except ValueError as exc:
+        raise HTTPException(400, "Project dates must use YYYY-MM-DD.") from exc
+    if start >= end:
+        raise HTTPException(400, "Project week end must be after the start date.")
+    if (end - start).days > 62:
+        raise HTTPException(400, "Project date range cannot exceed 62 days.")
+    return start.isoformat(), end.isoformat()
+
+
 def _resolve_input_signature(voice_rows: list[dict], candidates: list[dict]) -> str:
     voice = [
         {
@@ -676,7 +691,11 @@ def list_projects():
 def create_project(body: ProjectCreate):
     if body.channel != "cinema" or body.content_type != "weekly_news":
         raise HTTPException(400, "The MVP currently supports Cinema → Weekly News only.")
-    start, end = default_week()
+    default_start, default_end = default_week()
+    start, end = _validate_project_date_range(
+        body.date_start or default_start,
+        body.date_end or default_end,
+    )
     try:
         root = create_project_folder(Path(body.parent_path), body.name.strip())
     except Exception as exc:
@@ -691,7 +710,7 @@ def create_project(body: ProjectCreate):
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 project_id, body.name.strip(), body.channel, body.content_type, body.language,
-                body.target_minutes, body.media_chunk_minutes, body.date_start or start, body.date_end or end,
+                body.target_minutes, body.media_chunk_minutes, start, end,
                 body.geographic_focus, body.editorial_focus, body.notes, str(root), stamp, stamp, body.channel_name.strip(),
             ),
         )
@@ -714,7 +733,13 @@ def update_project(project_id: str, body: ProjectUpdate):
     allowed = {"name","language","target_minutes","media_chunk_minutes","date_start","date_end","geographic_focus","editorial_focus","notes","channel_name"}
     values = {k:v for k,v in values.items() if k in allowed}
     with db() as conn:
-        project_or_404(conn, project_id)
+        project = project_or_404(conn, project_id)
+        if "date_start" in values or "date_end" in values:
+            merged_start = values.get("date_start", project["date_start"])
+            merged_end = values.get("date_end", project["date_end"])
+            valid_start, valid_end = _validate_project_date_range(merged_start, merged_end)
+            values["date_start"] = valid_start
+            values["date_end"] = valid_end
         sets = ",".join(f"{key}=?" for key in values) + ",updated_at=?"
         conn.execute(f"UPDATE projects SET {sets} WHERE id=?", (*values.values(), now(), project_id))
         save_manifest(conn, project_id)
