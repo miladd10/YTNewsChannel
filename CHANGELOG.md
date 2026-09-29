@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.2 — Repository hardening
+
+Repository-wide review and fixes:
+- Claim auditing now keeps opening weekend distinct from generic/later weekend scopes and requires ranking date ranges, box-office market/period, financial metrics, release scope, and title identity when those fields are material.
+- Production claim-ledger entries require a source-verbatim evidence anchor, and the narration audit checks every money/percentage amount in multi-value sentences instead of treating sentence-level extraction as sufficient.
+- Approved article excerpts are fetched before the claim ledger is built, so the writer's factual boundary sees article evidence rather than only headlines/snippets.
+- Reference/news page redirects are revalidated on every hop to block private-network redirects; rendered external links and image URLs are restricted to HTTP/HTTPS.
+- SQLite uses WAL plus a longer busy timeout for overlapping local requests; project date ranges are validated before research.
+- Resolve media staging is transactional with rollback, and FFmpeg/shot-analysis subprocesses have bounded runtimes.
+- Project manifests are written atomically. Launchers honor YT_NEWS_PORT and avoid trusting a stale/reused PID.
+- CI now syntax-checks both browser JavaScript bundles in addition to Python compilation and the test suite.
+- FFmpeg is checked before highest-quality video stream merging and documented as a Step 6/7 dependency.
+
 ## v0.4.1 — Output review fixes
 
 From reviewing Draft V16 and an exported project:
