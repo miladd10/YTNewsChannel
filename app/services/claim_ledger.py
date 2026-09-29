@@ -72,19 +72,20 @@ HARD RULES:
 _FA_SUFFIX = r"(?:‌?(?:های|ها|اش|شون|تون|مون|ش|ی|ه))?ٔ?"
 _FA_RISK_TERMS = (
     r"میلیون|میلیارد|هزار|درصد|بودجه|درآمد|فروش|گیشه|رتبه|صدر\s*جدول|"
-    r"ارزش\s+(?:معامله|خرید|بازار|قرارداد)|دلار|"
-    r"بازاکران|اکران\s+مجدد|اکران\s+(?:محدود|سراسری|ویژه)|پخش\s+استریم"
+    r"ارزش\s+(?:معامله|خرید|بازار|قرارداد)|دلار"
 )
 _EN_RISK_TERMS = (
     r"million|billion|percent|budget|revenue|gross(?:ed|es)?|box\s*office|"
     r"rank(?:ed|ing|s)?|number\s+one|top(?:ped|s)?\s+the\s+chart|"
-    r"re[\s-]?release|limited\s+theatrical|wide\s+theatrical|special\s+engagement|"
     r"pvod|vod|valuation|enterprise\s+value|equity\s+value"
 )
 HIGH_RISK_RE = re.compile(
     r"(?:[0-9۰-۹٠-٩]+(?:[.,٬٫][0-9۰-۹٠-٩]+)*|[$€£¥%]|#\s*[0-9۰-۹]|"
     rf"(?<![\w‌])(?:{_FA_RISK_TERMS}){_FA_SUFFIX}(?!\w)|"
-    rf"\b(?:{_EN_RISK_TERMS})\b)",
+    r"(?<![\w‌])اکران(?:ش|ِ|ٔ)?\s+(?:از|در)\s+(?:هفته|ماه|روز|تاریخ)|"
+    r"(?<![\w‌])اکران\s+(?:محدود|سراسری|ویژه)|"
+    rf"\b(?:{_EN_RISK_TERMS})\b|"
+    r"\brelease\s+(?:is\s+)?(?:limited|wide)|\b(?:limited|wide)\s+theatrical\b)",
     re.IGNORECASE,
 )
 
