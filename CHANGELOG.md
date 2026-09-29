@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.4.3 — Narration Assembly Repair
+
+Fixes from reviewing a broken generated transcript:
+- Every selected story must now have at least one usable verified ledger claim before narration starts; the app refuses to silently omit a selected story whose evidence could not be verified.
+- A deterministic structure audit checks selected-story coverage, unknown STORY ids, section placement/order and spoken length after every generated/enriched/revised draft.
+- Drafts that are missing stories, too short/long, or still contain blocked claims are automatically repaired up to two times against the same verified claim ledger before being saved.
+- Writer/planner/reviser instructions now require every selected story to appear, preserve format section order, and forbid transitions that refer back to a topic that has not actually been narrated yet.
+- Claim-audit attribution now reads the narration text itself; a sentence that literally says «طبق برآوردها»، «طبق گزارش‌ها» or «حدود» is no longer blocked just because the extraction model incorrectly returned attribution_present=false.
+- Deterministic high-risk detection no longer treats generic uses of words such as «اکران» as a missing factual claim, while specific release timing/scope statements remain protected.
+- Manual Claim Audit now includes the same story-coverage/section/length structure checks, and Reviewer receives those deterministic findings.
+- Step 3 shows when an automatic assembly repair ran.
+
 ## v0.4.2 — Repository hardening
 
 Repository-wide review and fixes:
