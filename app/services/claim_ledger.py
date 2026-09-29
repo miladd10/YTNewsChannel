@@ -558,6 +558,20 @@ def _attribution_present(sentence: str, claim: dict, extractor_value: bool) -> b
     ))
 
 
+def _period_compatible(spoken: dict, ledger: dict) -> bool:
+    """Same period scope, or a specific weekend (opening/second) against a
+    generic 'weekend' label for the very same explicit dates. Opening and
+    second weekends never match each other."""
+    if _field_equal(spoken.get("period_type"), ledger.get("period_type"), "period_type"):
+        return True
+    kinds = {_canonical_scope("period_type", spoken.get("period_type")),
+             _canonical_scope("period_type", ledger.get("period_type"))}
+    if "weekend" not in kinds or not kinds & {"opening_weekend", "second_weekend"}:
+        return False
+    dates = [(_clean(item.get("date_start")), _clean(item.get("date_end"))) for item in (spoken, ledger)]
+    return all(start and end for start, end in dates) and dates[0] == dates[1]
+
+
 def _validate_spoken_claim(raw: dict, ledger_by_id: dict[str, dict]) -> dict:
     ids = [str(value) for value in raw.get("ledger_claim_ids") or [] if str(value) in ledger_by_id]
     sentence = _clean(raw.get("sentence"))
@@ -604,7 +618,7 @@ def _validate_spoken_claim(raw: dict, ledger_by_id: dict[str, dict]) -> dict:
             reasons.append("Box-office extraction is missing market or period scope.")
         elif not any(claim.get("claim_type") in {"box_office", "ranking"}
                      and _field_equal(market_value, claim.get("market"), "market")
-                     and _field_equal(period_value, claim.get("period_type"), "period_type") for claim in matched):
+                     and _period_compatible(raw, claim) for claim in matched):
             reasons.append("Box-office market/period scope does not match the ledger.")
     if matched and claim_type in {"budget", "revenue", "deal_value"}:
         metric_value = _clean(raw.get("metric"))

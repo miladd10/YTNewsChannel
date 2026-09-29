@@ -511,3 +511,14 @@ def test_persian_compound_amount_is_one_amount():
     from app.services.claim_ledger import _financial_values_in_sentence
     assert _financial_values_in_sentence("فروشش به نزدیک ۲ میلیارد و ۹۰۰ میلیون دلار رسید") == [(2.9, "billion")]
     assert _financial_values_in_sentence("حدود ۴۳ میلیون دلار و ۵ درصد بیشتر") == [(43.0, "million"), (5.0, "percent")]
+
+
+def test_opening_weekend_matches_generic_weekend_only_with_same_dates():
+    from app.services.claim_ledger import _period_compatible
+    ledger = {"period_type": "weekend", "date_start": "2031-03-07", "date_end": "2031-03-09"}
+    assert _period_compatible({"period_type": "opening weekend", "date_start": "2031-03-07", "date_end": "2031-03-09"}, ledger)
+    assert not _period_compatible({"period_type": "opening weekend"}, ledger)
+    assert not _period_compatible({"period_type": "opening weekend", "date_start": "2031-03-14", "date_end": "2031-03-16"}, ledger)
+    assert not _period_compatible({"period_type": "second weekend", "date_start": "2031-03-07", "date_end": "2031-03-09"},
+                                  {"period_type": "opening weekend", "date_start": "2031-03-07", "date_end": "2031-03-09"})
+    assert not _period_compatible({"period_type": "cumulative"}, ledger)
