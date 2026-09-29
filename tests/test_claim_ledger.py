@@ -259,7 +259,7 @@ def test_scope_synonyms_match_but_real_scope_differences_do_not():
     assert _field_equal("global", "worldwide", "market")
     assert not _field_equal("domestic", "worldwide", "market")
     assert not _field_equal("international", "worldwide", "market")
-    assert _field_equal("opening weekend", "weekend", "period_type")
+    assert not _field_equal("opening weekend", "weekend", "period_type")
     assert not _field_equal("opening weekend", "cumulative", "period_type")
     assert not _field_equal("opening weekend total", "cumulative", "period_type")
     assert not _field_equal("weekend", "weekly", "period_type")
