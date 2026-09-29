@@ -19,5 +19,9 @@ jobs:
           pip install -r requirements.txt pytest
       - name: Compile
         run: python -m compileall -q app
+      - name: Check browser JavaScript syntax
+        run: |
+          node --check static/app.js
+          node --check static/editorial.js
       - name: Test
         run: PYTHONPATH=. pytest -q
