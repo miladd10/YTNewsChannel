@@ -505,3 +505,9 @@ def test_financial_amounts_read_thousands_groups_and_decimal_marks():
     assert amounts("It made $1,788 million") == [(1788.0, "million")]
     assert amounts("۲٫۸۸۵ میلیارد دلار") == [(2.885, "billion")]
     assert amounts("حدود ۴۲,۷ میلیون دلار") == [(42.7, "million")]
+
+
+def test_persian_compound_amount_is_one_amount():
+    from app.services.claim_ledger import _financial_values_in_sentence
+    assert _financial_values_in_sentence("فروشش به نزدیک ۲ میلیارد و ۹۰۰ میلیون دلار رسید") == [(2.9, "billion")]
+    assert _financial_values_in_sentence("حدود ۴۳ میلیون دلار و ۵ درصد بیشتر") == [(43.0, "million"), (5.0, "percent")]

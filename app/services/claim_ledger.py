@@ -513,6 +513,13 @@ _SCOPE_CANON = {
 }
 
 
+# Scopes where saying nothing could mislead a listener (a limited run heard as
+# a wide release, a re-release heard as a new film). Omitting any other scope
+# is harmless because the sentence makes no claim about it.
+RISKY_RELEASE_SCOPES = {"limited_theatrical", "re_release"}
+RISKY_TITLE_IDENTITIES = {"re_release", "extended_cut", "remake", "reboot"}
+
+
 def _canonical_scope(field: str, value) -> str:
     text = _clean(value).casefold()
     if not text:
@@ -608,15 +615,29 @@ def _validate_spoken_claim(raw: dict, ledger_by_id: dict[str, dict]) -> dict:
             reasons.append("Financial metric/valuation definition does not match the ledger.")
     if matched and claim_type == "release":
         release_value = _clean(raw.get("release_scope"))
-        if not release_value:
-            reasons.append("Release extraction is missing release scope.")
+        risky_release = any(
+            claim.get("claim_type") == "release"
+            and _canonical_scope("release_scope", claim.get("release_scope")) in RISKY_RELEASE_SCOPES
+            for claim in matched
+        )
+        if not release_value and not risky_release:
+            pass  # the sentence does not characterize the release; nothing to contradict
+        elif not release_value:
+            reasons.append("Release extraction is missing release scope for a limited/special/re-release fact.")
         elif not any(claim.get("claim_type") == "release"
                      and _field_equal(release_value, claim.get("release_scope"), "release_scope") for claim in matched):
             reasons.append("Release scope does not match the ledger.")
     if matched and claim_type == "title_identity":
         identity_value = _clean(raw.get("title_identity"))
-        if not identity_value:
-            reasons.append("Title-identity extraction is missing the identity type.")
+        risky_identity = any(
+            claim.get("claim_type") == "title_identity"
+            and _canonical_scope("title_identity", claim.get("title_identity")) in RISKY_TITLE_IDENTITIES
+            for claim in matched
+        )
+        if not identity_value and not risky_identity:
+            pass
+        elif not identity_value:
+            reasons.append("Title-identity extraction is missing the identity type for a re-release/remake/reboot/cut.")
         elif not any(claim.get("claim_type") == "title_identity"
                      and _field_equal(identity_value, claim.get("title_identity"), "title_identity") for claim in matched):
             reasons.append("Title identity does not match the ledger.")
@@ -678,6 +699,24 @@ def high_risk_sentences(draft_text: str) -> list[dict]:
 def _financial_values_in_sentence(sentence: str) -> list[tuple[float, str]]:
     """Extract money/percentage magnitudes without treating years/title numbers as amounts."""
     plain = str(sentence or "").translate(PERSIAN_DIGITS)
+    # Spoken Persian compound amounts ("2 میلیارد و 900 میلیون دلار") are one
+    # amount, 2.9 billion. Fold them into a single decimal before matching so
+    # the larger-unit and smaller-unit parts are not audited separately.
+    def _fold(match: re.Match) -> str:
+        big = float(match.group("big"))
+        small = float(match.group("small"))
+        scale = {"میلیارد": 1e9, "billion": 1e9, "میلیون": 1e6, "million": 1e6, "هزار": 1e3, "thousand": 1e3}
+        big_unit, small_unit = match.group("bu").casefold(), match.group("su").casefold()
+        if scale.get(small_unit, 0) >= scale.get(big_unit, 0):
+            return match.group(0)
+        value = big + small * scale[small_unit] / scale[big_unit]
+        return f"{value:g} {match.group('bu')}"
+
+    plain = re.sub(
+        r"(?P<big>\d+(?:\.\d+)?)\s*(?P<bu>میلیارد|میلیون|billion|million)\s*(?:و|and)\s*"
+        r"(?P<small>\d+(?:\.\d+)?)\s*(?P<su>میلیون|هزار|million|thousand)",
+        _fold, plain, flags=re.IGNORECASE,
+    )
     matches: list[tuple[float, str]] = []
     number = r"(?P<num>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?)"
     patterns = (
