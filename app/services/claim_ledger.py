@@ -37,6 +37,7 @@ HARD RULES:
 - RELEASE: distinguish limited/special-format/event/wide theatrical, streaming, PVOD/VOD and announcement vs actual availability.
 - TITLE IDENTITY: distinguish new film/sequel/prequel/remake/reboot/re-release/extended cut/new version when supported.
 - Conflicting figures/definitions require attribution; never flatten them into one unqualified fact.
+- attribution_required=true ONLY for estimates, projections, conflicting figures, money/ranking claims, quotes, and claims that are still unconfirmed reports. Confirmed facts (cast, trailers released, titles, official announcements, release dates announced by the studio) are attribution_required=false even when one outlet reported them.
 - Prefer fresh preferred evidence for volatile current values. Older values may stay only as explicitly historical claims.
 - Do not create a current cumulative value from an opening-weekend figure.
 - Do not create a weekly #1 claim from weekend evidence, or vice versa.
@@ -86,6 +87,13 @@ HIGH_RISK_RE = re.compile(
 PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩٫٬", "01234567890123456789.,")
 
 FINANCIAL_CLAIM_TYPES = {"budget", "revenue", "box_office", "deal_value"}
+
+ATTRIBUTABLE_CLAIM_TYPES = {"box_office", "ranking", "budget", "revenue", "deal_value", "quote"}
+UNCONFIRMED_REPORT_RE = re.compile(
+    r"\b(report(?:ed|edly|s)?|sources?|insiders?|exclusive(?:ly)?|allegedly|rumou?r(?:ed|s)?|"
+    r"according\s+to|people\s+familiar|in\s+talks|expected\s+to|plans?\s+to)\b",
+    re.IGNORECASE,
+)
 
 MONEY_OR_PERCENT_RE = re.compile(
     r"([$€£¥]|\b(?:usd|eur|gbp|dollars?|million|billion|percent)\b|%|"
@@ -319,13 +327,19 @@ def normalize_ledger_claims(raw_claims: object, stories: list[dict], fresh_sourc
         if claim_type in {"revenue", "deal_value"} and not _clean(raw.get("metric")):
             status = "blocked"
             reasons.append("Financial claim must identify its exact metric/valuation definition.")
-        attribution_required = bool(raw.get("attribution_required"))
         estimate_status = _clean(raw.get("estimate_status")).lower()
         conflict_note = _clean(raw.get("conflict_note"))
+        # Attribution is spoken aloud, so it is kept only where it informs the
+        # viewer: estimates/projections/conflicts, money/ranking/quote claims,
+        # and claims worded as unconfirmed reports. Routine confirmed facts
+        # (cast, trailers, titles, official announcements) need no spoken source.
+        attribution_required = bool(raw.get("attribution_required")) and (
+            claim_type in ATTRIBUTABLE_CLAIM_TYPES or bool(UNCONFIRMED_REPORT_RE.search(canonical_text))
+        )
         if estimate_status in {"reported_estimate", "projection", "approximate", "conflicting"} or conflict_note:
             attribution_required = True
-            if status == "verified":
-                status = "verified_with_attribution"
+        if status in {"verified", "verified_with_attribution"}:
+            status = "verified_with_attribution" if attribution_required else "verified"
         output.append({
             "id": f"C{index + 1:03d}",
             "story_id": story_id, "claim_type": claim_type, "subject": _clean(raw.get("subject")),

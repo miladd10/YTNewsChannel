@@ -271,3 +271,20 @@ def test_scope_synonyms_match_but_real_scope_differences_do_not():
     assert _field_equal("production budget", "budget", "metric")
     assert not _field_equal("marketing spend", "production budget", "metric")
     assert not _field_equal("enterprise value", "equity value", "metric")
+
+
+def test_confirmed_routine_facts_do_not_require_spoken_attribution():
+    from app.services.claim_ledger import normalize_ledger_claims
+    stories = [{"id": "s1", "articles": [{"url": "u"}]}]
+    raw = [
+        {"story_id": "s1", "claim_type": "cast", "canonical_text": "Ana Ruiz voices the lead in Moth Kingdom.",
+         "attribution_required": True, "estimate_status": "confirmed", "source_urls": ["u"], "verification_status": "verified_with_attribution"},
+        {"story_id": "s1", "claim_type": "box_office", "canonical_text": "Moth Kingdom opened to $40 million worldwide.",
+         "numeric_value": 40, "unit": "million", "market": "worldwide", "period_type": "weekend",
+         "estimate_status": "reported_estimate", "source_urls": ["u"], "verification_status": "verified"},
+        {"story_id": "s1", "claim_type": "production", "canonical_text": "Studio X is reportedly in talks to acquire the rights.",
+         "attribution_required": True, "source_urls": ["u"], "verification_status": "verified_with_attribution"},
+    ]
+    out = normalize_ledger_claims(raw, stories, {})
+    assert [(c["attribution_required"], c["verification_status"]) for c in out] == [
+        (False, "verified"), (True, "verified_with_attribution"), (True, "verified_with_attribution")]

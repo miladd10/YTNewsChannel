@@ -677,11 +677,11 @@ Rules:
 
 ATTRIBUTION_POLICY = """
 ATTRIBUTION POLICY (single shared rule for writer, reviser, fact checker and reviewer):
-- Speak a source or estimate marker ONLY for ledger claims with attribution_required=true. Never add source names to other facts.
-- reported_estimate / approximate / projection: a light estimate marker in the same sentence is enough ("حدود"، "تقریباً"، "برآورد"، "طبق برآوردها"). Naming the outlet is optional.
-- conflicting figures or a claim only one outlet reports (attribution_label set): name the outlet once, in natural spoken form ("ورایتی می‌گه..."، "به گزارش ددلاین..."). Vary the phrasing; never open consecutive sentences with "طبق گزارش".
-- Name the same outlet at most once per story. Later sentences of that story use only a light marker ("حدود"، "این برآورد...") where the ledger still requires one.
-- Reviewers must NOT flag required attribution as a style problem. Flag only attribution added where the ledger does not require it, the same outlet repeated within a story, or a required marker that is missing.
+- Speak a source or estimate marker ONLY for ledger claims with attribution_required=true. Never add source names to other facts (cast, trailers, titles, announcements).
+- DEFAULT: a light marker in the same sentence, not an outlet name: "حدود"، "تقریباً"، "طبق برآوردها"، "طبق گزارش‌ها"، "گفته می‌شه". Most viewers do not know trade outlets; a string of outlet names sounds like a news agency.
+- Name an outlet ONLY when figures from different outlets conflict, when the claim is an exclusive or still-unconfirmed report, or when the outlet itself is part of the story. Then name it once, naturally ("ورایتی می‌گه...").
+- Across the whole episode, name outlets rarely (aim for at most 2-3 in total). Never name the same outlet twice in one story; never open consecutive sentences with a source.
+- Reviewers must NOT flag required attribution as a style problem. Flag attribution added where the ledger does not require it, outlet names where a light marker would do, repeated outlets, or a required marker that is missing.
 """
 
 
