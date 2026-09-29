@@ -926,7 +926,7 @@ def _video_rank(item: dict, story: dict, base: str) -> tuple[int, int, int, int,
     views = _as_int(item.get("view_count")) or 0
     # Resolution is intentionally first. Among equally good copies, prefer the
     # cleanest/original source, then exact official/relevance signals.
-    return quality_tier, height, cleanliness, relevance, views
+    return _language_fit(item), quality_tier, height, cleanliness, relevance, views
 
 
 def _video_kind_key(title: str) -> str:
@@ -966,6 +966,27 @@ def _video_identity_key(item: dict, story: dict) -> str:
     return f"{subject_key}|{coverage_kind}|{kind}|{duration_bucket}"
 
 
+# Markers of a localized (dubbed/subtitled/regional) copy. Cinema-news B-roll
+# should use the original-language asset; a localized copy is kept only as a
+# fallback when no original copy survives.
+_LOCALIZED_MARKERS_RE = re.compile(
+    r"\b(ufficiale|italiano|italia|doppiato|sottotitol\w*|oficial|español|espanol|castellano|latino|doblad[oa]|"
+    r"subtitulad[oa]|legendado|dublado|brasil|portugu[eê]s|officielle?|français|francais|vostfr|vf\b|"
+    r"deutsch|offizieller?|german|omu|nederlands|kronieken|türkçe|turkce|polski|zwiastun|русский|"
+    r"hindi|tamil|telugu|japanese|korean|chinese|thai|indonesia|arabic|dub(?:bed)?|sub(?:bed)?)\b",
+    re.IGNORECASE,
+)
+_NON_LATIN_TITLE_RE = re.compile(r"[\u0400-\u04FF\u0600-\u06FF\u0900-\u0DFF\u0E00-\u0E7F\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]")
+
+
+def _language_fit(item: dict) -> int:
+    """1 for an original-language copy, 0 for a localized copy."""
+    text = " ".join(str(item.get(key) or "") for key in ("title", "channel", "uploader", "source"))
+    if _LOCALIZED_MARKERS_RE.search(text) or _NON_LATIN_TITLE_RE.search(str(item.get("title") or "")):
+        return 0
+    return 1
+
+
 def _video_editorial_utility(item: dict) -> int:
     title = str(item.get("title") or "").casefold()
     # Among different official assets for the same story, a real trailer/clip
@@ -1002,7 +1023,7 @@ def _result_quality_rank(item: dict, story: dict) -> tuple[int, int, int, int, i
     elif "reference page" in provider:
         clean = 3
     official_title = 1 if "official" in title else 0
-    return _video_editorial_utility(item), _video_quality_tier(height), height, clean, official_title
+    return _video_editorial_utility(item), _language_fit(item), _video_quality_tier(height), height, clean, official_title
 
 
 def _dedupe_quality_first_results(items: list[dict], story: dict, limit: int) -> list[dict]:

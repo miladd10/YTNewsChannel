@@ -777,3 +777,14 @@ def test_media_reference_sources_include_post_draft_enrichment_sources():
         "https://example.com/news",
         "https://example.com/context",
     ]
+
+
+def test_original_language_copy_beats_localized_copy_of_same_asset():
+    from app.services.media import _language_fit, _result_quality_rank
+    story = {"canonical_title": "Moth Kingdom trailer", "search_subject": "Moth Kingdom"}
+    original = {"title": "Moth Kingdom | Official Trailer | Studio X", "height": 1080, "source": "Studio X"}
+    italian = {"title": "Moth Kingdom | Trailer ufficiale | Studio X Italia", "height": 2160, "source": "Studio X Italia"}
+    dutch = {"title": "De Kronieken van Moth Kingdom - Featurette", "height": 1080}
+    assert _language_fit(original) == 1 and _language_fit(italian) == 0 and _language_fit(dutch) == 0
+    assert _result_quality_rank(original, story) > _result_quality_rank(italian, story)
+    assert _language_fit({"title": "Subject: Official Teaser", "channel": "Subterranean Films"}) == 1
