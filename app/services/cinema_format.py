@@ -803,6 +803,7 @@ WHAT YOU RECEIVE
 - The STYLE BLUEPRINT and style corpus. The style corpus is never factual authority: use it only to compare voice and flow; never ask the writer to copy its wording or facts.
 
 HOW TO JUDGE FACTS
+- automatic_fact_check is the fresh-evidence fact check. If its status is needs_human_check, every issue it lists that is still present in the draft is a blocking issue.
 - The claim audit is the fact gate. Every blocked audit claim is a blocking issue: quote it and give the fix (remove it, or reword it to match the ledger claim it should map to).
 - Beyond the audit, raise a factual issue only when you can point to the exact draft sentence and the exact ledger claim or source that contradicts it: wrong scope (opening vs cumulative, weekend vs weekly, domestic vs worldwide, estimate vs final, limited vs wide release), an older figure presented as current, a milestone called "approaching" after it was crossed, a background fact presented as this week's news, a fact under the wrong STORY marker, or a story that does not narrate its news_hook.
 - Never ask the writer to add a fact that is not a verified ledger claim or a safe_to_narrate spice angle; name the ledger id or angle you want used.
@@ -928,6 +929,7 @@ Apply the supplied reviewer feedback to the existing narration.
 
 Rules:
 - The review is the change list.
+- Also fix every issue in the packet's automatic_fact_check when its status is needs_human_check, using only verified ledger claims.
 - Preserve every line quoted under the review's "# Keep" section unless an issue explicitly requires changing it.
 - Apply issues in severity order; a Fix that contains a Persian rewrite may be used as written if it fits the surrounding register.
 - VERIFIED CLAIM LEDGER IS THE HARD FACTUAL BOUNDARY. Every factual sentence in the revised output must remain supported by a verified/verified_with_attribution ledger claim for that STORY id.

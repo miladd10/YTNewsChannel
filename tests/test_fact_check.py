@@ -94,3 +94,16 @@ def test_explicit_domestic_weekend_number_one_claim_is_allowed():
     }
     flags = _deterministic_fact_red_flags(draft, fresh)
     assert not any(flag["rule"] == "unqualified_box_office_rank" for flag in flags)
+
+
+def test_fact_check_over_edit_guard():
+    from app.main import _fact_check_over_edit
+    draft = ("<!-- STORY:a --> جملهٔ اول درباره فیلم. جملهٔ دوم با عدد ۴۳ میلیون. جملهٔ سوم.\n\n"
+             "<!-- STORY:b --> خبر دوم. ادامهٔ خبر دوم. پایان خبر دوم.")
+    fixed_one = draft.replace("۴۳ میلیون", "حدود ۴۳ میلیون")
+    assert _fact_check_over_edit(draft, fixed_one, 1) == ""
+    dropped_story = "<!-- STORY:a --> جملهٔ اول درباره فیلم. جملهٔ دوم با عدد ۴۳ میلیون. جملهٔ سوم."
+    assert "removed" in _fact_check_over_edit(draft, dropped_story, 1)
+    rewritten = ("<!-- STORY:a --> متن کاملاً تازه یک. تازه دو. تازه سه.\n\n"
+                 "<!-- STORY:b --> تازه چهار. تازه پنج. تازه شش.")
+    assert "changed 6 sentences" in _fact_check_over_edit(draft, rewritten, 1)

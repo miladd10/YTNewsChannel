@@ -1716,6 +1716,31 @@ def _deterministic_fact_red_flags(
     return flags
 
 
+def _narration_sentences(text: str) -> list[str]:
+    body = re.sub(r"<!--.*?-->", " ", text or "", flags=re.S)
+    body = re.sub(r"(?m)^\s*#+\s.*$", " ", body)
+    return [re.sub(r"\s+", " ", part).strip() for part in re.split(r"[.!؟?\n]+", body) if part.strip()]
+
+
+def _fact_check_over_edit(draft_text: str, corrected: str, issue_count: int) -> str:
+    """Why a fact-check 'corrected' rewrite goes beyond fixing its issues, or ''."""
+    draft_ids = set(re.findall(r"<!--\s*STORY:([^>\s]+)\s*-->", draft_text or ""))
+    corrected_ids = set(re.findall(r"<!--\s*STORY:([^>\s]+)\s*-->", corrected or ""))
+    lost = draft_ids - corrected_ids
+    if lost:
+        return f"The rewrite removed every sentence of {len(lost)} story/stories."
+    draft_words = len(" ".join(_narration_sentences(draft_text)).split())
+    corrected_words = len(" ".join(_narration_sentences(corrected)).split())
+    if draft_words and corrected_words < 0.7 * draft_words:
+        return f"The rewrite cut the draft from {draft_words} to {corrected_words} words."
+    kept = set(_narration_sentences(corrected))
+    changed = sum(1 for sentence in _narration_sentences(draft_text) if sentence not in kept)
+    allowed = max(3, 3 * max(1, issue_count))
+    if changed > allowed:
+        return f"The rewrite changed {changed} sentences to fix {issue_count} issue(s)."
+    return ""
+
+
 def _run_narration_fact_check(
     project: dict,
     stories: list[dict],
@@ -1805,6 +1830,21 @@ def _run_narration_fact_check(
                         "correction_basis": "Keep only STORY ids from the approved packet.",
                     })
                     issue_count = len(issues)
+                else:
+                    edit_problem = _fact_check_over_edit(draft_text, corrected, issue_count)
+                    if edit_problem:
+                        # Keep the writer's text: an over-broad rewrite undoes
+                        # voice and structure. The listed issues stay attached
+                        # (needs_human_check) so review and revision fix them.
+                        status = "needs_human_check"
+                        corrected = draft_text
+                        issues.append({
+                            "story_id": "",
+                            "claim": "Fact-check rewrite rejected",
+                            "problem": edit_problem,
+                            "correction_basis": "Fix only the issues listed above in revision; the original draft was kept.",
+                        })
+                        issue_count = len(issues)
             else:
                 corrected = draft_text
 
@@ -1945,6 +1985,22 @@ def _build_verified_claim_ledger(
             "Claim Ledger produced no verified claims. Refresh research/source verification before writing narration.",
         )
     return ledger, fresh_sources, actual_provider, actual_model
+
+
+def _fact_check_summary(draft) -> dict:
+    """Status and issues of a draft's automatic fact check, for the reviewer
+    and the revision writer (they previously never saw them)."""
+    try:
+        report = json.loads(draft["fact_check_json"] or "{}")
+    except Exception:
+        report = {}
+    return {
+        "status": str(draft["fact_check_status"] or report.get("status") or "not_run"),
+        "issues": [
+            {key: issue.get(key) for key in ("story_id", "claim", "problem", "correction_basis")}
+            for issue in (report.get("issues") or []) if isinstance(issue, dict)
+        ][:12],
+    }
 
 
 def _reusable_ledger(conn, narration_id: str, stories: list[dict]) -> list[dict] | None:
@@ -2656,6 +2712,7 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
             "format_blueprint": format_packet(),
             "length_target": length_target(project, draft["content"]),
             "spoken_lint": spoken_lint(draft["content"]),
+            "automatic_fact_check": _fact_check_summary(draft),
             "approved_sections": _sectioned_story_packet(stories),
         }, ensure_ascii=False),
         "</current_week_authoritative_packet>",
@@ -2771,6 +2828,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
             "format_blueprint": format_packet(),
             "length_target": length_target(project, draft["content"]),
             "spoken_lint": spoken_lint(draft["content"]),
+            "automatic_fact_check": _fact_check_summary(draft),
             "approved_sections": _sectioned_story_packet(stories),
             "verified_claim_ledger": ledger_for_writer(claim_ledger),
         }, ensure_ascii=False),
