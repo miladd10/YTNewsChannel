@@ -310,7 +310,13 @@ def _source_supports_exact_quote(source: dict, quote: str) -> bool:
     return bool(haystack and needle in haystack)
 
 
-def normalize_ledger_claims(raw_claims: object, stories: list[dict], fresh_sources: dict[str, list[dict]]) -> list[dict]:
+def normalize_ledger_claims(
+    raw_claims: object,
+    stories: list[dict],
+    fresh_sources: dict[str, list[dict]],
+    *,
+    require_evidence_quote: bool = False,
+) -> list[dict]:
     if not isinstance(raw_claims, list):
         return []
     story_ids = {str(story.get("id") or "") for story in stories}
@@ -354,7 +360,7 @@ def normalize_ledger_claims(raw_claims: object, stories: list[dict], fresh_sourc
 
         evidence_url = _clean(raw.get("evidence_url"))
         evidence_quote = _clean(raw.get("evidence_quote"))
-        if status in {"verified", "verified_with_attribution"}:
+        if require_evidence_quote and status in {"verified", "verified_with_attribution"}:
             if evidence_url not in source_urls:
                 status = "blocked"
                 reasons.append("Verified claim is missing an evidence_url from its cited sources.")
@@ -434,7 +440,12 @@ def build_claim_ledger(stories, project, fresh_sources, provider, model):
         json.dumps(_ledger_input(stories, fresh_sources, project), ensure_ascii=False),
     )
     parsed = _json_object(raw)
-    return normalize_ledger_claims(parsed.get("claims"), stories, fresh_sources), actual_provider, actual_model
+    return normalize_ledger_claims(
+        parsed.get("claims"),
+        stories,
+        fresh_sources,
+        require_evidence_quote=True,
+    ), actual_provider, actual_model
 
 
 def ledger_for_writer(claims: list[dict]) -> list[dict]:
