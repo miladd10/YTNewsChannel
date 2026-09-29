@@ -1947,6 +1947,42 @@ def _build_verified_claim_ledger(
     return ledger, fresh_sources, actual_provider, actual_model
 
 
+def _reusable_ledger(conn, narration_id: str, stories: list[dict]) -> list[dict] | None:
+    """The ledger a draft was written against, for revising/auditing it.
+
+    Walks back through parent drafts (a hand edit has no ledger of its own)
+    and returns the first stored ledger whose stories are all still selected.
+    Rebuilding instead would ask the AI for a new ledger with new claim ids,
+    so reviewer fixes citing ids would point at different facts and a
+    re-audit could judge the draft against facts the writer never saw.
+    """
+    current_ids = {str(story.get("id") or "") for story in stories}
+    seen: set[str] = set()
+    current = narration_id
+    for _ in range(25):
+        if not current or current in seen:
+            return None
+        seen.add(current)
+        rows = conn.execute(
+            "SELECT data_json FROM claim_ledger WHERE narration_id=? ORDER BY created_at,id", (current,)
+        ).fetchall()
+        if rows:
+            claims = []
+            for row in rows:
+                try:
+                    claims.append(json.loads(row["data_json"] or "{}"))
+                except Exception:
+                    continue
+            story_ids = {str(claim.get("story_id") or "") for claim in claims}
+            usable = [c for c in claims if c.get("verification_status") in {"verified", "verified_with_attribution"}]
+            if usable and story_ids <= current_ids:
+                return claims
+            return None
+        parent = conn.execute("SELECT parent_narration_id FROM narrations WHERE id=?", (current,)).fetchone()
+        current = str(parent["parent_narration_id"] or "") if parent else ""
+    return None
+
+
 def _persist_claim_audit(
     conn,
     project: dict,
@@ -2535,10 +2571,11 @@ def run_claim_audit(project_id: str, narration_id: str, body: NarrationReviewBod
         if not draft:
             raise HTTPException(404, "Narration draft not found")
         stories = selected_story_packet(conn, project_id)
+        claim_ledger = _reusable_ledger(conn, narration_id, stories)
 
-    claim_ledger, fresh_sources, _, _ = _build_verified_claim_ledger(
-        project, stories, provider, model
-    )
+    ledger_reused = claim_ledger is not None
+    if claim_ledger is None:
+        claim_ledger, _, _, _ = _build_verified_claim_ledger(project, stories, provider, model)
     claim_audit, actual_provider, actual_model = audit_narration_claims(
         str(draft["content"] or ""),
         claim_ledger,
@@ -2569,6 +2606,7 @@ def run_claim_audit(project_id: str, narration_id: str, body: NarrationReviewBod
         "uncovered_high_risk_count": int(claim_audit.get("uncovered_high_risk_count") or 0),
         "system_issues": claim_audit.get("system_issues") or [],
         "ledger_summary": ledger_summary(claim_ledger),
+        "ledger_reused": ledger_reused,
         "provider": actual_provider,
         "model": actual_model,
     }
@@ -2699,6 +2737,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         if not review:
             raise HTTPException(400, "Run a reviewer pass on this draft first.")
         stories = selected_story_packet(conn, project_id)
+        reused_ledger = _reusable_ledger(conn, narration_id, stories)
         styles = _style_transcripts(
             conn,
             project.get("channel") or "cinema",
@@ -2712,9 +2751,14 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         provider,
         model,
     )
-    claim_ledger, fresh_claim_sources, _, _ = _build_verified_claim_ledger(
-        project, stories, provider, model
-    )
+    if reused_ledger is not None:
+        # Revise against the same ledger the reviewed draft was written and
+        # audited against, so claim ids cited in the review stay valid.
+        claim_ledger, fresh_claim_sources = reused_ledger, None
+    else:
+        claim_ledger, fresh_claim_sources, _, _ = _build_verified_claim_ledger(
+            project, stories, provider, model
+        )
 
     user = "\n".join([
         "<current_week_authoritative_packet>",
