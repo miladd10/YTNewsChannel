@@ -2628,6 +2628,10 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
         stories = selected_story_packet(conn, project_id)
         all_ledger_rows, all_claim_checks = _claim_rows_for_workspace(conn, project_id)
         draft_ledger = [row for row in all_ledger_rows if row.get("narration_id") == narration_id]
+        if not draft_ledger:
+            # Hand-edited drafts have no ledger of their own; review them
+            # against the ledger of the draft they were edited from.
+            draft_ledger = _reusable_ledger(conn, narration_id, selected_story_packet(conn, project_id)) or []
         draft_claim_checks = [row for row in all_claim_checks if row.get("narration_id") == narration_id]
         styles = _style_transcripts(conn, project.get("channel") or "cinema", project.get("content_type") or "weekly_news")
 
