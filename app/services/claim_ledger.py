@@ -72,12 +72,14 @@ HARD RULES:
 _FA_SUFFIX = r"(?:‌?(?:های|ها|اش|شون|تون|مون|ش|ی|ه))?ٔ?"
 _FA_RISK_TERMS = (
     r"میلیون|میلیارد|هزار|درصد|بودجه|درآمد|فروش|گیشه|رتبه|صدر\s*جدول|"
-    r"اکران|معامله|ارزش\s+(?:معامله|خرید|بازار|قرارداد)|دلار"
+    r"ارزش\s+(?:معامله|خرید|بازار|قرارداد)|دلار|"
+    r"بازاکران|اکران\s+مجدد|اکران\s+(?:محدود|سراسری|ویژه)|پخش\s+استریم"
 )
 _EN_RISK_TERMS = (
     r"million|billion|percent|budget|revenue|gross(?:ed|es)?|box\s*office|"
     r"rank(?:ed|ing|s)?|number\s+one|top(?:ped|s)?\s+the\s+chart|"
-    r"release[sd]?|streaming|theatrical|valuation|enterprise\s+value|equity\s+value"
+    r"re[\s-]?release|limited\s+theatrical|wide\s+theatrical|special\s+engagement|"
+    r"pvod|vod|valuation|enterprise\s+value|equity\s+value"
 )
 HIGH_RISK_RE = re.compile(
     r"(?:[0-9۰-۹٠-٩]+(?:[.,٬٫][0-9۰-۹٠-٩]+)*|[$€£¥%]|#\s*[0-9۰-۹]|"
@@ -565,8 +567,10 @@ def _field_equal(spoken, ledger, field: str = "") -> bool:
 def _attribution_present(sentence: str, claim: dict, extractor_value: bool) -> bool:
     if not claim.get("attribution_required"):
         return True
-    if not extractor_value:
-        return False
+    # The narration text is authoritative here. The extraction model sometimes
+    # returns attribution_present=false even when the sentence literally says
+    # «طبق برآوردها»، «طبق گزارش‌ها» or «حدود». Do not block a correctly
+    # attributed sentence because of that secondary classifier bit.
     return bool(re.search(
         r"(طبق|بر\s+اساس|گزارش|به\s+گفته|گفته|می[\u200c ]?گ(?:ه|ن|ید)|اعلام|according|reported|reports?|says?|"
         r"estimat(?:e|ed)|حدود|تقریباً|برآورد)",
