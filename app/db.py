@@ -21,9 +21,10 @@ PIPELINE = [
 
 def connect() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 30000")
     return conn
 
 
@@ -46,6 +47,12 @@ def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
 
 def init_db() -> None:
     with db() as conn:
+        # FastAPI runs synchronous endpoints in a thread pool. WAL lets reads
+        # continue while another request commits a write, and the explicit busy
+        # timeout prevents short overlapping writes from failing immediately
+        # with "database is locked".
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS projects (
