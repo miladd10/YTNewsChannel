@@ -21,7 +21,7 @@ CLAIM_LEDGER_SYSTEM = """You build a source-locked atomic claim ledger for a wee
 You receive approved story packets, their dated sources, fresh verification results, and the project window.
 
 Return ONLY JSON:
-{"claims":[{"story_id":"...","claim_type":"box_office|ranking|budget|revenue|release|deal_value|title_identity|person_credit|cast|quote|award|production|company|other","subject":"...","predicate":"...","canonical_text":"one atomic fact","value_text":"","numeric_value":null,"currency":"","unit":"","metric":"","market":"","region":"","chart_type":"","rank":null,"period_type":"","date_start":"","date_end":"","as_of_date":"","release_scope":"","title_identity":"","estimate_status":"confirmed|reported_estimate|projection|approximate|conflicting|","attribution_required":false,"attribution_label":"","source_urls":["exact supplied URL"],"evidence_summary":"what the cited evidence actually supports","conflict_note":"","verification_status":"verified|verified_with_attribution|blocked"}]}
+{"claims":[{"story_id":"...","claim_type":"box_office|ranking|budget|revenue|release|deal_value|title_identity|person_credit|cast|quote|award|production|company|other","subject":"...","predicate":"...","canonical_text":"one atomic fact","value_text":"","numeric_value":null,"currency":"","unit":"","metric":"","market":"","region":"","chart_type":"","rank":null,"period_type":"","date_start":"","date_end":"","as_of_date":"","release_scope":"","title_identity":"","estimate_status":"confirmed|reported_estimate|projection|approximate|conflicting|","attribution_required":false,"attribution_label":"","source_urls":["exact supplied URL"],"evidence_url":"one cited source URL","evidence_quote":"short exact contiguous quote copied from that source's supplied title/snippet/description/excerpt","evidence_summary":"what the cited evidence actually supports","conflict_note":"","verification_status":"verified|verified_with_attribution|blocked"}]}
 
 HARD RULES:
 - Every claim is atomic. Split different numbers/scopes into separate claims.
@@ -29,6 +29,7 @@ HARD RULES:
 - FAMILIARITY: when a story has a familiarity_anchor (a short recognition cue such as a person's best-known work), create one person_credit claim stating that credit if any supplied source for the story supports it, citing that source. If nothing supplied supports it, create the claim with verification_status=blocked. Never support it from memory.
 - Read each article's title, snippet, description and excerpt. Extract every useful checkable fact the excerpts support (premise, credits, dates, formats, figures, context), not only the headline fact.
 - source_urls must be exact supplied URLs for that same story. No source means blocked.
+- Every verified/verified_with_attribution claim must include evidence_url and evidence_quote. evidence_url must be one of source_urls. evidence_quote must be a short exact contiguous excerpt copied from that source's supplied title, snippet, description or excerpt; do not paraphrase it.
 - Numeric meaning is inseparable from scope.
 - BOX OFFICE: distinguish daily/weekend/weekly; opening weekend vs cumulative; domestic/international/worldwide; estimate vs actual; and exact date range/as-of date.
 - RANKING: rank, chart_type, market/region, date_start and date_end are mandatory.
@@ -293,6 +294,22 @@ def _ledger_input(stories: list[dict], fresh_sources: dict[str, list[dict]], pro
     }
 
 
+def _normalized_evidence_text(value: str) -> str:
+    text = _clean(value).casefold()
+    text = text.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
+    return text
+
+
+def _source_supports_exact_quote(source: dict, quote: str) -> bool:
+    needle = _normalized_evidence_text(quote)
+    if len(needle) < 8:
+        return False
+    haystack = _normalized_evidence_text(" ".join(
+        str(source.get(key) or "") for key in ("title", "snippet", "description", "excerpt")
+    ))
+    return bool(haystack and needle in haystack)
+
+
 def normalize_ledger_claims(raw_claims: object, stories: list[dict], fresh_sources: dict[str, list[dict]]) -> list[dict]:
     if not isinstance(raw_claims, list):
         return []
@@ -334,6 +351,19 @@ def normalize_ledger_claims(raw_claims: object, stories: list[dict], fresh_sourc
         if not source_urls:
             status = "blocked"
             reasons.append("No supplied source URL supports this claim.")
+
+        evidence_url = _clean(raw.get("evidence_url"))
+        evidence_quote = _clean(raw.get("evidence_quote"))
+        if status in {"verified", "verified_with_attribution"}:
+            if evidence_url not in source_urls:
+                status = "blocked"
+                reasons.append("Verified claim is missing an evidence_url from its cited sources.")
+            elif not evidence_quote:
+                status = "blocked"
+                reasons.append("Verified claim is missing an exact evidence quote.")
+            elif not _source_supports_exact_quote(allowed_urls[evidence_url], evidence_quote):
+                status = "blocked"
+                reasons.append("Evidence quote was not found verbatim in the cited supplied source text.")
         # Only money/percentage figures need a structured numeric value. Dates,
         # years, counts ("12 states"), episode/season numbers and formats are
         # ordinary facts; blocking them stripped release dates from scripts.
@@ -391,6 +421,7 @@ def normalize_ledger_claims(raw_claims: object, stories: list[dict], fresh_sourc
             "title_identity": _clean(raw.get("title_identity")).lower(), "estimate_status": estimate_status,
             "attribution_required": attribution_required, "attribution_label": _clean(raw.get("attribution_label")),
             "source_urls": source_urls, "source_names": source_names, "source_tier": source_tier,
+            "evidence_url": evidence_url, "evidence_quote": evidence_quote,
             "evidence_summary": _clean(raw.get("evidence_summary")), "conflict_note": conflict_note,
             "verification_status": status, "validation_notes": reasons,
         })
