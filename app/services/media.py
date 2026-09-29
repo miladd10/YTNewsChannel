@@ -2530,11 +2530,15 @@ def download_image(url: str, target_stem: Path, max_bytes: int = 80 * 1024 * 102
         raise RuntimeError("Too many redirects while downloading image.")
 
 
+MAX_VIDEO_DOWNLOAD_SECONDS = 60 * 60
+MAX_VIDEO_DOWNLOAD_BYTES = 6 * 1024 ** 3
+
 def download_video(url: str, target_stem: Path) -> Path:
     _assert_public_http_url(url)
     if not shutil.which("ffmpeg"):
         raise RuntimeError("FFmpeg is required for video stream merging. Install FFmpeg, restart YT News Studio, then retry.")
     from yt_dlp import YoutubeDL
+    from yt_dlp.utils import match_filter_func
 
     target_stem.parent.mkdir(parents=True, exist_ok=True)
     output_template = str(target_stem.parent / f"{target_stem.name}.%(ext)s")
@@ -2551,6 +2555,11 @@ def download_video(url: str, target_stem: Path) -> Path:
         "fragment_retries": 3,
         "socket_timeout": 20,
         "concurrent_fragment_downloads": 1,
+        # B-roll sources are trailers, clips and interviews. Refuse live
+        # streams and anything longer than an hour or larger than 6 GB so a
+        # mis-selected full-length upload cannot fill the disk.
+        "max_filesize": MAX_VIDEO_DOWNLOAD_BYTES,
+        "match_filter": match_filter_func(f"!is_live & duration <=? {MAX_VIDEO_DOWNLOAD_SECONDS}"),
     }
     strategies = [
         {
@@ -2596,6 +2605,8 @@ def download_video(url: str, target_stem: Path) -> Path:
             ]
             if created:
                 return max(created, key=lambda p: p.stat().st_mtime)
+            if info and (info.get("duration") or 0) > MAX_VIDEO_DOWNLOAD_SECONDS:
+                raise RuntimeError("Video is longer than the 60-minute B-roll limit; choose a trailer, clip or shorter upload.")
         except Exception as exc:
             errors.append(f"attempt {attempt}: {exc}")
 
