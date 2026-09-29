@@ -1295,6 +1295,7 @@ def build_fun_facts_visual_context(project_id: str, narration_id: str, body: Sto
                     if angle.get("safe_to_narrate") and angle.get("type") == "cool_fact"
                 ),
                 "visual_context_count": len(story.get("visual_context") or []),
+                "visual_context_diagnostics": story.get("visual_context_diagnostics") or {},
                 "source_count": len(source_ids),
             })
 

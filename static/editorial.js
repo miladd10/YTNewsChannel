@@ -294,6 +294,7 @@ async function buildFunFactsVisualContext(){
     await renderStage();
     finishRunStatus(true,'',`Draft V${rewritten.version_number} enriched · ${research.fun_fact_count} fun fact(s) · ${research.visual_context_count} visual target(s)`);
     toast(`Added ${research.fun_fact_count} sourced fun fact(s) and ${research.visual_context_count} narration-aware visual target(s). Draft V${rewritten.version_number} is ready for review.`);
+    if(!Number(research.visual_context_count||0)){const diags=(research.stories||[]).map(x=>x.visual_context_diagnostics||{});const returned=diags.reduce((n,d)=>n+Number(d.returned||0),0);const reasons=[...new Set(diags.flatMap(d=>d.dropped||[]))].slice(0,3);const noText=diags.filter(d=>!Number(d.narration_text_chars||0)).length;toast(returned?`0 visual targets kept: the AI proposed ${returned}, all dropped (${reasons.join('; ')})`:noText?`0 visual targets: ${noText} stories had no narration text mapped to them (check STORY markers in the draft)`:'0 visual targets: the AI proposed none for this draft',true)}
   }catch(e){
     finishRunStatus(false,e.message);toast(e.message,true);
     if(b){b.disabled=false;b.textContent='Add Fun Facts + Visual Context'}

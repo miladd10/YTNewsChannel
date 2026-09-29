@@ -92,3 +92,17 @@ def test_fun_fact_is_a_distinct_visual_beat():
         beat["kind"] == "fun_fact" and beat["label"] == "The Incredibles"
         for beat in plan["beats"]
     )
+
+
+def test_visual_naming_story_subjects_is_kept_without_its_own_url():
+    from app.services.research import _validated_visual_context
+    sources = [{"url": "https://example.com/a", "source": "Outlet"}]
+    grounding = "moth kingdom trailer: ana ruiz and leo park lead the cast".casefold()
+    drops = []
+    raw = [
+        {"kind": "people_group", "label": "Cast", "subjects": ["Ana Ruiz", "Leo Park"], "source_urls": []},
+        {"kind": "related_title", "label": "Earlier film", "subjects": ["Ana Ruiz"], "related_title": "Glass Harbor", "source_urls": []},
+    ]
+    kept = _validated_visual_context(raw, sources, grounding, drops)
+    assert len(kept) == 1 and kept[0]["grounding"] == "narration" and kept[0]["source_urls"] == ["https://example.com/a"]
+    assert len(drops) == 1 and "Earlier film" in drops[0]

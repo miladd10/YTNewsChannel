@@ -903,7 +903,23 @@ VISUAL_LAYOUT_HINTS = {
 }
 
 
-def _validated_visual_context(raw_context: object, sources: list[dict]) -> list[dict]:
+def _visual_grounding_text(story: dict, sources: list[dict]) -> str:
+    """Everything the approved story/narration already says, used to accept
+    visual items that only depict people/titles named there."""
+    parts = [str(story.get(key) or "") for key in ("canonical_title", "news_hook", "summary", "search_subject", "_narration_text")]
+    for article in story.get("articles") or []:
+        parts.extend(str(article.get(key) or "") for key in ("title", "snippet", "description", "excerpt"))
+    for source in sources:
+        parts.extend(str(source.get(key) or "") for key in ("title", "snippet"))
+    for angle in story.get("spice_angles") or []:
+        parts.append(str(angle.get("text") or ""))
+    return " ".join(parts).casefold()
+
+
+def _validated_visual_context(raw_context: object, sources: list[dict], grounding_text: str = "",
+                              drop_log: list[str] | None = None) -> list[dict]:
+    if drop_log is None:
+        drop_log = []
     if not isinstance(raw_context, list):
         return []
     source_by_url = {
@@ -917,6 +933,7 @@ def _validated_visual_context(raw_context: object, sources: list[dict]) -> list[
             continue
         kind = str(raw.get("kind") or "").strip().lower()
         if kind not in VISUAL_CONTEXT_KINDS:
+            drop_log.append(f"unknown kind '{kind}'")
             continue
         label = str(raw.get("label") or "").strip()
         subjects = [
@@ -927,16 +944,28 @@ def _validated_visual_context(raw_context: object, sources: list[dict]) -> list[
         if label and label not in subjects:
             subjects = [label, *subjects][:3]
         if not subjects:
+            drop_log.append("no subjects")
             continue
         urls = [
             str(url).strip()
             for url in (raw.get("source_urls") or [])
             if str(url).strip() in source_by_url
         ]
-        # Contextual visual claims need the same source grounding as narration
-        # enrichment. Current-title promo is handled independently by Media.
+        # Contextual visual claims need source grounding. A visual that only
+        # depicts people/titles already named in the approved story or its
+        # narration is grounded by that text itself; a new relationship
+        # (e.g. an earlier credit not in the evidence) still needs a cited URL.
+        grounding = "narration"
         if not urls:
-            continue
+            related = str(raw.get("related_title") or "").strip()
+            named = [value for value in [*subjects, related] if value]
+            if grounding_text and named and all(value.casefold() in grounding_text for value in named):
+                urls = list(source_by_url)[:2]
+            if not urls:
+                drop_log.append(f"'{label or subjects[0]}': no supplied source URL and not named in the story/narration")
+                continue
+        else:
+            grounding = "source"
         layout = str(raw.get("layout_hint") or "single").strip().lower()
         if layout not in VISUAL_LAYOUT_HINTS:
             layout = "single"
@@ -959,6 +988,7 @@ def _validated_visual_context(raw_context: object, sources: list[dict]) -> list[
             ][:5],
             "layout_hint": layout,
             "source_urls": urls[:4],
+            "grounding": grounding,
             "source_labels": [
                 str(source_by_url[url].get("source") or "") for url in urls[:4]
             ],
@@ -1479,7 +1509,17 @@ STRICT RULES:
         item = by_id.get(story_id) or {}
         sources = sources_by_story.get(story_id) or []
         story["spice_angles"] = _validated_spice_angles(item.get("spice_angles"), sources)
-        story["visual_context"] = _validated_visual_context(item.get("visual_context"), sources)
+        drops: list[str] = []
+        raw_visuals = item.get("visual_context")
+        story["visual_context"] = _validated_visual_context(
+            raw_visuals, sources, _visual_grounding_text(story, sources), drops
+        )
+        story["visual_context_diagnostics"] = {
+            "returned": len(raw_visuals) if isinstance(raw_visuals, list) else 0,
+            "kept": len(story["visual_context"]),
+            "dropped": drops[:10],
+            "narration_text_chars": len(str(story.get("_narration_text") or "")),
+        }
         story["spice_source_ids"] = [str(source.get("id")) for source in sources if source.get("id")]
     return stories, actual_provider, actual_model
 
