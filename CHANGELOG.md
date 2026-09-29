@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.1 — Output review fixes
+
+From reviewing Draft V16 and an exported project:
+- Ledger no longer requires spoken sources for routine confirmed facts; the attribution policy defaults to light markers and keeps outlet names to a few per episode.
+- Shared spoken-quality rules (no pipeline language, no standalone scope disclaimers, rounded spoken numbers, one register, clear organization names, no recap/filler) plus a deterministic "Spoken check" shown in Step 3 and given to the reviewer.
+- Step 3 explains why a claim audit is blocked (e.g. the reviewer provider hit its usage limit).
+- Visual targets that depict people/titles already named in the story are kept; each run reports how many were proposed, kept and dropped.
+- Transcript library header shows usable and writer counts.
+- Media ranking prefers original-language copies over localized/dubbed ones.
+- Resolve generation refuses a voice track that is not from the approved draft; downloads are limited to the current episode's stories.
+- Step 7 warns when timeline media links point outside the project folder (moved/renamed folder).
+- project.json keeps only the current run's stories (plus referenced older ones) and records the app version.
+
 ## v0.4.0 — Editorial Reliability
 
 Writing quality
