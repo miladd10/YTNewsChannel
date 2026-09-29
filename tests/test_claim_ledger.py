@@ -454,3 +454,46 @@ def test_production_ledger_requires_verbatim_evidence_anchor():
     }], [story], {}, require_evidence_quote=True)[0]
     assert invented["verification_status"] == "blocked"
     assert any("not found verbatim" in note for note in invented["validation_notes"])
+
+
+
+def test_audit_blocks_when_second_financial_amount_in_sentence_is_not_extracted(monkeypatch):
+    def fake_generate_text(provider, model, system, user):
+        return json.dumps({"claims": [{
+            "story_id": "s1",
+            "sentence": "فیلم ۲۶ میلیون دلار داخلی و ۸۶ میلیون دلار جهانی فروخت.",
+            "claim_type": "box_office",
+            "numeric_value": 26,
+            "unit": "million",
+            "market": "domestic",
+            "period_type": "opening_weekend",
+            "ledger_claim_ids": ["C001"],
+            "semantic_match": "equivalent",
+        }]}), provider, model
+
+    monkeypatch.setattr(claim_ledger, "generate_text", fake_generate_text)
+    audit, _, _ = claim_ledger.audit_narration_claims(
+        """
+<!-- STORY:s1 -->
+فیلم ۲۶ میلیون دلار داخلی و ۸۶ میلیون دلار جهانی فروخت.
+""",
+        [
+            {
+                "id": "C001", "story_id": "s1", "claim_type": "box_office",
+                "numeric_value": 26, "unit": "million", "market": "domestic",
+                "period_type": "opening_weekend", "verification_status": "verified",
+                "attribution_required": False,
+            },
+            {
+                "id": "C002", "story_id": "s1", "claim_type": "box_office",
+                "numeric_value": 86, "unit": "million", "market": "worldwide",
+                "period_type": "opening_weekend", "verification_status": "verified",
+                "attribution_required": False,
+            },
+        ],
+        "test",
+        "test",
+    )
+    assert audit["status"] == "blocked"
+    assert audit["uncovered_financial_amount_count"] == 1
+    assert any("86 million" in issue for issue in audit["system_issues"])
