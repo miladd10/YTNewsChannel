@@ -313,8 +313,10 @@ def _source_supports_exact_quote(source: dict, quote: str) -> bool:
     # A quote may skip words with an ellipsis; every fragment must then be
     # found, in order, in the source.
     fragments = [part for part in re.split(r"\.{3,}|…", str(quote or "")) if part.strip()]
-    normalized = [_normalized_evidence_text(part) for part in fragments]
-    normalized = [part for part in normalized if part.strip()]
+    # Words inside a fragment must match exactly; its first and last word may
+    # be cut mid-word (quotes are often trimmed), as with a plain substring.
+    normalized = [_normalized_evidence_text(part).strip() for part in fragments]
+    normalized = [part for part in normalized if part]
     if not normalized or len("".join(normalized).replace(" ", "")) < 8:
         return False
     position = 0
@@ -322,7 +324,7 @@ def _source_supports_exact_quote(source: dict, quote: str) -> bool:
         found = haystack.find(part, position)
         if found < 0:
             return False
-        position = found + len(part) - 1
+        position = found + len(part)
     return True
 
 

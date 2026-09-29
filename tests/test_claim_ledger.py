@@ -533,3 +533,11 @@ def test_evidence_quote_tolerates_punctuation_and_ellipsis_but_not_word_changes(
     assert not _source_supports_exact_quote(source, "open in select theaters on March 4")
     assert not _source_supports_exact_quote(source, "open in select theaters … from Ana Ruiz")  # wrong order
     assert not _source_supports_exact_quote(source, "March")  # too short
+
+
+def test_evidence_quote_may_be_cut_mid_word_at_its_edges():
+    from app.services.claim_ledger import _source_supports_exact_quote
+    source = {"title": "Studio X settles lawsuit over merger"}
+    assert _source_supports_exact_quote(source, "Studio X settles lawsu")
+    assert _source_supports_exact_quote(source, "udio X settles lawsuit")
+    assert not _source_supports_exact_quote(source, "Studio X settled lawsuit")
