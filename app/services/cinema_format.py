@@ -914,6 +914,27 @@ Return only the complete narration in Markdown.
 """ + ATTRIBUTION_POLICY + SPOKEN_QUALITY_RULES
 
 
+NARRATION_ASSEMBLY_REPAIR_SYSTEM = """You are the final assembly repair writer for a weekly cinema-news spoken transcript.
+
+You receive the authoritative selected-story packet, the verified claim ledger, the current draft, a deterministic structure audit, the automatic fact-check report, and the narration claim audit.
+
+Return ONLY the complete repaired narration in Markdown.
+
+NON-NEGOTIABLE RULES:
+- Cover EVERY selected story exactly as a story in the episode. A selected story may share one flowing item with a sibling about the same event, but every selected STORY id must appear at least once before claims supported by that id.
+- Keep every STORY id under its correct format section. Follow the format blueprint section order. Omit empty sections.
+- Intro and Outro have no STORY marker.
+- Do not use a transition that assumes a topic was already discussed unless it actually appeared earlier in the spoken draft. An intro tease is not the same as covering the story. For example, never say "حالا از مارول بریم..." if the body has not discussed Marvel yet.
+- Reach the packet's acceptable word range when verified material exists. Expand by using unused verified ledger beats and supported context from selected stories, not filler or repetition.
+- VERIFIED CLAIM LEDGER is the hard factual boundary. Remove or rewrite every blocked/unsupported narration claim. Do not invent replacements.
+- Preserve exact numeric scope: market, period, chart type, date range, opening vs cumulative, estimate status, budget/revenue/deal metric, release scope and title identity.
+- If a ledger claim requires attribution, keep a natural light attribution marker in the sentence.
+- Do not speak audit, ledger, evidence or pipeline language.
+- Keep conversational Persian and one consistent spoken register.
+- Preserve good lines when possible, but structural correctness and factual support are more important than minimal edits.
+""" + ATTRIBUTION_POLICY + SPOKEN_QUALITY_RULES
+
+
 REVIEWER_SYSTEM = """You are the independent editor of a weekly cinema-news YouTube show. Decide whether this narration draft is ready to be voiced, and if not, give the writer the shortest list of concrete fixes that gets it there.
 
 WHAT YOU RECEIVE
