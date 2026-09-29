@@ -529,3 +529,14 @@ def test_length_target_and_word_count():
     assert target["acceptable_words"] == [595, 770]
     assert target["current_draft_words"] == 7
     assert "length_target" in WRITER_SYSTEM and "length_target" in REVIEWER_SYSTEM
+
+
+def test_spoken_lint_flags_written_or_pipeline_speech_and_passes_clean_text():
+    from app.services.cinema_format import spoken_lint, SPOKEN_QUALITY_RULES, WRITER_SYSTEM, FACT_CHECK_SYSTEM
+    bad = ("<!-- STORY:a --> ددلاین گزارش داده این فیلم حدود ۴۲.۷ میلیون دلار فروخته. رقمی که دقیقاً مربوط به افتتاحیه است.\n"
+           "ورایتی را هم داریم. رویترز گفته. بلومبرگ هم گفته. البته در شواهد موجود مشخص نشده. این را دارد و آن را آمده. اینه و رو.")
+    rules = {f["rule"] for f in spoken_lint(bad)}
+    assert {"pipeline_language", "scope_disclaimer", "spoken_decimal", "outlet_names", "register_drift"} <= rules
+    clean = "<!-- STORY:a --> این فیلم تو آخرهفتهٔ اولش حدود ۴۳ میلیون دلار فروخت. حالا بریم سراغ سریال‌ها که خبرای خوبی داره."
+    assert spoken_lint(clean) == []
+    assert SPOKEN_QUALITY_RULES in WRITER_SYSTEM and SPOKEN_QUALITY_RULES in FACT_CHECK_SYSTEM

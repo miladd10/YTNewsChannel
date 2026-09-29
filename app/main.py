@@ -51,6 +51,7 @@ from .services.cinema_format import (
     format_packet,
     length_target,
     parse_review_gate,
+    spoken_lint,
     style_corpus_hash,
     style_rows_for_window,
     usable_style_transcripts,
@@ -2313,6 +2314,8 @@ def narration_workspace(project_id: str):
             "SELECT * FROM narrations WHERE project_id=? ORDER BY version_number DESC",
             (project_id,),
         ).fetchall()]
+        for item in narrations:
+            item["spoken_lint"] = spoken_lint(item.get("content") or "")
         reviews = [dict(row) for row in conn.execute(
             "SELECT * FROM narration_reviews WHERE project_id=? ORDER BY created_at DESC",
             (project_id,),
@@ -2379,6 +2382,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
             },
             "format_blueprint": format_packet(),
             "length_target": length_target(project, draft["content"]),
+            "spoken_lint": spoken_lint(draft["content"]),
             "approved_sections": _sectioned_story_packet(stories),
             "verified_claim_ledger": ledger_for_writer(claim_ledger),
         }, ensure_ascii=False),
@@ -2577,6 +2581,7 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
             },
             "format_blueprint": format_packet(),
             "length_target": length_target(project, draft["content"]),
+            "spoken_lint": spoken_lint(draft["content"]),
             "approved_sections": _sectioned_story_packet(stories),
         }, ensure_ascii=False),
         "</current_week_authoritative_packet>",
@@ -2684,6 +2689,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         json.dumps({
             "format_blueprint": format_packet(),
             "length_target": length_target(project, draft["content"]),
+            "spoken_lint": spoken_lint(draft["content"]),
             "approved_sections": _sectioned_story_packet(stories),
             "verified_claim_ledger": ledger_for_writer(claim_ledger),
         }, ensure_ascii=False),

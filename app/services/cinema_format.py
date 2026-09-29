@@ -685,6 +685,17 @@ ATTRIBUTION POLICY (single shared rule for writer, reviser, fact checker and rev
 """
 
 
+SPOKEN_QUALITY_RULES = """
+SPOKEN QUALITY RULES (shared by writer, reviser, enrichment writer and fact checker):
+- Never speak pipeline language. No "in the available evidence/sources", "it is not specified", "the data does not show", ledger/audit/verification talk, or any variant («در شواهد موجود»، «مشخص نشده»، «در منابع موجود»). If a detail is unknown, simply leave it out.
+- State a figure's scope once, inside the sentence that gives the figure ("در آخرهفتهٔ افتتاحیه حدود ... فروخت"). Never add a separate sentence that only restates or clarifies scope ("این رقم مربوط به ... است"، "نه فروش کل ..."، "رقمی که دقیقاً مربوط به ...").
+- Speak numbers the way a host says them: round to natural spoken precision within the ledger value ("حدود ۱۰۸ میلیون دلار"، "نزدیک ۲ میلیارد و ۹۰۰ میلیون دلار"). Avoid decimals unless the decimal itself is the point.
+- Keep ONE spoken register for the whole episode. In Persian use conversational forms consistently («رو» not «را»، «داره» not «دارد»، «اومده» not «آمده»، «ـه/هست» not «است»، «شدن» not «شده‌اند»). Names, titles and exact numbers stay as they are.
+- Organization, guild and union names: say them in plain Persian description when a transliteration would be unfamiliar or would sound like another name or word in the same passage. Never let two different organizations sound alike within one story.
+- Every sentence must add a new beat. Do not recap what was just said ("پس ... هم ..." summaries), and do not end an item with low-value evaluation ("اطلاعات بدی نیست"، "جالبه").
+"""
+
+
 FACT_CHECK_SYSTEM = """You are the final factual freshness auditor for a weekly cinema-news narration.
 
 You receive:
@@ -715,6 +726,7 @@ STRICT RULES:
 - A blocked ledger claim cannot be narrated.
 - For verified_with_attribution ledger claims, preserve explicit attribution/estimate/conflict framing.
 - Preserve wording/style/structure unless a factual correction is needed.
+- A corrected sentence must use the same spoken register as the surrounding draft and must not add hedges, disclaimers or pipeline language.
 - Every number must keep its scope: domestic vs international vs worldwide; weekend-only vs cumulative total; opening weekend vs current total; estimate/projection vs final/actual.
 - A source published this week may mention an OLDER event or subtotal. Publication date does not make every number inside it a current-week value.
 - BOX OFFICE IS VOLATILE. If a film opened last weekend and the draft is being written after its second weekend, an opening-weekend worldwide number must be called an opening-weekend number, never phrased as the film's current worldwide total.
@@ -731,7 +743,7 @@ STRICT RULES:
 - Do not silently delete the STORY marker for a corrected claim.
 - Do not add a fact simply because it would make the narration better.
 - If no factual correction is needed, corrected_narration must exactly preserve the supplied draft.
-""" + ATTRIBUTION_POLICY
+""" + ATTRIBUTION_POLICY + SPOKEN_QUALITY_RULES
 
 
 WRITER_SYSTEM = """You are the cinema weekly-news narration writer inside YT News Studio.
@@ -805,7 +817,7 @@ Writing rules:
 - NAMES READ ALOUD: this script is voiced by text-to-speech. Transliterate each foreign person/company name into the narration script once and spell it identically every time. When the bare transliteration could be read as ordinary words in the narration language, or its vowels are ambiguous, add short-vowel marks (in Persian: اعراب such as ـَ ـِ ـُ) to that name so it is read as a name. Keep film/series titles in their official form.
 - LENGTH: the packet's length_target gives the spoken word budget for this episode. Reach acceptable_words by telling supported beats more fully and covering every selected story, never by filler. If the approved evidence genuinely cannot fill the range, stay shorter rather than pad.
 - Return only the complete narration in Markdown.
-""" + ATTRIBUTION_POLICY
+""" + ATTRIBUTION_POLICY + SPOKEN_QUALITY_RULES
 
 
 REVIEWER_SYSTEM = """You are the independent narration reviewer inside YT News Studio.
@@ -865,6 +877,8 @@ Check:
 - whether Intro hooks the actual episode and Outro closes briefly;
 - whether the draft resembles the style corpus in broad craft without copying phrases;
 - whether important selected stories were accidentally omitted.
+- SPOKEN LINT: the packet includes spoken_lint findings measured by code (pipeline language, standalone scope disclaimers, spoken decimals, outlet-name count, formal-register forms). Treat pipeline language as major; treat the rest as style issues and confirm them against the text.
+- Apply the SPOKEN QUALITY RULES: flag pipeline language, standalone scope-disclaimer sentences, hard-to-say decimals, register drift, sound-alike organization names, and recap/filler sentences.
 - NAME PRONUNCIATION: flag a transliterated name whose bare spelling would be read as ordinary words (or ambiguously) by text-to-speech and lacks vowel marks, and any name spelled inconsistently across the draft.
 - LENGTH: compare length_target.current_draft_words with acceptable_words. Under the range while the packet still has unused supported beats or selected stories is a major Format issue ("under length"). Under the range only because evidence is thin is a minor note. More than 15% over the range is a major issue.
 
@@ -949,7 +963,7 @@ Rules:
 - Keep Persian conversational, compact and natural. Follow recurring Filmbaz craft without copying reference wording.
 - Return only the complete rewritten narration in Markdown.
 - LENGTH: the packet's length_target gives the spoken word budget for this episode. Reach acceptable_words by telling supported beats more fully and covering every selected story, never by filler. If the approved evidence genuinely cannot fill the range, stay shorter rather than pad.
-""" + ATTRIBUTION_POLICY
+""" + ATTRIBUTION_POLICY + SPOKEN_QUALITY_RULES
 
 REVISION_SYSTEM = """You are the narration revision writer inside YT News Studio.
 Apply the supplied reviewer feedback to the existing narration.
@@ -973,13 +987,60 @@ Rules:
 - Do not broadly restart or re-outline the episode unless a blocking review issue explicitly requires it.
 - Return the complete revised narration only in Markdown.
 - LENGTH: the packet's length_target gives the spoken word budget for this episode. Reach acceptable_words by telling supported beats more fully and covering every selected story, never by filler. If the approved evidence genuinely cannot fill the range, stay shorter rather than pad.
-""" + ATTRIBUTION_POLICY
+""" + ATTRIBUTION_POLICY + SPOKEN_QUALITY_RULES
 
 
 def _strip_markdown_emphasis(text: str) -> str:
     # Reviewers often bold labels/values ("- **Status:** **PASS**"). Remove
     # emphasis markers but keep single underscores inside NEEDS_WORK etc.
     return re.sub(r"\*\*|__|\*|`", "", text or "")
+
+
+_META_SPEECH_RE = re.compile(
+    r"(شواهد\s+موجود|منابع\s+موجود|داده[\u200c ]?های\s+موجود|در\s+دسترس\s+نیست|مشخص\s+نشده|"
+    r"ledger|claim\s+audit|verification|evidence)",
+    re.IGNORECASE,
+)
+_SCOPE_DISCLAIMER_RE = re.compile(r"(مربوط\s+به\s+(?:همان|همون)|نه\s+فروش\s+(?:کل|تجمعی|یک)|رقمی\s+که\s+دقیقاً)")
+_SPOKEN_DECIMAL_RE = re.compile(r"[0-9۰-۹]+[.٫][0-9۰-۹]+\s*(?:میلیون|میلیارد|هزار|درصد|million|billion)")
+_OUTLET_RE = re.compile(
+    r"(ددلاین|ورایتی|هالیوود\s*ریپورتر|رویترز|بلومبرگ|آسوشیتدپرس|ورج|اسکرین\s*دیلی|ایندی\s*وایر|"
+    r"باکس[\u200c ]?آفیس\s*(?:پرو|موجو)|د\s*رپ|Deadline|Variety|Reuters|Bloomberg|Hollywood Reporter|TheWrap|IndieWire)",
+    re.IGNORECASE,
+)
+_FORMAL_FORMS_RE = re.compile(r"(?<![\w\u200c])(را|است|دارد|آمده|می[\u200c ]?باشد|شده[\u200c ]?اند|کرده[\u200c ]?اند)(?![\w\u200c])")
+_COLLOQUIAL_FORMS_RE = re.compile(r"(?<![\w\u200c])(رو|داره|اومده|هست|شدن|کردن|اینه)(?![\w\u200c])")
+
+
+def spoken_lint(text: str) -> list[dict]:
+    """Deterministic checks for things that make a script sound written or
+    machine-made. Findings are advisory: shown in Step 3 and given to the
+    reviewer, never an automatic block."""
+    body = re.sub(r"<!--.*?-->", " ", text or "", flags=re.S)
+    body = re.sub(r"(?m)^\s*#+\s.*$", " ", body)
+    findings: list[dict] = []
+
+    def add(rule: str, message: str, examples: list[str]) -> None:
+        findings.append({"rule": rule, "message": message, "examples": [e.strip()[:160] for e in examples[:3]]})
+
+    meta = [m.group(0) for m in _META_SPEECH_RE.finditer(body)]
+    if meta:
+        add("pipeline_language", "Pipeline/evidence language is spoken aloud.", meta)
+    sentences = [x.strip() for x in re.split(r"[.!؟?\n]+", body) if x.strip()]
+    disclaimers = [x for x in sentences if _SCOPE_DISCLAIMER_RE.search(x)]
+    if disclaimers:
+        add("scope_disclaimer", "Standalone sentences that only restate a figure's scope.", disclaimers)
+    decimals = [m.group(0) for m in _SPOKEN_DECIMAL_RE.finditer(body)]
+    if decimals:
+        add("spoken_decimal", "Decimals that are hard to say aloud; round to natural spoken precision.", decimals)
+    outlets = [m.group(0) for m in _OUTLET_RE.finditer(body)]
+    if len(outlets) > 3:
+        add("outlet_names", f"{len(outlets)} outlet names spoken; prefer light markers and keep outlet names to 2-3 per episode.", outlets)
+    formal = [m.group(0) for m in _FORMAL_FORMS_RE.finditer(body)]
+    colloquial = _COLLOQUIAL_FORMS_RE.findall(body)
+    if formal and colloquial and len(formal) >= 3:
+        add("register_drift", f"Mixed register: {len(formal)} formal forms next to {len(colloquial)} conversational forms.", formal)
+    return findings
 
 
 def parse_review_gate(text: str) -> dict:
