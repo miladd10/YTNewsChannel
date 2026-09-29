@@ -401,6 +401,125 @@ def length_target(project: dict, draft_text: str | None = None) -> dict:
     return result
 
 
+
+def narration_structure_audit(text: str, stories: list[dict], project: dict) -> dict:
+    """Deterministic episode-assembly checks independent of the reviewer AI."""
+    expected = {str(story.get("id") or ""): story for story in stories if story.get("id")}
+    heading_map: dict[str, str] = {}
+    for item in CINEMA_WEEKLY_FORMAT:
+        key = str(item.get("key") or "")
+        for label in (
+            item.get("label") or "",
+            PERSIAN_SECTION_LABELS.get(key, ""),
+        ):
+            normalized = re.sub(r"\s+", " ", str(label).strip()).casefold()
+            if normalized:
+                heading_map[normalized] = key
+
+    current_section = ""
+    encountered_sections: list[str] = []
+    marker_sections: dict[str, list[str]] = {}
+    marker_order: list[str] = []
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        heading = re.match(r"^#{1,4}\s+(.+?)\s*$", line)
+        if heading:
+            label = re.sub(r"\s+", " ", heading.group(1)).strip().casefold()
+            section = heading_map.get(label, "")
+            if section:
+                current_section = section
+                if not encountered_sections or encountered_sections[-1] != section:
+                    encountered_sections.append(section)
+            continue
+        story_marker = re.match(r"^<!--\s*STORY:([^>\s]+)\s*-->$", line)
+        if story_marker:
+            story_id = story_marker.group(1).strip()
+            marker_order.append(story_id)
+            marker_sections.setdefault(story_id, []).append(current_section)
+
+    present = set(marker_sections)
+    missing_ids = [story_id for story_id in expected if story_id not in present]
+    unknown_ids = [story_id for story_id in present if story_id not in expected]
+
+    wrong_sections = []
+    for story_id, story in expected.items():
+        expected_section = str(story.get("category") or "")
+        if story_id not in marker_sections:
+            continue
+        for actual_section in marker_sections[story_id]:
+            if not actual_section:
+                wrong_sections.append({
+                    "story_id": story_id,
+                    "title": story.get("canonical_title") or "",
+                    "expected_section": expected_section,
+                    "actual_section": "",
+                    "problem": "STORY marker appears before any recognized section heading.",
+                })
+            elif expected_section and actual_section != expected_section:
+                wrong_sections.append({
+                    "story_id": story_id,
+                    "title": story.get("canonical_title") or "",
+                    "expected_section": expected_section,
+                    "actual_section": actual_section,
+                    "problem": "Story appears under the wrong format section.",
+                })
+
+    order_index = {key: index for index, key in enumerate(SECTION_ORDER)}
+    ordered = [key for key in encountered_sections if key in order_index]
+    order_violation = any(
+        order_index[ordered[index]] < order_index[ordered[index - 1]]
+        for index in range(1, len(ordered))
+    )
+
+    target = length_target(project, text)
+    current_words = int(target.get("current_draft_words") or 0)
+    low, high = target.get("acceptable_words") or [0, 10**9]
+    length_status = "ok"
+    if current_words < int(low):
+        length_status = "short"
+    elif current_words > int(high):
+        length_status = "long"
+
+    blocking = []
+    if missing_ids:
+        blocking.append(f"{len(missing_ids)} selected story/stories are missing from the narration.")
+    if unknown_ids:
+        blocking.append(f"{len(unknown_ids)} narration STORY id(s) are not selected inputs.")
+    if wrong_sections:
+        blocking.append(f"{len(wrong_sections)} STORY marker placement(s) use the wrong/missing section.")
+    if order_violation:
+        blocking.append("Section order does not follow the format blueprint.")
+
+    major = []
+    if length_status == "short":
+        major.append(
+            f"Narration is {current_words} words; minimum acceptable target is {int(low)}."
+        )
+    elif length_status == "long":
+        major.append(
+            f"Narration is {current_words} words; maximum acceptable target is {int(high)}."
+        )
+
+    return {
+        "status": "pass" if not blocking and not major else "needs_repair",
+        "blocking_issues": blocking,
+        "major_issues": major,
+        "missing_story_ids": missing_ids,
+        "missing_story_titles": [
+            str(expected[story_id].get("canonical_title") or story_id) for story_id in missing_ids
+        ],
+        "unknown_story_ids": unknown_ids,
+        "wrong_sections": wrong_sections,
+        "section_order": encountered_sections,
+        "section_order_violation": order_violation,
+        "story_marker_order": marker_order,
+        "expected_story_count": len(expected),
+        "covered_story_count": len([story_id for story_id in expected if story_id in present]),
+        "word_count": current_words,
+        "length_status": length_status,
+        "length_target": target,
+    }
+
 def section_label(key: str) -> str:
     return (FORMAT_BY_KEY.get(key) or {}).get("label") or key.replace("_", " ").title()
 
