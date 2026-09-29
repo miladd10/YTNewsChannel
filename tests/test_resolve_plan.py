@@ -1,5 +1,6 @@
 import app.services.resolve_plan as resolve_plan_module
 import json
+import pytest
 
 from app.services.resolve_plan import _alignment_visual_beat_offsets, _assign_transitions, _clamp_video_source_in, _semantic_composite_candidates, _visual_slices, build_edit_plan, crop_instruction, story_windows, voice_timeline, write_resolve_package
 
@@ -522,3 +523,100 @@ def test_people_group_images_create_real_uhd_three_up_composite(tmp_path):
     assert output.exists()
     with Image.open(output) as rendered:
         assert rendered.size == (3840, 2160)
+
+
+
+def test_failed_resolve_staging_keeps_previous_media_folder(tmp_path, monkeypatch):
+    (tmp_path / "audio/narration").mkdir(parents=True)
+    (tmp_path / "media/selected/story").mkdir(parents=True)
+    (tmp_path / "resolve/media").mkdir(parents=True)
+    (tmp_path / "resolve/media/previous.mp4").write_bytes(b"previous-package")
+    (tmp_path / "audio/narration/1.mp3").write_bytes(b"voice")
+    (tmp_path / "media/selected/story/video.mp4").write_bytes(b"source")
+
+    monkeypatch.setattr(resolve_plan_module, "_probe_media_duration", lambda _path: 30.0)
+
+    def fail_stage(*args, **kwargs):
+        raise RuntimeError("synthetic staging failure")
+
+    monkeypatch.setattr(resolve_plan_module, "_stage_resolve_video_cut", fail_stage)
+
+    plan = {
+        "fps": 30,
+        "project_name": "Rollback",
+        "timeline": {"total_frames": 90, "duration_seconds": 3.0},
+        "voice_segments": [{
+            "id": "v1", "segment_index": 1, "story_id": "story",
+            "start": 0.0, "end": 3.0, "duration": 3.0,
+            "audio_path": "audio/narration/1.mp3",
+        }],
+        "visual_clips": [{
+            "story_id": "story", "candidate_id": "m1", "media_type": "video",
+            "title": "Video", "timeline_start": 0.0, "timeline_end": 3.0,
+            "timeline_duration": 3.0, "source_in": 0.0, "source_out": 3.0,
+            "stored_path": "media/selected/story/video.mp4",
+            "transition_in_frames": 0, "transition_out_frames": 0,
+        }],
+        "warnings": [],
+    }
+
+    with pytest.raises(RuntimeError, match="synthetic staging failure"):
+        write_resolve_package(tmp_path, plan)
+
+    assert (tmp_path / "resolve/media/previous.mp4").read_bytes() == b"previous-package"
+    assert not list((tmp_path / "resolve").glob(".media-build-*"))
+
+
+def test_failed_package_write_rolls_back_previous_resolve_media(tmp_path, monkeypatch):
+    (tmp_path / "audio/narration").mkdir(parents=True)
+    (tmp_path / "media/selected/story").mkdir(parents=True)
+    (tmp_path / "resolve/media").mkdir(parents=True)
+    (tmp_path / "resolve/media/previous.mp4").write_bytes(b"previous-package")
+    (tmp_path / "audio/narration/1.mp3").write_bytes(b"voice")
+    (tmp_path / "media/selected/story/video.mp4").write_bytes(b"source")
+
+    monkeypatch.setattr(resolve_plan_module, "_probe_media_duration", lambda _path: 30.0)
+
+    def fake_stage(source, target, *, source_in, duration, fps, source_duration=None):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"new-media")
+        return {
+            "source_duration": source_duration,
+            "requested_source_in": source_in,
+            "adjusted_source_in": source_in,
+            "frame_count": int(round(duration * fps)),
+            "staged_duration": duration,
+            "measured_duration": duration,
+        }
+
+    monkeypatch.setattr(resolve_plan_module, "_stage_resolve_video_cut", fake_stage)
+    monkeypatch.setattr(
+        resolve_plan_module,
+        "_write_resolve_package_files",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("synthetic package failure")),
+    )
+
+    plan = {
+        "fps": 30,
+        "project_name": "Rollback",
+        "timeline": {"total_frames": 90, "duration_seconds": 3.0},
+        "voice_segments": [{
+            "id": "v1", "segment_index": 1, "story_id": "story",
+            "start": 0.0, "end": 3.0, "duration": 3.0,
+            "audio_path": "audio/narration/1.mp3",
+        }],
+        "visual_clips": [{
+            "story_id": "story", "candidate_id": "m1", "media_type": "video",
+            "title": "Video", "timeline_start": 0.0, "timeline_end": 3.0,
+            "timeline_duration": 3.0, "source_in": 0.0, "source_out": 3.0,
+            "stored_path": "media/selected/story/video.mp4",
+            "transition_in_frames": 0, "transition_out_frames": 0,
+        }],
+        "warnings": [],
+    }
+
+    with pytest.raises(RuntimeError, match="synthetic package failure"):
+        write_resolve_package(tmp_path, plan)
+
+    assert (tmp_path / "resolve/media/previous.mp4").read_bytes() == b"previous-package"
+    assert not list((tmp_path / "resolve").glob(".media-backup-*"))
