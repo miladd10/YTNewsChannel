@@ -1617,7 +1617,13 @@ def _restore_resolve_media_after_failure(resolve_media: Path, backup_value: str)
 def write_resolve_package(root: Path, plan: dict) -> dict:
     resolve_dir = root / "resolve"
     resolve_dir.mkdir(parents=True, exist_ok=True)
-    staged_plan, staged_info = _stage_resolve_media(root, plan)
+    previous_build_dirs = set(resolve_dir.glob(".media-build-*"))
+    try:
+        staged_plan, staged_info = _stage_resolve_media(root, plan)
+    except Exception:
+        for path in set(resolve_dir.glob(".media-build-*")) - previous_build_dirs:
+            shutil.rmtree(path, ignore_errors=True)
+        raise
     backup_media = str(staged_info.pop("_backup_media_folder", "") or "")
     resolve_media = resolve_dir / "media"
 
