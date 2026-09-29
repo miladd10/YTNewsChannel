@@ -1914,6 +1914,11 @@ def _build_verified_claim_ledger(
     model: str,
     fresh_sources: dict[str, list[dict]] | None = None,
 ) -> tuple[list[dict], dict[str, list[dict]], str, str]:
+    # The ledger is the writer's factual boundary, so give it the readable
+    # article evidence before asking it to decide which facts are supported.
+    # Previously excerpts were guaranteed only in the later fact-check pass,
+    # which made the initial ledger unnecessarily headline/snippet-only.
+    _ensure_article_excerpts(stories)
     if fresh_sources is None:
         fresh_sources = fetch_narration_fact_check_sources(
             stories,
