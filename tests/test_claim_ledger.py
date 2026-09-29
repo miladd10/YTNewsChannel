@@ -412,3 +412,45 @@ def test_financial_extraction_cannot_omit_metric():
     }, ledger)
     assert checked["status"] == "blocked"
     assert "missing the metric" in checked["issue"].lower()
+
+
+
+def test_production_ledger_requires_verbatim_evidence_anchor():
+    story = {
+        "id": "s1",
+        "articles": [{
+            "url": "https://example.com/report",
+            "source": "Example Trade",
+            "title": "Moth Kingdom opens to $40 million worldwide",
+            "snippet": "The animated film opened to $40 million worldwide this weekend.",
+        }],
+    }
+    base = {
+        "story_id": "s1",
+        "claim_type": "box_office",
+        "canonical_text": "Moth Kingdom opened to $40 million worldwide.",
+        "numeric_value": 40,
+        "unit": "million",
+        "currency": "USD",
+        "market": "worldwide",
+        "period_type": "opening_weekend",
+        "source_urls": ["https://example.com/report"],
+        "verification_status": "verified",
+    }
+    missing = normalize_ledger_claims([base], [story], {}, require_evidence_quote=True)[0]
+    assert missing["verification_status"] == "blocked"
+
+    anchored = normalize_ledger_claims([{
+        **base,
+        "evidence_url": "https://example.com/report",
+        "evidence_quote": "The animated film opened to $40 million worldwide this weekend.",
+    }], [story], {}, require_evidence_quote=True)[0]
+    assert anchored["verification_status"] == "verified"
+
+    invented = normalize_ledger_claims([{
+        **base,
+        "evidence_url": "https://example.com/report",
+        "evidence_quote": "The animated film has reached $140 million worldwide.",
+    }], [story], {}, require_evidence_quote=True)[0]
+    assert invented["verification_status"] == "blocked"
+    assert any("not found verbatim" in note for note in invented["validation_notes"])
