@@ -1257,6 +1257,7 @@ def _probe_media_duration(path: Path) -> float | None:
         stderr=subprocess.PIPE,
         text=True,
         check=False,
+        timeout=60,
     )
     if result.returncode != 0:
         return None
@@ -1279,14 +1280,18 @@ def _clamp_video_source_in(source_in: float, requested_duration: float, source_d
     return min(source_in, latest)
 
 
-def _run_ffmpeg(command: list[str]) -> None:
-    result = subprocess.run(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+def _run_ffmpeg(command: list[str], timeout: int = 900) -> None:
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"FFmpeg timed out after {timeout}s while creating Resolve-safe media.") from exc
     if result.returncode != 0:
         tail = "\n".join((result.stderr or "").splitlines()[-10:])
         raise RuntimeError(f"FFmpeg could not create Resolve-safe media. {tail}".strip())
