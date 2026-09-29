@@ -790,6 +790,7 @@ WHAT TO PLAN:
 - optional_spice: only safe_to_narrate angles that map to verified ledger claims.
 - depth: lead for the week's biggest story, quick when evidence is thin. Never invent filler to reach a length.
 - Merge several story ids into one planned item only when they clearly describe the same film/event; keep every id in "id".
+- COVERAGE IS MANDATORY: every selected story id in approved_sections must appear exactly once in the plan (alone or inside one merged id joined by +). Never silently drop a thin story; mark it quick and use only its verified hook if evidence is limited.
 - SOURCE DATE IS NOT EVENT DATE: a current article can mention an older figure; never plan it as the current value. Use the latest reliable in-window value for "now/has reached" notes; never plan "approaching" when a later source shows the milestone was crossed.
 - Keep rumors marked as rumor and social reaction tied to its platform and scale.
 """
@@ -887,6 +888,7 @@ PRIORITIES, in order: (1) every fact is supported, (2) it sounds like one person
 - RUMORS: only from a safe type=rumor angle, always framed as unconfirmed ("فعلاً در حد شایعه‌ست..."، "گزارش‌ها می‌گن..."), never replacing the verified hook. SOCIAL REACTION names its real platform and scale ("توی ردیت بعضی از کاربرا...") and never implies consensus. Critic reaction only from type=critic_reaction.
 - Keep every factual paragraph traceable with <!-- STORY:<id> --> immediately before the sentences it supports. Intro and Outro have no STORY id. Story ids are evidence boundaries, not paragraph boundaries: items about the same film/event become one flowing item with each marker kept next to its claims.
 - Omit any format section without approved material (except Intro/Outro). Do not revive skipped stories.
+- COVERAGE IS MANDATORY: every selected story id from approved_sections must appear at least once as <!-- STORY:<id> --> in the final narration. Never silently drop a selected story because another story is richer.
 
 2. VOICE
 - This is a SPOKEN TRANSCRIPT, not entertainment journalism. Follow the STYLE BLUEPRINT first and the corpus flow anchors second: a host telling the week to a friend, in natural colloquial Persian, never "corrected" into written Persian.
@@ -894,6 +896,7 @@ PRIORITIES, in order: (1) every fact is supported, (2) it sounds like one person
 - Humor and interest come from actual contrasts and odd facts, never from empty adjectives ("عجیب"، "خفن"، "سنگین"، "کنجکاوی‌برانگیز") or fake excitement.
 - No abstract stakes ("برای مخاطب مهمه چون...") without a concrete supported consequence; no ceremonial setups; no placeholder endings ("حالا باید دید..."، "باید زیر نظرش داشت") unless the evidence leaves a concrete open question. End an item on its strongest detail.
 - Transitions come from the content ("حالا که..."، "از این یکی بگذریم..."), not "خبر بعدی" or "اما می‌رسیم به..." every time. Vary sentence length; connected spoken chains are fine.
+- CONTINUITY: a transition may refer back only to something actually narrated immediately earlier in the BODY. An intro tease does not count as coverage. Never write a bridge like «حالا از مارول بریم...» when Marvel has not yet been discussed in the body.
 - Section headings are quiet metadata for the app: use the supplied spoken_label_fa values and never output English headings inside a Persian narration. The prose under them flows without announcing the template.
 - NAMES READ ALOUD: the script is voiced by text-to-speech. Transliterate each foreign name once and spell it identically every time; add short-vowel marks (اعراب) to a name whose bare spelling could be read as ordinary words. Keep film/series titles in their official form.
 - The greeting uses the channel name from project.channel_name only when it is set; otherwise greet without a channel name. Never borrow a channel name from the style references.
@@ -955,6 +958,7 @@ SEVERITY (use these definitions exactly)
   - FORMAL WRITTEN-PERSIAN DRIFT across an item, or pipeline language spoken aloud;
   - generic AI/news-presenter phrasing, empty hype or EMPTY ADJECTIVE PAYOFFS ("ترکیب سنگینی جمع شده"، "اتفاق بزرگیه") carrying an item instead of a concrete detail;
   - items that start, summarize and stop like database cards with no bridges;
+  - BROKEN CONTINUITY: a transition refers back to a topic that has not actually appeared earlier in the body, or section order makes the bridge nonsensical;
   - more outlet names than the ATTRIBUTION POLICY allows, or scope-disclaimer sentences;
   - a selected story omitted; the lead story shallower than quick items; LENGTH below length_target.acceptable_words while supported material is unused, or more than 15% over it;
   - a CASUAL-AUDIENCE FAMILIARITY cue missing when a verified ledger claim supports it, or a biography/credit dump instead of one short cue;
@@ -1053,6 +1057,8 @@ Rules:
 - Preserve supported creator/actor-to-related-title context when visual_context marks it; this lets Media Sources cover the exact related movie/show instead of showing only the current trailer.
 - Do not pad a story merely because a context search was run.
 - Preserve concise casual-audience familiarity cues when supported.
+- Preserve coverage of EVERY selected story id and its correct format section. Do not drop a story while enriching another.
+- Re-check transitions after enrichment: never refer back to a topic that is only teased in the intro or appears later.
 - Related database story IDs can be merged into one flowing spoken item when they are about the same film/event, while keeping every <!-- STORY:id --> marker immediately before the claim(s) it supports.
 - Remove empty endings like "حالا باید دید..." when a concrete supported detail can end the item better.
 - Keep Persian conversational and orally natural. Follow the Style Blueprint and long flow anchors, not generic polished news prose.
@@ -1078,6 +1084,7 @@ Rules:
 - Make only changes needed to resolve the review, BUT if the Style/Storytelling audit says an affected story is fundamentally over-compressed or article-like, rewrite that whole story's spoken passage rather than patching one sentence.
 - Preserve everything already correct.
 - Preserve current-week factual fidelity and STORY markers.
+- Preserve coverage of every selected story id and correct section order. If the existing draft omitted a selected story or has a broken transition, add/fix it using only verified ledger beats.
 - Preserve claim scope exactly: opening weekend is not current cumulative total; weekend gross is not total gross; domestic is not worldwide; limited theatrical is not wide theatrical. If reviewer feedback identifies a stale volatile value, use only the newer supported value in the packet or qualify/remove the claim.
 - Do not import facts from the style transcript corpus.
 - When fixing style, obey the supplied Style Blueprint first and use the corpus/flow anchors for recurring behavior (oral syntax, story micro-arcs, rhythm, context, transitions, natural humor), never for copied phrases.
