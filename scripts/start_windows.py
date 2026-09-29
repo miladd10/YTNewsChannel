@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, subprocess, sys, time, urllib.request, webbrowser
 from pathlib import Path
-APP_DIR=Path(__file__).resolve().parents[1]; PORT=8787; URL=f"http://127.0.0.1:{PORT}"
+APP_DIR=Path(__file__).resolve().parents[1]; PORT=int(os.environ.get("YT_NEWS_PORT","8787")); URL=f"http://127.0.0.1:{PORT}"
 DATA=APP_DIR/'data'; VENV=APP_DIR/'.venv'; PY=VENV/'Scripts'/'python.exe'; PID=DATA/'server.pid'; LOG=DATA/'server.log'; ERR=DATA/'server-error.log'
 def ready():
     try: urllib.request.urlopen(URL,timeout=1); return True
