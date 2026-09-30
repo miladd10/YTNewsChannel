@@ -3370,6 +3370,17 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
             raise HTTPException(400, "Run a reviewer pass on this draft first.")
         stories = selected_story_packet(conn, project_id)
         reused_ledger = _reusable_ledger(conn, narration_id, stories)
+        draft_claim_checks = []
+        for row in conn.execute(
+            "SELECT data_json FROM narration_claim_checks WHERE narration_id=? ORDER BY created_at,id",
+            (narration_id,),
+        ).fetchall():
+            try:
+                item = json.loads(row["data_json"] or "{}")
+            except Exception:
+                item = {}
+            if item:
+                draft_claim_checks.append(item)
         styles = _style_transcripts(
             conn,
             project.get("channel") or "cinema",
@@ -3400,6 +3411,14 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
             "length_target": length_target(project, draft["content"]),
             "spoken_lint": spoken_lint(draft["content"]),
             "automatic_fact_check": _fact_check_summary(draft),
+            "narration_claim_audit": {
+                "status": str(draft["claim_audit_status"] or "not_run"),
+                "blocked_count": int(draft["claim_blocked_count"] or 0),
+                "blocked_claims": [
+                    item for item in draft_claim_checks
+                    if item.get("status") == "blocked"
+                ],
+            },
             "approved_sections": _narration_story_packet(stories),
             "verified_claim_ledger": ledger_for_writer(claim_ledger),
         }, ensure_ascii=False),
