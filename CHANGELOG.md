@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.6 — Faster, Simpler Writing Pipeline
+
+A draft or revision used to take ~15-20 minutes and often came back short, blocked and bland. Causes and fixes:
+- **Web searches were repeated on every pass.** Each fact check re-ran ~10-16 serial searches per story, and a revision could fact-check up to four times. Searches now run in parallel and are cached per story for 12 hours (`narration/fact-sources.json`). Stable sources also stop new "issues" from appearing on every pass.
+- **Three copies of the same post-writing pipeline** (Generate, Enrich, Revise) are now one shared step: polish wording → fact check + claim audit in parallel → repair.
+- **The fluency polish was almost always discarded.** It ran last, re-verified itself with two extra AI calls, and was rejected whenever any gate was still open. It now runs before verification, guarded only by cheap checks (story markers unchanged, lint not worse, no more than 15% shorter).
+- **Repairs could make things worse.** A repair is now kept only if it reduces the open issues and doesn't cut the script far below its length target; otherwise the loop stops.
+- **The claim gate deleted ordinary context.** Unmatched cast/credit/production/company sentences with no numbers, money, dates, rankings, release scope or title identity are now "to eyeball" (non-blocking) instead of blocked. Risky claims still block.
+- Worst case drops from about 12 sequential AI calls to about 6 serial steps; a clean draft needs writer + polish + one parallel check.
+
 ## v0.4.5 — Direct Filmbaz Style Authority
 
 Narration-style pipeline fixes based on the user's actual Filmbaz weekly-news transcripts and repeated review/revise drift:
