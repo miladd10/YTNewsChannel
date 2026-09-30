@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.9 — Learn the Transformation, Not a Phrase List
+
+- Drafts sounded translated because the writer turns English facts into Persian, and rules/phrase lists can't cover every calque. The app now builds **voice pairs** from the direct reference transcripts: ~20 verbatim host passages paired with the dry English news for the same facts (one cached AI call per reference set). Writer, revision, enrichment, reviewer, polish and repair all see them.
+- One general rule instead of growing lists: if a listener could guess the English a sentence came from, rewrite it from the fact the way the host does.
+- The jargon phrase list from the previous commit was reverted.
+
 ## v0.4.8 — Natural Titles and Phrasing
 
 Fixes for the odd Persian in V26:
