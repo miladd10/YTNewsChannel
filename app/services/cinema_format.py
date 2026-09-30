@@ -675,19 +675,26 @@ def usable_style_transcripts(transcripts: Iterable[dict]) -> list[dict]:
 def style_reference_kind(row: dict) -> str:
     """Infer the reference episode format from its filename/title.
 
-    Users often import several Filmbaz formats into the same style library
-    (weekly news, monthly preview/list videos, etc.). They share a host voice,
-    but their pacing and item structure are different. For a weekly-news
-    episode, direct writer examples should therefore come from weekly-news
-    references whenever enough of them exist.
+    Voice can be shared across formats, but pacing cannot. Monthly preview/list
+    videos are deliberately classified *before* weekly-news cues so an incidental
+    phrase such as "هر هفته" inside a monthly transcript cannot leak list-video
+    pacing into a weekly-news writer.
     """
     name = str(row.get("name") or "").casefold()
-    content = str(row.get("content") or "")[:1200].casefold()
+    content = str(row.get("content") or "")[:1800].casefold()
     combined = f"{name}\n{content}"
-    if re.search(r"اخبار\s+سینما|جدید(?:ترین| ترین).*اخبار|weekly\s+news|هر\s+هفته", combined):
-        return "weekly_news"
-    if re.search(r"مورد\s+انتظارترین|فیلم.{0,40}سریال.{0,40}ماه|monthly\s+(?:preview|release)", combined):
+    if re.search(
+        r"مورد\s+انتظارترین|(?:فیلم|سریال).{0,70}(?:ماه|منتشر\s+بشن)|"
+        r"مثل\s+هر\s+ماه|monthly\s+(?:preview|release)",
+        combined,
+    ):
         return "monthly_preview"
+    if re.search(
+        r"اخبار\s+سینما|جدید(?:ترین| ترین).*اخبار|weekly\s+news|"
+        r"مثل\s+هر\s+هفته|توی\s+هفته\s+(?:گذشته|قبل)",
+        combined,
+    ):
+        return "weekly_news"
     return "other"
 
 
@@ -714,6 +721,85 @@ def style_rows_for_window(
         if not (start and row.get("reference_date") and str(row["reference_date"]) >= start)
     ]
     return style_rows_for_content_type(rows, content_type)
+
+
+def writer_style_rows_for_window(
+    transcripts: Iterable[dict],
+    date_start: str,
+    content_type: str = "weekly_news",
+    *,
+    max_rows: int = 4,
+) -> list[dict]:
+    """Small, high-signal direct examples for prose generation.
+
+    The old writer packet mixed many episodes plus distributed snippets. That is
+    useful for building the abstract Style Blueprint, but it dilutes a prose
+    model: several formats/eras average into generic "news presenter" Persian.
+    For actual writing we prefer the closest earlier SAME-FORMAT episodes and
+    give them enough contiguous text to demonstrate real flow.
+    """
+    rows = style_rows_for_window(transcripts, date_start, content_type)
+    usable = usable_style_transcripts(rows)
+    desired = str(content_type or "").strip().lower()
+    if desired == "weekly_news":
+        same = [row for row in usable if style_reference_kind(row) == "weekly_news"]
+        if same:
+            usable = same
+    usable.sort(
+        key=lambda item: (
+            str(item.get("reference_date") or ""),
+            str(item.get("updated_at") or item.get("created_at") or ""),
+        ),
+        reverse=True,
+    )
+    return usable[:max(1, int(max_rows))]
+
+
+def build_writer_style_packet(
+    transcripts: Iterable[dict],
+    date_start: str,
+    content_type: str = "weekly_news",
+    *,
+    max_chars: int = 52000,
+) -> str:
+    """Direct same-format few-shot packet used by writer/reviser/polisher."""
+    rows = writer_style_rows_for_window(
+        transcripts,
+        date_start,
+        content_type,
+        max_rows=4,
+    )
+    if not rows:
+        return "<style_corpus>No direct same-format style references are available.</style_corpus>"
+
+    budget = max(12000, int(max_chars))
+    each = max(3000, budget // len(rows))
+    chunks = [
+        "<style_corpus>",
+        "DIRECT SAME-FORMAT REFERENCES ARE THE PRIMARY VOICE AUTHORITY.",
+        "Facts inside these references are old and unusable; copy ONLY recurring spoken behavior.",
+        "Do not translate their wording into rules. Listen to the actual Persian: ordinary verbs, connected clauses, concrete explanations, quick familiarity cues and natural transitions.",
+        "ASR spelling mistakes are noise; phrasing/rhythm are signal.",
+    ]
+    # Start each recent episode near its opening so the model sees the host's
+    # natural weekly-news setup, then include a second contiguous stretch from
+    # later in the same episode (where transitions/quick items live).
+    for index, item in enumerate(rows):
+        text = str(item.get("content") or "").strip()
+        first_budget = max(1600, int(each * 0.55))
+        later_budget = max(1400, each - first_budget)
+        opening = _contiguous_style_excerpt(text, first_budget, 0.0)
+        later_offset = (0.30, 0.48, 0.62, 0.76)[index % 4]
+        later = _contiguous_style_excerpt(text, later_budget, later_offset)
+        chunks.extend([
+            f'<weekly_flow_reference name={json.dumps(item.get("name") or "Transcript")}>',
+            opening,
+            "\n... [same episode, later] ...\n",
+            later,
+            "</weekly_flow_reference>",
+        ])
+    chunks.append("</style_corpus>")
+    return "\n".join(chunks)[:budget + 4000]
 
 
 def build_style_packet(transcripts: Iterable[dict], max_chars: int = 120000) -> str:
@@ -956,7 +1042,7 @@ PRIORITIES, in order: (1) every fact is supported, (2) it sounds like one person
 - COVERAGE IS MANDATORY: every selected story id from approved_sections must appear at least once as <!-- STORY:<id> --> in the final narration. Never silently drop a selected story because another story is richer.
 
 2. VOICE
-- This is a SPOKEN TRANSCRIPT, not entertainment journalism. Follow the STYLE BLUEPRINT first and the corpus flow anchors second: a host telling the week to a friend, in natural colloquial Persian, never "corrected" into written Persian.
+- This is a SPOKEN TRANSCRIPT, not entertainment journalism. DIRECT SAME-FORMAT STYLE REFERENCES are the primary voice authority; the STYLE BLUEPRINT is only a secondary summary. If the summary and the actual transcript behavior feel different, imitate the transcript behavior. Write like a host telling the week to a friend, in natural colloquial Persian, never "corrected" into written Persian.
 - Let the host reason out loud when it helps ("یعنی..."، "برای همین..."، "مشکل اینجاست..."، "حالا چرا این جالبه؟"). These are tools, varied naturally, not catchphrases. Rhetorical questions are fine when they set up a real answer.
 - Humor and interest come from actual contrasts and odd facts, never from empty adjectives ("عجیب"، "خفن"، "سنگین"، "کنجکاوی‌برانگیز") or fake excitement.
 - No abstract stakes ("برای مخاطب مهمه چون...") without a concrete supported consequence; no ceremonial setups; no placeholder endings ("حالا باید دید..."، "باید زیر نظرش داشت") unless the evidence leaves a concrete open question. End an item on its strongest detail.
@@ -1056,7 +1142,7 @@ REVIEWER_SYSTEM = """You are the independent editor of a weekly cinema-news YouT
 WHAT YOU RECEIVE
 - The approved current-week packet, its VERIFIED CLAIM LEDGER and the NARRATION CLAIM AUDIT (a sentence-by-sentence check of the draft against the ledger, already done by code).
 - The format blueprint, length_target and spoken_lint findings (measured by code).
-- The STYLE BLUEPRINT and style corpus. The style corpus is never factual authority: use it only to compare voice and flow; never ask the writer to copy its wording or facts.
+- The direct SAME-FORMAT style corpus and STYLE BLUEPRINT. The direct corpus is the primary voice reference; the blueprint is only a summary. Neither is factual authority for this episode.
 
 HOW TO JUDGE FACTS
 - automatic_fact_check is the fresh-evidence fact check. If its status is needs_human_check, every issue it lists that is still present in the draft is a blocking issue.
@@ -1174,7 +1260,7 @@ Rules:
 - Re-check transitions after enrichment: never refer back to a topic that is only teased in the intro or appears later.
 - Related database story IDs can be merged into one flowing spoken item when they are about the same film/event, while keeping every <!-- STORY:id --> marker immediately before the claim(s) it supports.
 - Remove empty endings like "حالا باید دید..." when a concrete supported detail can end the item better.
-- Keep Persian conversational and orally natural. Follow the Style Blueprint and long flow anchors, not generic polished news prose.
+- Keep Persian conversational and orally natural. Follow the direct same-format flow anchors first and the Style Blueprint second, never generic polished news prose.
 - When new context turns a previously thin item into a rich one, rebuild that item's micro-arc instead of just appending one sentence at the end.
 - Use natural causal/explanatory turns when they genuinely help: "یعنی", "برای همین", "مشکل اینجاست", a short rhetorical setup, or a fact-based aside. Vary them; do not turn them into a template.
 - Do not use empty adjective payoffs such as "ترکیب سنگینی", "کنجکاوی‌برانگیز", or "مهم برای مخاطب" unless a concrete supported detail immediately earns that description.
@@ -1200,7 +1286,7 @@ Rules:
 - Preserve coverage of every selected story id and correct section order. If the existing draft omitted a selected story or has a broken transition, add/fix it using only verified ledger beats.
 - Preserve claim scope exactly: opening weekend is not current cumulative total; weekend gross is not total gross; domestic is not worldwide; limited theatrical is not wide theatrical. If reviewer feedback identifies a stale volatile value, use only the newer supported value in the packet or qualify/remove the claim.
 - Do not import facts from the style transcript corpus.
-- When fixing style, obey the supplied Style Blueprint first and use the corpus/flow anchors for recurring behavior (oral syntax, story micro-arcs, rhythm, context, transitions, natural humor), never for copied phrases.
+- When fixing style, use the direct same-format corpus/flow anchors as the primary voice reference (oral syntax, story micro-arcs, rhythm, context, transitions, natural humor). The Style Blueprint is secondary. Never copy old facts or distinctive sentences.
 - A revision must not preserve a weak two-sentence news brief merely because its facts are correct. If the approved packet contains richer supported beats, rebuild the passage into a natural spoken mini-story.
 - Do not create length with abstract filler. If evidence is thin, leave the item short.
 - If the review requests a familiarity cue, use only the approved story's familiarity_anchor; keep it to one short clause.
