@@ -2509,6 +2509,128 @@ def _claim_rows_for_workspace(conn, project_id: str) -> tuple[list[dict], list[d
     return ledger_rows, check_rows
 
 
+def _validate_content_plan(plan: dict, stories: list[dict], ledger: list[dict]) -> list[str]:
+    if not isinstance(plan, dict):
+        return ["Content plan is not a JSON object."]
+    selected = {str(story.get("id") or ""): story for story in stories if story.get("id")}
+    ledger_by_id = {
+        str(claim.get("id") or ""): claim
+        for claim in ledger
+        if claim.get("verification_status") in {"verified", "verified_with_attribution"}
+    }
+    seen: dict[str, int] = {}
+    errors: list[str] = []
+    claim_fields = (
+        "hook_claim_ids", "setup_claim_ids", "detail_claim_ids",
+        "familiarity_claim_ids", "spice_claim_ids", "ending_claim_ids",
+    )
+    sections = plan.get("sections")
+    if not isinstance(sections, list):
+        return ["Content plan sections are missing."]
+
+    for section in sections:
+        if not isinstance(section, dict):
+            errors.append("Content plan contains a non-object section.")
+            continue
+        section_key = str(section.get("section") or "")
+        rows = section.get("stories")
+        if not isinstance(rows, list):
+            errors.append(f"Section {section_key or '?'} has no story list.")
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                errors.append(f"Section {section_key or '?'} contains a non-object story.")
+                continue
+            row_ids = [part.strip() for part in str(row.get("id") or "").split("+") if part.strip()]
+            if not row_ids:
+                errors.append(f"Section {section_key or '?'} contains a story without an id.")
+                continue
+            for sid in row_ids:
+                if sid not in selected:
+                    errors.append(f"Unknown story id in content plan: {sid}")
+                    continue
+                seen[sid] = seen.get(sid, 0) + 1
+                expected_section = str(selected[sid].get("category") or "")
+                if expected_section and section_key != expected_section:
+                    errors.append(f"Story {sid} is planned under {section_key}, expected {expected_section}.")
+
+            allowed_story_ids = set(row_ids)
+            for field in claim_fields:
+                values = row.get(field) or []
+                if not isinstance(values, list):
+                    errors.append(f"{field} for {'+'.join(row_ids)} is not a list.")
+                    continue
+                for claim_id in values:
+                    claim = ledger_by_id.get(str(claim_id))
+                    if not claim:
+                        errors.append(f"Unknown/blocked ledger id in plan: {claim_id}")
+                        continue
+                    if str(claim.get("story_id") or "") not in allowed_story_ids:
+                        errors.append(f"Ledger id {claim_id} belongs to a different story.")
+                    if field == "hook_claim_ids" and claim.get("claim_role") != "current_hook":
+                        errors.append(f"Hook ledger id {claim_id} is not claim_role=current_hook.")
+            hook_values = row.get("hook_claim_ids") or []
+            for sid in row_ids:
+                if not any(
+                    str(ledger_by_id.get(str(cid), {}).get("story_id") or "") == sid
+                    and ledger_by_id.get(str(cid), {}).get("claim_role") == "current_hook"
+                    for cid in hook_values
+                ):
+                    errors.append(f"Story {sid} has no current-hook claim in hook_claim_ids.")
+
+    for sid in selected:
+        if seen.get(sid, 0) != 1:
+            errors.append(f"Selected story {sid} appears {seen.get(sid, 0)} times in content plan; expected exactly once.")
+    return list(dict.fromkeys(errors))
+
+
+def _fallback_content_plan(stories: list[dict], ledger: list[dict]) -> dict:
+    """Deterministic claim-id plan used when the planner returns malformed structure."""
+    claims_by_story: dict[str, list[dict]] = {}
+    for claim in ledger:
+        if claim.get("verification_status") not in {"verified", "verified_with_attribution"}:
+            continue
+        claims_by_story.setdefault(str(claim.get("story_id") or ""), []).append(claim)
+
+    sections = []
+    intro_claim_ids = []
+    for section in CINEMA_WEEKLY_FORMAT:
+        rows = []
+        for story in stories:
+            if story.get("category") != section["key"]:
+                continue
+            sid = str(story.get("id") or "")
+            claims = claims_by_story.get(sid, [])
+            hooks = [str(x["id"]) for x in claims if x.get("claim_role") == "current_hook"][:2]
+            background = [str(x["id"]) for x in claims if x.get("claim_role") == "background"][:1]
+            familiarity = [
+                str(x["id"]) for x in claims
+                if x.get("claim_type") == "person_credit" and x.get("claim_role") != "current_hook"
+            ][:1]
+            used = set(hooks + background + familiarity)
+            details = [
+                str(x["id"]) for x in claims
+                if str(x.get("id")) not in used and x.get("claim_role") == "supporting"
+            ][:5]
+            if hooks and len(intro_claim_ids) < 3:
+                intro_claim_ids.append(hooks[0])
+            total_beats = len(hooks) + len(background) + len(familiarity) + len(details)
+            rows.append({
+                "id": sid,
+                "depth": "quick" if total_beats <= 2 else ("lead" if total_beats >= 7 else "normal"),
+                "hook_claim_ids": hooks,
+                "setup_claim_ids": background,
+                "detail_claim_ids": details,
+                "familiarity_claim_ids": familiarity,
+                "spice_claim_ids": [],
+                "ending_claim_ids": [],
+                "bridge_relation": "none",
+            })
+        if rows:
+            sections.append({"section": section["key"], "stories": rows})
+    return {"intro_claim_ids": intro_claim_ids, "sections": sections, "planner_fallback": True}
+
+
 @app.post("/api/projects/{project_id}/narration")
 def generate_narration(project_id: str, body: GenerateBody):
     settings = masked_status()
@@ -2575,16 +2697,16 @@ def generate_narration(project_id: str, body: GenerateBody):
             json.dumps(packet, ensure_ascii=False),
         )
         content_plan = _parse_json_object_text(plan_text)
+        plan_errors = _validate_content_plan(content_plan, baseline_stories, claim_ledger)
+        if plan_errors:
+            raise ValueError("; ".join(plan_errors[:12]))
     except Exception as exc:
-        # Do not silently replace the facts with made-up planning. The writer
-        # still gets the complete authoritative packet and an explicit planner
-        # error so it can keep thin stories short.
+        # The fallback is deterministic and claim-id-only. It never invents
+        # prose/facts and still guarantees every selected current hook reaches
+        # the writer if the planner returns malformed JSON or bad claim ids.
         content_plan_error = str(exc)
-        content_plan = {
-            "intro_hooks": [],
-            "sections": [],
-            "planner_error": content_plan_error,
-        }
+        content_plan = _fallback_content_plan(baseline_stories, claim_ledger)
+        content_plan["planner_error"] = content_plan_error
 
     user = "\n".join([
         "<current_week_authoritative_packet>",
