@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.4 — Filmbaz Voice Match
+
+Writing-pipeline fixes based on the user's real Filmbaz weekly-news transcripts and a broken generated draft:
+- Weekly-news projects now use same-format weekly-news transcripts as their direct writer/reviewer flow examples instead of mixing in monthly preview/list-video structure. The most recent eligible weekly episodes become the primary flow anchors.
+- Raw YouTube/ASR subtitle line breaks and non-speech cues are normalized before style sampling, so the writer learns continuous spoken rhythm rather than subtitle formatting.
+- The content planner no longer writes English prose for the writer to translate. It returns ledger claim IDs plus structural relationships only; plans are validated in code and fall back to a deterministic claim-ID plan when malformed.
+- Writer/reviewer/reviser prompts receive a compact story packet instead of raw English article excerpts and model-written research summaries. Full evidence remains available to the ledger/fact checker, while the spoken writer sees the verified facts and style references with far less prompt noise.
+- Every selected story must now have a verified `current_hook` claim, and the narration audit verifies that the current hook itself was actually spoken. A STORY marker or generic filler sentence can no longer count as coverage.
+- A dedicated final spoken-Persian fluency pass uses the same-format style corpus, then reruns fact, claim and structure validation; the polished version is discarded if it changes evidence boundaries or fails validation.
+- Spoken-writing rules explicitly reject translationese, newsroom abstractions, ledger labels and empty audience-payoff sentences. Thin stories stay thin instead of being padded to hit the duration target.
+- Generic transitions such as «و برسیم به گیشه» are no longer treated as factual claims, while scoped box-office amounts/rankings remain protected by the deterministic audit.
+- Step 3 now shows which references actually feed the weekly writer/reviewer and labels different-format references accordingly.
+
 ## v0.4.3 — Narration Assembly Repair
 
 Fixes from reviewing a broken generated transcript:
