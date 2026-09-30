@@ -658,16 +658,59 @@ def usable_style_transcripts(transcripts: Iterable[dict]) -> list[dict]:
             and not row.get("likely_garbled")]
 
 
-def style_rows_for_window(transcripts: Iterable[dict], date_start: str) -> list[dict]:
-    """Drop references dated on/after the episode's first day: they may cover
-    the same news the episode is about, and their facts must never leak in."""
+def style_reference_kind(row: dict) -> str:
+    """Infer the reference episode format from its filename/title.
+
+    Users often import several Filmbaz formats into the same style library
+    (weekly news, monthly preview/list videos, etc.). They share a host voice,
+    but their pacing and item structure are different. For a weekly-news
+    episode, direct writer examples should therefore come from weekly-news
+    references whenever enough of them exist.
+    """
+    name = str(row.get("name") or "").casefold()
+    content = str(row.get("content") or "")[:1200].casefold()
+    combined = f"{name}\n{content}"
+    if re.search(r"اخبار\s+سینما|جدید(?:ترین| ترین).*اخبار|weekly\s+news|هر\s+هفته", combined):
+        return "weekly_news"
+    if re.search(r"مورد\s+انتظارترین|فیلم.{0,40}سریال.{0,40}ماه|monthly\s+(?:preview|release)", combined):
+        return "monthly_preview"
+    return "other"
+
+
+def style_rows_for_content_type(transcripts: Iterable[dict], content_type: str) -> list[dict]:
+    rows = list(transcripts)
+    desired = str(content_type or "").strip().lower()
+    if desired != "weekly_news":
+        return rows
+    weekly = [row for row in rows if style_reference_kind(row) == "weekly_news"]
+    # Require several examples before narrowing; otherwise keep the full voice
+    # corpus rather than accidentally leaving the writer with one odd episode.
+    return weekly if len(weekly) >= 3 else rows
+
+
+def style_rows_for_window(
+    transcripts: Iterable[dict],
+    date_start: str,
+    content_type: str = "weekly_news",
+) -> list[dict]:
+    """Keep pre-episode references and prefer the same episode format."""
     start = str(date_start or "")[:10]
-    return [row for row in transcripts
-            if not (start and row.get("reference_date") and str(row["reference_date"]) >= start)]
+    rows = [
+        row for row in transcripts
+        if not (start and row.get("reference_date") and str(row["reference_date"]) >= start)
+    ]
+    return style_rows_for_content_type(rows, content_type)
 
 
 def build_style_packet(transcripts: Iterable[dict], max_chars: int = 120000) -> str:
     enabled = usable_style_transcripts(transcripts)
+    enabled.sort(
+        key=lambda item: (
+            str(item.get("reference_date") or ""),
+            str(item.get("updated_at") or item.get("created_at") or ""),
+        ),
+        reverse=True,
+    )
     if not enabled:
         return "<style_corpus>No usable style transcripts are available for this episode.</style_corpus>"
 
@@ -701,7 +744,10 @@ def build_style_packet(transcripts: Iterable[dict], max_chars: int = 120000) -> 
         ])
     chunks.append("</distributed_samples>")
 
-    anchors = sorted(enabled, key=lambda item: len(str(item.get("content") or "")), reverse=True)[:anchor_count]
+    # The closest earlier episodes are the strongest flow examples for a
+    # weekly show. Length alone used to select anchors and could promote a
+    # monthly/list-format transcript over the user's recent weekly episodes.
+    anchors = enabled[:anchor_count]
     if anchors:
         chunks.append("<flow_anchors>")
         anchor_each = max(2500, anchor_budget // len(anchors))
@@ -754,52 +800,45 @@ Be concrete enough that another writer can follow it without seeing the transcri
 
 CONTENT_PLAN_SYSTEM = """You are the factual story architect for a spoken weekly cinema-news episode.
 
-Use ONLY the supplied approved current-week packet and its verified_claim_ledger. Do not use outside knowledge or the style references.
+Use ONLY the supplied approved current-week packet and its verified_claim_ledger. Do not use outside knowledge or style references.
+
+The planner MUST NOT write English or Persian prose for the writer to translate. It only chooses ledger claim IDs and structural relationships.
 
 Return ONLY valid JSON:
 {
-  "intro_hooks": ["note"],
+  "intro_claim_ids": ["C001"],
   "sections": [
     {
       "section": "key",
       "stories": [
         {
-          "id": "story id (join several ids with + when they are one event)",
+          "id": "story id (join several ids with + only when they are one event)",
           "depth": "lead|normal|quick",
-          "headline_hook": "note",
-          "setup": ["note"],
-          "familiarity": ["note"],
-          "interesting_details": ["note"],
-          "why_it_matters": ["note"],
-          "optional_spice": ["note"],
-          "ending_fact": "note",
-          "bridge_hint": "note"
+          "hook_claim_ids": ["C001"],
+          "setup_claim_ids": ["C002"],
+          "detail_claim_ids": ["C003","C004"],
+          "familiarity_claim_ids": ["C005"],
+          "spice_claim_ids": ["C006"],
+          "ending_claim_ids": ["C007"],
+          "bridge_relation": "same_company|same_title|contrast|continuation|none"
         }
       ]
     }
   ]
 }
 
-HOW TO WRITE NOTES (this plan is raw material, not the script):
-- Write every note as a terse ENGLISH fact note, never a finished sentence and never Persian. The writer composes the spoken Persian from scratch; prose here gets copied and makes the script sound written.
-- End every factual note with the ledger id(s) that support it, e.g. "Encore opening weekend: ~$86M worldwide [C002]". A note without a supporting verified ledger id must not exist.
-- Keep scope inside the note itself (market, period, estimate). Mark attribution only as "(estimate)" or "(attrib: <outlet>, conflicting)" when the ledger claim has attribution_required=true. Do not add outlet names otherwise.
-- Never write disclaimers, "not specified", "evidence does not show", or any note about what is unknown. If something is unknown, leave it out.
-- Round volatile figures only in the writer, not here: copy ledger values exactly.
-
-WHAT TO PLAN:
-- Extract as many genuinely useful supported beats as the packet provides. Do not compress a rich source packet into two facts; article descriptions and excerpts are the richest source of setup, premise and detail.
-- headline_hook: the concrete current-week development.
-- setup: only context a casual viewer needs to follow the hook.
-- familiarity: the recognition cue for a non-obvious central person/company, only when a verified person_credit ledger claim supports it.
-- interesting_details: premise, numbers, contrasts, production or reaction details that make the item a small story.
-- why_it_matters: a concrete consequence stated in the evidence that is DIFFERENT from the hook (who it affects and how). If there is none, return an empty list; never restate the hook or write generic importance.
-- optional_spice: only safe_to_narrate angles that map to verified ledger claims.
-- depth: lead for the week's biggest story, quick when evidence is thin. Never invent filler to reach a length.
-- Merge several story ids into one planned item only when they clearly describe the same film/event; keep every id in "id".
-- COVERAGE IS MANDATORY: every selected story id in approved_sections must appear exactly once in the plan (alone or inside one merged id joined by +). Never silently drop a thin story; mark it quick and use only its verified hook if evidence is limited.
-- SOURCE DATE IS NOT EVENT DATE: a current article can mention an older figure; never plan it as the current value. Use the latest reliable in-window value for "now/has reached" notes; never plan "approaching" when a later source shows the milestone was crossed.
-- Keep rumors marked as rumor and social reaction tied to its platform and scale.
+HARD RULES:
+- Every claim id must exist in verified_claim_ledger and belong to that story id.
+- Never include a blocked claim.
+- Every selected story id in approved_sections must appear exactly once in the plan, alone or inside one merged id.
+- hook_claim_ids MUST contain at least one claim_role=current_hook for each selected story.
+- Prefer a quick item when only the hook plus one support claim exists. Do not invent filler.
+- Use familiarity_claim_ids only for verified person/company recognition context.
+- Use spice_claim_ids only when the same fact is represented by a verified ledger claim.
+- bridge_relation is semantic only; never write a suggested transition sentence.
+- Keep the exact evidence scope by selecting the right claim IDs. The writer will read the ledger fields directly.
+- Current hook first, then only the strongest useful support. Rich stories may use more claims; thin stories stay short.
+- Source date is not event date. Do not choose an older cumulative value for a current-value beat when the ledger has a newer one.
 """
 
 
@@ -884,7 +923,7 @@ WRITER_SYSTEM = """You are the narration writer for a weekly cinema-news YouTube
 
 INPUTS
 1. APPROVED CURRENT-WEEK NEWS with its VERIFIED CLAIM LEDGER: the ONLY factual authority for this episode.
-2. CONTENT PLAN: terse English fact notes tagged with ledger ids. It is raw material. Retell it in your own spoken words; never translate the notes line by line.
+2. CONTENT PLAN: only ledger claim IDs and structural relationships. It deliberately contains NO prose to translate. Read the selected claim IDs from the ledger, then compose Persian from scratch in the host's spoken style.
 3. FORMAT BLUEPRINT: what each section is for.
 4. STYLE BLUEPRINT and STYLE CORPUS: how the host talks. Voice and flow only, never facts.
 
