@@ -13,6 +13,39 @@ const providerOptions = [
   ['anthropic','Anthropic API'],
 ];
 
+const modelOptions = {
+  codex_local: [
+    ['default','Portable default — GPT-5.6 Terra'],
+    ['gpt-6-astra','GPT-6 Astra'],
+    ['gpt-5.6-sol','GPT-5.6 Sol'],
+    ['gpt-5.6-terra','GPT-5.6 Terra'],
+    ['gpt-5.6-luna','GPT-5.6 Luna'],
+  ],
+  claude_local: [
+    ['default','Claude Code account default'],
+    ['sonnet','Claude Sonnet'],
+    ['opus','Claude Opus'],
+  ],
+  openai: [
+    ['gpt-6-astra','GPT-6 Astra — Most capable'],
+    ['gpt-5.6-sol','GPT-5.6 Sol — High quality'],
+    ['gpt-5.6-terra','GPT-5.6 Terra — Balanced'],
+    ['gpt-5.6-luna','GPT-5.6 Luna — Lowest cost'],
+  ],
+  anthropic: [
+    ['claude-fable-5','Claude Fable 5 — Most capable'],
+    ['claude-opus-5','Claude Opus 5 — Advanced'],
+    ['claude-sonnet-5','Claude Sonnet 5 — Balanced'],
+    ['claude-haiku-4-5','Claude Haiku 4.5 — Fast'],
+  ],
+};
+
+const providerModelPairs = [
+  ['#sResearchProvider','#sResearchModel'],
+  ['#sWriterProvider','#sWriterModel'],
+  ['#sReviewerProvider','#sReviewerModel'],
+];
+
 async function api(path, options={}){
   const res = await fetch(path, options);
   const ct = res.headers.get('content-type') || '';
@@ -60,7 +93,37 @@ function bind(){
     if(input){await setMediaSelected(input.dataset.mediaSelect,input.checked)}
   });
 }
-function fillProviderSelects(){const html=providerOptions.map(([v,l])=>`<option value="${v}">${l}</option>`).join('');['#sResearchProvider','#sWriterProvider','#sReviewerProvider'].forEach(id=>$(id).innerHTML=html)}
+function fillModelSelect(providerSelector,modelSelector,preferredModel=null){
+  const provider=$(providerSelector),model=$(modelSelector);
+  if(!provider||!model)return;
+  const options=modelOptions[provider.value]||[];
+  const preferred=String(preferredModel??'').trim();
+  model.innerHTML=options.map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
+  if(preferred&&options.some(([v])=>v===preferred))model.value=preferred;
+  else if(preferred){
+    const custom=document.createElement('option');
+    custom.value=preferred;
+    custom.textContent=`Saved/custom — ${preferred}`;
+    model.appendChild(custom);
+    model.value=preferred;
+  }else if(options.length)model.value=options[0][0];
+}
+function applyProviderModel(providerSelector,modelSelector,providerValue,modelValue){
+  const provider=$(providerSelector);
+  if(!provider)return;
+  provider.value=providerOptions.some(([v])=>v===providerValue)?providerValue:'codex_local';
+  fillModelSelect(providerSelector,modelSelector,modelValue||'default');
+}
+function fillProviderSelects(){
+  const html=providerOptions.map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
+  providerModelPairs.forEach(([providerSelector,modelSelector])=>{
+    const provider=$(providerSelector);
+    if(!provider)return;
+    provider.innerHTML=html;
+    provider.onchange=()=>fillModelSelect(providerSelector,modelSelector);
+    fillModelSelect(providerSelector,modelSelector);
+  });
+}
 
 async function refreshProjects(prefer=null){state.projects=await api('/api/projects');$('#projectSelect').innerHTML=state.projects.length?state.projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join(''):'<option>No projects yet</option>';if(!state.projects.length){state.project=null;$('#empty').classList.remove('hidden');$('#workspace').classList.add('hidden');return}const id=prefer||state.project?.id||state.projects[0].id;$('#projectSelect').value=id;await loadProject(id)}
 async function loadProject(id){state.project=await api(`/api/projects/${id}`);state.stories=await api(`/api/projects/${id}/stories`);$('#empty').classList.add('hidden');$('#workspace').classList.remove('hidden');$('#openFolderBtn').disabled=false;$('#editProjectBtn').disabled=false;renderProject();renderPipeline();await renderStage()}
@@ -135,15 +198,9 @@ async function refreshSettings(){try{state.settings=await api('/api/settings')}c
 async function openSettings(){
   await refreshSettings();
   const a=state.settings.ai||{};
-  if(window.YTNewsModels){
-    window.YTNewsModels.apply('sResearchProvider','sResearchModel',a.research_provider||'codex_local',a.research_model||'default');
-    window.YTNewsModels.apply('sWriterProvider','sWriterModel',a.writer_provider||'codex_local',a.writer_model||'default');
-    window.YTNewsModels.apply('sReviewerProvider','sReviewerModel',a.reviewer_provider||'claude_local',a.reviewer_model||'default');
-  }else{
-    $('#sResearchProvider').value=a.research_provider||'codex_local';$('#sResearchModel').value=a.research_model||'default';
-    $('#sWriterProvider').value=a.writer_provider||'codex_local';$('#sWriterModel').value=a.writer_model||'default';
-    $('#sReviewerProvider').value=a.reviewer_provider||'claude_local';$('#sReviewerModel').value=a.reviewer_model||'default';
-  }
+  applyProviderModel('#sResearchProvider','#sResearchModel',a.research_provider||'codex_local',a.research_model||'default');
+  applyProviderModel('#sWriterProvider','#sWriterModel',a.writer_provider||'codex_local',a.writer_model||'default');
+  applyProviderModel('#sReviewerProvider','#sReviewerModel',a.reviewer_provider||'claude_local',a.reviewer_model||'default');
   renderProviderStatus(state.settings.local_providers||{});
   $('#settingsDialog').showModal();
 }
