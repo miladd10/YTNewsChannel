@@ -643,3 +643,47 @@ def test_prose_ledger_is_compact_and_hides_field_labels():
     row = rows[0]
     assert set(row) <= {"id", "story_id", "role", "fact", "value", "scope", "say_lightly_attributed", "conflict_note"}
     assert row["scope"] == "domestic, opening weekend, reported estimate" and row["say_lightly_attributed"]
+
+
+def test_audit_does_not_block_natural_sentences_for_missing_ledger_fields():
+    from app.services.claim_ledger import _validate_spoken_claim
+    ledger = {
+        "T": {"id": "T", "story_id": "s", "claim_type": "title_identity", "canonical_text": "The film was previously titled Old Name.", "verification_status": "verified"},
+        "R": {"id": "R", "story_id": "s", "claim_type": "release", "canonical_text": "It premieres on a streamer in early 2027.", "verification_status": "verified"},
+        "O": {"id": "O", "story_id": "s", "claim_type": "award", "canonical_text": "It received a ten-minute standing ovation.", "verification_status": "verified"},
+    }
+    base = {"story_id": "s", "semantic_match": "equivalent"}
+    assert _validate_spoken_claim({**base, "sentence": "اسم قبلیش یه چیز دیگه بود.", "claim_type": "title_identity", "title_identity": "renamed", "ledger_claim_ids": ["T"]}, ledger)["status"] == "verified"
+    assert _validate_spoken_claim({**base, "sentence": "اوایل ۲۰۲۷ پخش میشه.", "claim_type": "release", "release_scope": "streaming", "ledger_claim_ids": ["R"]}, ledger)["status"] == "verified"
+    assert _validate_spoken_claim({**base, "sentence": "ده دقیقه ایستاده تشویقش کردن.", "claim_type": "award", "numeric_value": 10, "ledger_claim_ids": ["O"]}, ledger)["status"] == "verified"
+
+
+def test_audit_checks_attribution_on_the_whole_sentence(monkeypatch):
+    from app.services import claim_ledger as cl
+    ledger = [{"id": "W", "story_id": "s", "claim_type": "box_office", "canonical_text": "Worldwide weekend gross was an estimated $86 million.",
+               "numeric_value": 86, "unit": "million", "currency": "USD", "market": "worldwide", "period_type": "weekend",
+               "attribution_required": True, "verification_status": "verified_with_attribution"}]
+    draft = "<!-- STORY:s -->\nگفته میشه فروش جهانیش تو همین آخر هفته ۸۶ میلیون دلار شد."
+    extracted = {"claims": [{"story_id": "s", "sentence": "فروش جهانیش تو همین آخر هفته ۸۶ میلیون دلار شد", "claim_type": "box_office",
+                             "numeric_value": 86, "unit": "million", "currency": "USD", "market": "worldwide", "period_type": "weekend",
+                             "ledger_claim_ids": ["W"], "semantic_match": "exact"}]}
+    monkeypatch.setattr(cl, "generate_text", lambda *a: (json.dumps(extracted), "p", "m"))
+    audit, _, _ = cl.audit_narration_claims(draft, ledger, "p", "m")
+    assert audit["status"] == "pass", audit
+
+
+def test_checks_apply_only_to_fields_the_ledger_defines():
+    from app.services.claim_ledger import _validate_spoken_claim
+    ledger = {
+        "M": {"id": "M", "story_id": "s", "claim_type": "box_office", "canonical_text": "Studio Y is the first studio of the year to pass $5 billion worldwide.",
+              "numeric_value": 5, "unit": "billion", "currency": "USD", "market": "worldwide", "verification_status": "verified"},
+        "R": {"id": "R", "story_id": "s", "claim_type": "ranking", "rank": 1, "chart_type": "weekend", "market": "domestic",
+              "title_identity": "re_release", "canonical_text": "Film Z, a re-release, ranked #1 on the domestic weekend chart.", "verification_status": "verified"},
+    }
+    base = {"story_id": "s", "semantic_match": "equivalent"}
+    milestone = _validate_spoken_claim({**base, "sentence": "یونیورسال اولین استودیوی امسال بود که از ۵ میلیارد دلار رد شد.",
+                                        "claim_type": "ranking", "ledger_claim_ids": ["M"]}, ledger)
+    assert "Ranking extraction" not in milestone["issue"]
+    identity = _validate_spoken_claim({**base, "sentence": "این فیلم که دوباره اکران شده اول شد.", "claim_type": "title_identity",
+                                       "title_identity": "دوباره اکران", "ledger_claim_ids": ["R"]}, ledger)
+    assert identity["status"] == "verified", identity["issue"]

@@ -561,7 +561,7 @@ _SCOPE_CANON = {
         ("daily", r"daily|\bday\b|روزانه"),
     ),
     "release_scope": (
-        ("re_release", r"re[\s-]?release|re[\s-]?issue|remaster|anniversary|بازاکران|اکران\s+مجدد"),
+        ("re_release", r"re[\s-]?release|re[\s-]?issue|remaster|anniversary|encore|بازاکران|اکران\s+مجدد|دوباره\s*[‌ ]?اکران|اکران\s*[‌ ]?دوباره"),
         ("limited_theatrical", r"limited|select|special|event|festival|imax|محدود|انتخابی|ویژه"),
         ("wide_theatrical", r"wide|nationwide|general|سراسری|عمومی"),
         ("streaming", r"stream|svod|platform|استریم"),
@@ -580,7 +580,7 @@ _SCOPE_CANON = {
         ("revenue", r"revenue|sales|درآمد"),
     ),
     "title_identity": (
-        ("re_release", r"re[\s-]?release|re[\s-]?issue|remaster|anniversary|بازاکران|اکران\s+مجدد"),
+        ("re_release", r"re[\s-]?release|re[\s-]?issue|remaster|anniversary|encore|بازاکران|اکران\s+مجدد|دوباره\s*[‌ ]?اکران|اکران\s*[‌ ]?دوباره"),
         ("extended_cut", r"extended|director'?s\s+cut|new\s+cut|نسخه\s+کامل"),
         ("sequel", r"sequel|دنباله"),
         ("prequel", r"prequel|پیش\s*[‌ ]?درآمد"),
@@ -633,7 +633,7 @@ def _attribution_present(sentence: str, claim: dict, extractor_value: bool) -> b
     # attributed sentence because of that secondary classifier bit.
     return bool(re.search(
         r"(طبق|بر\s+اساس|گزارش|به\s+گفته|گفته|می[\u200c ]?گ(?:ه|ن|ید)|اعلام|according|reported|reports?|says?|"
-        r"estimat(?:e|ed)|حدود|تقریباً|برآورد)",
+        r"estimat(?:e|ed)|حدود|تقریباً|تقریبا|نزدیک|ظاهراً|ظاهرا|برآورد)",
         _clean(sentence).casefold(), flags=re.IGNORECASE,
     ))
 
@@ -685,10 +685,22 @@ def _validate_spoken_claim(raw: dict, ledger_by_id: dict[str, dict]) -> dict:
     if any(claim.get("verification_status") == "blocked" for claim in matched):
         reasons.append("Mapped ledger claim is blocked.")
     numeric_value = _float(raw.get("numeric_value"))
-    if numeric_value is not None and matched and not any(_number_supported(raw, claim) for claim in matched):
-        reasons.append("Numeric value/unit does not match the supporting ledger claim.")
     claim_type = _clean(raw.get("claim_type")).lower() or "other"
-    if matched and claim_type == "ranking":
+    # A count or duration in ordinary context («ده دقیقه تشویق»، «چهار صحنه»)
+    # has no structured figure in the ledger; only money, rankings and
+    # box-office numbers (or ledger claims that carry a figure) are compared.
+    numbers_matter = claim_type in FINANCIAL_CLAIM_TYPES | {"ranking"} or any(
+        _float(claim.get("numeric_value")) is not None
+        or re.search(r"[0-9۰-۹]", _clean(claim.get("canonical_text")))
+        for claim in matched
+    )
+    if numeric_value is not None and matched and numbers_matter and not any(_number_supported(raw, claim) for claim in matched):
+        reasons.append("Numeric value/unit does not match the supporting ledger claim.")
+    # Validate a ranking only against ledger claims that define one; a
+    # "first studio to pass $X" milestone is not a chart position.
+    if matched and claim_type == "ranking" and any(
+        claim.get("claim_type") == "ranking" or claim.get("rank") not in (None, "") for claim in matched
+    ):
         rank_value = _int(raw.get("rank"))
         chart_value = _clean(raw.get("chart_type"))
         market_value = _clean(raw.get("market"))
@@ -721,37 +733,49 @@ def _validate_spoken_claim(raw: dict, ledger_by_id: dict[str, dict]) -> dict:
             reasons.append("Box-office market/period scope does not match the ledger.")
     if matched and claim_type in {"budget", "revenue", "deal_value"}:
         metric_value = _clean(raw.get("metric"))
-        if not metric_value:
+        attributed_figure = any(
+            claim.get("attribution_required") and _attribution_present(sentence, claim, bool(raw.get("attribution_present")))
+            for claim in matched
+        )
+        if not metric_value and attributed_figure:
+            # An attributed figure («آسوشیتدپرس می‌گه ... ولی رقم‌ها فرق دارن»)
+            # already signals it is one outlet's valuation.
+            pass
+        elif not metric_value:
             reasons.append("Financial extraction is missing the metric/valuation definition.")
+        elif not any(_clean(claim.get("metric")) for claim in matched):
+            pass
         elif not any(claim.get("claim_type") == claim_type
                      and _field_equal(metric_value, claim.get("metric"), "metric") for claim in matched):
             reasons.append("Financial metric/valuation definition does not match the ledger.")
     if matched and claim_type == "release":
         release_value = _clean(raw.get("release_scope"))
         risky_release = any(
-            claim.get("claim_type") == "release"
-            and _canonical_scope("release_scope", claim.get("release_scope")) in RISKY_RELEASE_SCOPES
+            _canonical_scope("release_scope", claim.get("release_scope")) in RISKY_RELEASE_SCOPES
             for claim in matched
         )
         if not release_value and not risky_release:
             pass  # the sentence does not characterize the release; nothing to contradict
         elif not release_value:
             reasons.append("Release extraction is missing release scope for a limited/special/re-release fact.")
-        elif not any(claim.get("claim_type") == "release"
+        elif not any(_clean(claim.get("release_scope")) for claim in matched):
+            pass  # the ledger does not characterize the release either
+        elif not any(_clean(claim.get("release_scope"))
                      and _field_equal(release_value, claim.get("release_scope"), "release_scope") for claim in matched):
             reasons.append("Release scope does not match the ledger.")
     if matched and claim_type == "title_identity":
         identity_value = _clean(raw.get("title_identity"))
         risky_identity = any(
-            claim.get("claim_type") == "title_identity"
-            and _canonical_scope("title_identity", claim.get("title_identity")) in RISKY_TITLE_IDENTITIES
+            _canonical_scope("title_identity", claim.get("title_identity")) in RISKY_TITLE_IDENTITIES
             for claim in matched
         )
         if not identity_value and not risky_identity:
             pass
         elif not identity_value:
             reasons.append("Title-identity extraction is missing the identity type for a re-release/remake/reboot/cut.")
-        elif not any(claim.get("claim_type") == "title_identity"
+        elif not any(_clean(claim.get("title_identity")) for claim in matched):
+            pass  # the ledger does not characterize the title identity either
+        elif not any(_clean(claim.get("title_identity"))
                      and _field_equal(identity_value, claim.get("title_identity"), "title_identity") for claim in matched):
             reasons.append("Title identity does not match the ledger.")
     attribution_needed = any(claim.get("attribution_required") for claim in matched)
@@ -901,7 +925,21 @@ def audit_narration_claims(draft_text, ledger, provider, model):
             "claims": [], "system_issues": [f"Claim extraction failed: {exc}"],
         }, provider, model
     ledger_by_id = {str(claim.get("id")): claim for claim in ledger}
-    claims = [_validate_spoken_claim(item, ledger_by_id) for item in raw_claims if isinstance(item, dict)]
+    # The extractor often returns a clause («و فروش جهانیش ... نزدیک ۸۶ میلیون»)
+    # instead of the whole sentence, which hides an attribution marker said at
+    # the start of the sentence and breaks per-sentence coverage checks.
+    draft_sentences = _story_sentences(draft_text)
+
+    def _whole_sentence(item: dict) -> dict:
+        fragment = _plain_sentence(item.get("sentence") or "")
+        if not fragment:
+            return item
+        for candidate in draft_sentences:
+            if candidate["story_id"] == _clean(item.get("story_id")) and fragment in _plain_sentence(candidate["sentence"]):
+                return {**item, "sentence": candidate["sentence"]}
+        return item
+
+    claims = [_validate_spoken_claim(_whole_sentence(item), ledger_by_id) for item in raw_claims if isinstance(item, dict)]
     risky = high_risk_sentences(draft_text)
     uncovered = [item for item in risky if not _covered_by_extraction(item, claims)]
     system_issues = [
