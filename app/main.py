@@ -1614,14 +1614,19 @@ def _narration_story_packet(stories: list[dict]) -> list[dict]:
         for story in stories:
             if story.get("category") != section["key"]:
                 continue
+            # The angle TEXT is the fun fact the user saw in Step 3. It used
+            # to be stripped here (only the type reached the writer), so
+            # "Add Fun Facts" rarely changed the script.
             safe_spice = [
                 {
                     "type": angle.get("type"),
-                    "safe_to_narrate": bool(angle.get("safe_to_narrate")),
+                    "text": angle.get("text") or "",
+                    "how_to_use": angle.get("usage_note") or "",
                     "evidence_status": angle.get("evidence_status"),
+                    "safe_to_narrate": True,
                 }
                 for angle in (story.get("spice_angles") or [])
-                if angle.get("safe_to_narrate")
+                if angle.get("safe_to_narrate") and angle.get("text")
             ][:3]
             visuals = [
                 {
@@ -1640,7 +1645,7 @@ def _narration_story_packet(stories: list[dict]) -> list[dict]:
                 "news_hook": story.get("news_hook") or "",
                 "news_hook_date": story.get("news_hook_date") or "",
                 "familiarity_anchor": story.get("familiarity_anchor") or "",
-                "safe_spice_types": safe_spice,
+                "spice_angles": safe_spice,
                 "visual_context": visuals,
             })
         if items:
