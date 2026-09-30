@@ -614,26 +614,79 @@ def _contiguous_style_excerpt(text: str, allowance: int, offset_ratio: float = 0
     if len(text) <= allowance:
         return text
     start = int(max(0.0, min(1.0, offset_ratio)) * max(0, len(text) - allowance))
-    return text[start:start + allowance].strip()
+    if start > 0:
+        next_space = text.find(" ", start)
+        if 0 <= next_space < start + 80:
+            start = next_space + 1
+    end = min(len(text), start + allowance)
+    if end < len(text):
+        prev_space = text.rfind(" ", max(start, end - 80), end)
+        if prev_space > start:
+            end = prev_space
+    return text[start:end].strip()
+
+
+def _cue_style_excerpt(text: str, allowance: int) -> str:
+    """Find a high-signal weekly-news transition/quick-item stretch.
+
+    This is deliberately deterministic and wording-agnostic enough to work on
+    ASR transcripts. It favors passages around the host's recurring real-world
+    transitions instead of arbitrary character offsets.
+    """
+    normalized = _normalize_style_reference_text(text)
+    if not normalized or allowance <= 0:
+        return ""
+    cues = (
+        r"برای\s+خبر(?:ای|های)\s+بعدی",
+        r"بریم\s+سراغ",
+        r"تو(?:ی)?\s+همین\s+گیشه",
+        r"یه\s+(?:فیلم|سریال|خبر)\s+دیگه",
+        r"نکته\s+جالب",
+        r"جالبش\s+اینجاست",
+    )
+    positions = []
+    for cue in cues:
+        match = re.search(cue, normalized, flags=re.IGNORECASE)
+        if match:
+            positions.append(match.start())
+    if not positions:
+        return _contiguous_style_excerpt(normalized, allowance, 0.42)
+    center = positions[min(1, len(positions) - 1)]
+    start = max(0, center - allowance // 4)
+    if start > 0:
+        next_space = normalized.find(" ", start)
+        if next_space >= 0:
+            start = next_space + 1
+    end = min(len(normalized), start + allowance)
+    if end < len(normalized):
+        prev_space = normalized.rfind(" ", max(start, end - 80), end)
+        if prev_space > start:
+            end = prev_space
+    return normalized[start:end].strip()
 
 
 def style_corpus_hash(transcripts: Iterable[dict]) -> str:
     enabled = [dict(item) for item in transcripts if int(item.get("enabled", 1) or 0)]
-    payload = [
-        {
-            "id": str(item.get("id") or ""),
-            "name": str(item.get("name") or ""),
-            "content": str(item.get("content") or ""),
-            "updated_at": str(item.get("updated_at") or ""),
-        }
-        for item in enabled
-        if str(item.get("content") or "").strip()
-    ]
+    payload = {
+        "style_profile_schema_version": STYLE_PROFILE_SCHEMA_VERSION,
+        "transcripts": [
+            {
+                "id": str(item.get("id") or ""),
+                "name": str(item.get("name") or ""),
+                "content": str(item.get("content") or ""),
+                "updated_at": str(item.get("updated_at") or ""),
+                "reference_kind": style_reference_kind(item),
+            }
+            for item in enabled
+            if str(item.get("content") or "").strip()
+        ],
+    }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 GARBLED_UNIQUE_WORD_SHARE = 0.25
+STYLE_PROFILE_SCHEMA_VERSION = 3
 _REFERENCE_DATE_RE = re.compile(r"(?<!\d)((?:19|20)\d{2})-(\d{2})-(\d{2})(?!\d)")
 
 
@@ -789,8 +842,7 @@ def build_writer_style_packet(
         first_budget = max(1600, int(each * 0.55))
         later_budget = max(1400, each - first_budget)
         opening = _contiguous_style_excerpt(text, first_budget, 0.0)
-        later_offset = (0.30, 0.48, 0.62, 0.76)[index % 4]
-        later = _contiguous_style_excerpt(text, later_budget, later_offset)
+        later = _cue_style_excerpt(text, later_budget)
         chunks.extend([
             f'<weekly_flow_reference name={json.dumps(item.get("name") or "Transcript")}>',
             opening,
