@@ -255,6 +255,7 @@
 .claim-check-row.blocked,.claim-ledger-row.blocked{border-color:#713d44;background:#1b1114}
 .claim-check-row.verified,.claim-ledger-row.verified{border-color:#315c46}
 .claim-check-row.verified_with_attribution,.claim-ledger-row.verified_with_attribution{border-color:#66562e}
+.claim-check-row.needs_review{border-color:#66562e;border-style:dashed}
 .claim-check-row>div,.claim-ledger-row>div{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .claim-check-row strong,.claim-ledger-row strong{font-size:9px;line-height:1.45}
 .claim-check-row small,.claim-ledger-row small{display:block;margin-top:5px;color:#9aa6b6;font-size:8px;line-height:1.45}

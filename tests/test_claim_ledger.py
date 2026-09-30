@@ -607,3 +607,25 @@ def test_claim_role_current_hook_is_preserved_for_writer():
     }], [story], {}, require_evidence_quote=True)[0]
     assert claim["claim_role"] == "current_hook"
     assert claim["verification_status"] == "verified"
+
+
+def test_low_risk_unmatched_context_is_flagged_not_blocked():
+    ledger = {"C1": {"id": "C1", "story_id": "s1", "claim_type": "cast", "verification_status": "verified"}}
+    soft = claim_ledger._validate_spoken_claim({
+        "story_id": "s1", "sentence": "کارگردان فیلم هم همون کسیه که قبلاً با این استودیو کار کرده.",
+        "claim_type": "person_credit", "semantic_match": "unsupported", "ledger_claim_ids": [],
+    }, ledger)
+    assert soft["status"] == "needs_review"
+
+
+def test_risky_unmatched_claims_still_block():
+    ledger = {"C1": {"id": "C1", "story_id": "s1", "claim_type": "cast", "verification_status": "verified"}}
+    for raw in (
+        {"claim_type": "box_office", "sentence": "فیلم ۲۶ میلیون دلار فروخت."},
+        {"claim_type": "release", "sentence": "فیلم اکران محدود شد.", "release_scope": "limited_theatrical"},
+        {"claim_type": "other", "sentence": "قرارداد ۲ میلیارد دلاری امضا شد."},
+        {"claim_type": "company", "sentence": "The deal is worth 2 billion.", "numeric_value": 2},
+    ):
+        result = claim_ledger._validate_spoken_claim(
+            {"story_id": "s1", "semantic_match": "unsupported", "ledger_claim_ids": [], **raw}, ledger)
+        assert result["status"] == "blocked", raw

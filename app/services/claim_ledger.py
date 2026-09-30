@@ -602,6 +602,25 @@ def _period_compatible(spoken: dict, ledger: dict) -> bool:
     return all(start and end for start, end in dates) and dates[0] == dates[1]
 
 
+LOW_RISK_CLAIM_TYPES = {"cast", "person_credit", "production", "company", "other"}
+_SOFT_REASONS = {
+    "Narration claim is not an exact/equivalent ledger match.",
+    "No verified ledger claim supports this narration claim.",
+}
+
+
+def _is_low_risk_unmatched(raw: dict, sentence: str, claim_type: str, reasons: list[str]) -> bool:
+    if claim_type not in LOW_RISK_CLAIM_TYPES:
+        return False
+    if any(reason not in _SOFT_REASONS for reason in reasons):
+        return False  # blocked ledger claim, wrong number, missing attribution...
+    if _float(raw.get("numeric_value")) is not None or HIGH_RISK_RE.search(sentence or ""):
+        return False
+    if _clean(raw.get("release_scope")) or _clean(raw.get("title_identity")) or _clean(raw.get("rank")):
+        return False
+    return True
+
+
 def _validate_spoken_claim(raw: dict, ledger_by_id: dict[str, dict]) -> dict:
     ids = [str(value) for value in raw.get("ledger_claim_ids") or [] if str(value) in ledger_by_id]
     sentence = _clean(raw.get("sentence"))
@@ -692,6 +711,15 @@ def _validate_spoken_claim(raw: dict, ledger_by_id: dict[str, dict]) -> dict:
     ):
         reasons.append("Claim requires explicit attribution/estimate framing.")
     status = "blocked" if reasons else ("verified_with_attribution" if attribution_needed else "verified")
+    # The ledger is an AI summary of a few excerpts, so ordinary low-risk
+    # context (a cast member, a director credit, "the project moved forward")
+    # often has no exact ledger twin. Blocking those sentences made repairs
+    # delete them and left short, bland scripts. Only claims whose error would
+    # be a real misstatement (numbers, money, rankings, dates, release scope,
+    # title identity, quotes, awards) stay hard-blocked; unmatched low-risk
+    # claims are flagged for the reviewer and the fresh-source fact check.
+    if status == "blocked" and _is_low_risk_unmatched(raw, sentence, claim_type, reasons):
+        status = "needs_review"
     return {
         "id": str(uuid.uuid4()), "story_id": story_id, "sentence": sentence,
         "claim_type": claim_type if claim_type in CLAIM_TYPES else "other",
@@ -853,10 +881,12 @@ def audit_narration_claims(draft_text, ledger, provider, model):
 
     verified = sum(1 for claim in claims if claim["status"] == "verified")
     attributed = sum(1 for claim in claims if claim["status"] == "verified_with_attribution")
+    needs_review = sum(1 for claim in claims if claim["status"] == "needs_review")
     blocked = sum(1 for claim in claims if claim["status"] == "blocked") + len(uncovered) + len(uncovered_amounts)
     return {
         "status": "pass" if blocked == 0 else "blocked", "claim_count": len(claims),
         "verified_count": verified, "attributed_count": attributed, "blocked_count": blocked,
+        "needs_review_count": needs_review,
         "uncovered_high_risk_count": len(uncovered),
         "uncovered_financial_amount_count": len(uncovered_amounts),
         "claims": claims,

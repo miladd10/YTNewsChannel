@@ -108,22 +108,24 @@ function claimAuditHtml(draft,workspace){
   const blocked=checks.filter(x=>x.status==='blocked');
   const verified=checks.filter(x=>x.status==='verified');
   const attributed=checks.filter(x=>x.status==='verified_with_attribution');
+  const review=checks.filter(x=>x.status==='needs_review');
   const blockedLedger=ledger.filter(x=>x.verification_status==='blocked');
   const ledgerVerified=ledger.filter(x=>x.verification_status==='verified');
   const ledgerAttributed=ledger.filter(x=>x.verification_status==='verified_with_attribution');
   const tone=pass?'pass':'needs-work';
-  const rows=[...blocked,...attributed,...verified];
+  const rows=[...blocked,...review,...attributed,...verified];
   return `<section class="claim-audit-panel ${tone}">
     <div class="claim-audit-head">
       <div><div class="eyebrow">ATOMIC CLAIM LEDGER</div><h3>${pass?'All narration claims verified':status==='not_run'?'Claim audit not run':'Claim audit blocked'}</h3></div>
       <button id="runClaimAuditBtn" class="btn secondary">${status==='not_run'?'Run Claim Audit':'Re-run Claim Audit'}</button>
     </div>
-    <p>Every checkable statement is mapped to source-backed atomic claims. Numbers, rankings, budgets, revenue, deal values, dates, release scope and title identity must preserve the ledger's exact meaning.</p>
+    <p>Every checkable statement is mapped to source-backed atomic claims. Numbers, rankings, budgets, revenue, deal values, dates, release scope, title identity, quotes and awards must match the ledger exactly or they block. Low-risk context with no exact ledger twin is listed as “to eyeball” instead of blocking.</p>
     <div class="claim-audit-metrics">
       <span class="signal ${pass?'high':'low'}">Narration ${Number(draft.claim_count||checks.length)} claims</span>
       <span class="signal high">${Number(draft.claim_verified_count||verified.length)} verified</span>
       <span class="signal medium">${Number(draft.claim_attributed_count||attributed.length)} attributed</span>
       <span class="signal ${Number(draft.claim_blocked_count||blocked.length)?'low':'high'}">${Number(draft.claim_blocked_count||blocked.length)} blocked</span>
+      ${review.length?`<span class="signal medium" title="Low-risk sentences with no exact ledger match. Not blocking; check them while reading.">${review.length} to eyeball</span>`:''}
       <span class="signal">Ledger ${ledger.length}: ${ledgerVerified.length} verified · ${ledgerAttributed.length} attributed · ${blockedLedger.length} blocked</span>
     </div>
     ${claimSystemIssuesHtml(draft)}

@@ -1199,6 +1199,7 @@ WHAT YOU RECEIVE
 HOW TO JUDGE FACTS
 - automatic_fact_check is the fresh-evidence fact check. If its status is needs_human_check, every issue it lists that is still present in the draft is a blocking issue.
 - The claim audit is the fact gate. Blocked audit claims are blocking, but DO NOT spend one reviewer issue per claim. Summarize all blocked claim sentences in ONE factual issue when possible; the revision writer receives the full claim-audit list directly and must fix every blocked claim.
+- Audit claims with status needs_review are low-risk context (cast, credit, production or company detail) that has no exact ledger twin. They are NOT blocking. Raise one only if the packet or a source contradicts it or it reads like an invented detail; otherwise leave it alone. Do not ask the writer to delete a correct, natural sentence just because it is not a ledger quote.
 - Beyond the audit, raise a factual issue only when you can point to the exact draft sentence and the exact ledger claim or source that contradicts it: wrong scope (opening vs cumulative, weekend vs weekly, domestic vs worldwide, estimate vs final, limited vs wide release), an older figure presented as current, a milestone called "approaching" after it was crossed, a background fact presented as this week's news, a fact under the wrong STORY marker, or a story that does not narrate its news_hook.
 - Never ask the writer to add a fact that is not a verified ledger claim or a safe_to_narrate spice angle; name the ledger id or angle you want used.
 
