@@ -9,6 +9,7 @@ from app.services.cinema_format import (
     format_packet,
     parse_review_gate,
     research_query_groups,
+    spoken_lint,
 )
 from app.services.research import (
     _apply_story_quality_gates,
@@ -571,3 +572,20 @@ def test_reviewer_prompt_defines_severity_and_audit_status():
     assert "Minor issues never fail an audit" in REVIEWER_SYSTEM
     assert "At most 8 issues" in REVIEWER_SYSTEM and "# Keep" in REVIEWER_SYSTEM
     assert '"# Keep"' in REVISION_SYSTEM
+
+
+
+def test_spoken_lint_flags_translationese_phrasing():
+    findings = spoken_lint(
+        "نتفلیکس چند عنوان تازه رو جلو آورد. "
+        "این فیلم وارد رادار شد. "
+        "فروش تجمعی جهانی فیلم بالا رفت."
+    )
+    rules = {item["rule"] for item in findings}
+    assert "translationese" in rules
+
+
+def test_writer_rules_prefer_natural_persian_over_ledger_labels():
+    assert "NATURAL PERSIAN OVER LITERAL TRANSLATION" in WRITER_SYSTEM
+    assert "فروش تجمعی جهانی" in WRITER_SYSTEM
+    assert "THIN STORY RULE" in WRITER_SYSTEM
