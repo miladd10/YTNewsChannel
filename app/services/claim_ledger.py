@@ -66,6 +66,8 @@ HARD RULES:
 - production budget does not match marketing spend.
 - company revenue does not match box-office gross.
 - If no ledger claim supports the exact meaning, use semantic_match=unsupported and no ledger IDs.
+- The narration is colloquial spoken Persian. Everyday scope words are real scope: «این آخر هفته» = the weekend in the ledger claim, «تو آمریکا» = domestic, «تو کل دنیا»/«جهانی» = worldwide, «تا الان» = cumulative to date, «افتتاحیه» = opening, «دوباره اکران» = re-release. When the sentence's wording is consistent with a ledger claim, fill rank/chart_type/market/period_type/date_start/date_end/release_scope/title_identity from that claim and mark it exact or equivalent. Mark a mismatch only when the words actually contradict the ledger scope (weekend said as whole week, domestic said as worldwide, opening said as total so far, re-release said as new film).
+- An intro tease that only previews a story covered later in the body is not a separate claim; do not extract it.
 """
 
 # Whole-word matching. Persian terms may carry common attached suffixes

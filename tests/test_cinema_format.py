@@ -663,3 +663,19 @@ Mostly clean.
 - Recommendation: REVISION_REQUIRED
 """
     assert parse_review_gate(review)["gate_status"] == "polish_optional"
+
+
+def test_every_prose_prompt_starts_from_the_same_host_voice():
+    from app.services import cinema_format as cf
+    for prompt in (cf.WRITER_SYSTEM, cf.REVISION_SYSTEM, cf.ENRICHMENT_REWRITE_SYSTEM,
+                   cf.NARRATION_FLUENCY_POLISH_SYSTEM, cf.NARRATION_ASSEMBLY_REPAIR_SYSTEM):
+        assert cf.HOST_VOICE in prompt
+        # voice comes before the rule wall
+        assert prompt.index(cf.HOST_VOICE) < prompt.index(cf.ATTRIBUTION_POLICY) if cf.ATTRIBUTION_POLICY in prompt else True
+
+
+def test_prompts_never_prescribe_database_scope_wording():
+    from app.services import cinema_format as cf
+    for prompt in (cf.WRITER_SYSTEM, cf.FACT_CHECK_SYSTEM, cf.REVIEWER_SYSTEM):
+        assert "در جدول آخرهفتهٔ آمریکای شمالی ... رتبهٔ اول" not in prompt
+    assert "Ordinary spoken scope is enough" in cf.FACT_CHECK_SYSTEM
