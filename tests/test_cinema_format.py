@@ -453,10 +453,10 @@ def test_style_profile_targets_spoken_micro_arc_not_written_news():
 
 
 def test_content_plan_extracts_supported_story_beats_before_writing():
-    assert '"headline_hook"' in CONTENT_PLAN_SYSTEM
-    assert '"interesting_details"' in CONTENT_PLAN_SYSTEM
-    assert '"why_it_matters"' in CONTENT_PLAN_SYSTEM
-    assert "Do not compress a rich source packet into two facts" in CONTENT_PLAN_SYSTEM
+    assert '"hook_claim_ids"' in CONTENT_PLAN_SYSTEM
+    assert '"detail_claim_ids"' in CONTENT_PLAN_SYSTEM
+    assert '"ending_claim_ids"' in CONTENT_PLAN_SYSTEM
+    assert "claim_role=current_hook" in CONTENT_PLAN_SYSTEM
 
 
 def test_writer_rejects_headline_summary_style_and_english_headings():
@@ -546,11 +546,11 @@ def test_spoken_lint_flags_written_or_pipeline_speech_and_passes_clean_text():
     assert SPOKEN_QUALITY_RULES in WRITER_SYSTEM and SPOKEN_QUALITY_RULES in FACT_CHECK_SYSTEM
 
 
-def test_content_plan_asks_for_english_notes_with_ledger_ids():
+def test_content_plan_is_claim_id_only_to_avoid_translationese():
     from app.services.cinema_format import CONTENT_PLAN_SYSTEM
-    assert "terse ENGLISH fact note" in CONTENT_PLAN_SYSTEM
-    assert "[C002]" in CONTENT_PLAN_SYSTEM
-    assert "never restate the hook" in CONTENT_PLAN_SYSTEM
+    assert "MUST NOT write English or Persian prose" in CONTENT_PLAN_SYSTEM
+    assert '"hook_claim_ids"' in CONTENT_PLAN_SYSTEM
+    assert '"bridge_relation"' in CONTENT_PLAN_SYSTEM
 
 
 def _new_format_review(issues: str) -> str:
