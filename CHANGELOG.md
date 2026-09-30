@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.5 — Direct Filmbaz Style Authority
+
+Narration-style pipeline fixes based on the user's actual Filmbaz weekly-news transcripts and repeated review/revise drift:
+- Direct same-format transcripts are now the **primary** prose voice authority. The generated Style Blueprint is secondary; if its summary conflicts with the real transcript behavior, the writer follows the transcripts.
+- Weekly writing uses only the four closest earlier weekly-news references. Monthly preview/list videos are classified first and excluded from direct weekly-news prose examples even if they contain incidental weekly wording.
+- Direct references now provide a real episode opening plus a cue-centered passage around natural transitions such as «برای خبرای بعدی»، «بریم سراغ»، «تو همین گیشه»، «نکته جالب» and «جالبش اینجاست», rather than many arbitrary distributed snippets.
+- Style-profile cache hashes now include a schema version and reference format, so the older blueprint is automatically rebuilt after these style-system changes.
+- The automatic fact checker is audit-only: its whole corrected draft is never allowed to replace the writer's Persian. Factual issues are applied later by the style-aware targeted repair/revision path.
+- Assembly repair is now minimal factual/coverage repair; general wording is left to the dedicated final fluency pass, reducing repeated broad rewrites that reintroduced generic news prose.
+- Revision receives the complete persisted blocked-claim audit directly, so the reviewer can summarize repeated factual failures instead of forcing many review/revise cycles.
+- Reviewer is exhaustive in one pass (up to 12 distinct issues), while minor-only wording notes become optional polish instead of another mandatory revision loop. Ambiguous NEEDS_WORK output with no severity remains blocking.
+- Step 3's “used by writer/reviewer” labels now identify the exact direct weekly references actually sent to the prose model.
+
 ## v0.4.4 — Filmbaz Voice Match
 
 Writing-pipeline fixes based on the user's real Filmbaz weekly-news transcripts and a broken generated draft:
