@@ -5,11 +5,14 @@ from app.services.cinema_format import (
     REVIEWER_SYSTEM,
     STYLE_PROFILE_SYSTEM,
     WRITER_SYSTEM,
+    NARRATION_FLUENCY_POLISH_SYSTEM,
+
     build_style_packet,
     format_packet,
     parse_review_gate,
     research_query_groups,
     spoken_lint,
+    style_rows_for_content_type,
 )
 from app.services.research import (
     _apply_story_quality_gates,
@@ -589,3 +592,29 @@ def test_writer_rules_prefer_natural_persian_over_ledger_labels():
     assert "NATURAL PERSIAN OVER LITERAL TRANSLATION" in WRITER_SYSTEM
     assert "فروش تجمعی جهانی" in WRITER_SYSTEM
     assert "THIN STORY RULE" in WRITER_SYSTEM
+
+
+
+def test_weekly_writer_uses_weekly_news_references_not_monthly_preview_format():
+    rows = [
+        {"name": "2026-09-11 آخرین و جدید ترین اخبار سینمای جهان.txt", "content": "هر هفته میریم یه نگاهی بندازیم به جدیدترین اتفاقاتی که توی سینما افتادن", "enabled": 1},
+        {"name": "2026-09-04 آخرین و جدید ترین اخبار سینمای جهان.txt", "content": "امروزم مثل هر هفته میریم سراغ خبرها", "enabled": 1},
+        {"name": "2026-08-28 آخرین و جدید ترین اخبار سینمای جهان.txt", "content": "این هفته توی سینما یه عالم اتفاق افتاد", "enabled": 1},
+        {"name": "2026-08-23 معرفی مورد انتظارترین فیلم ها و سریال‌های ماه.txt", "content": "امروز قراره فیلم‌هایی که ماه بعد میان رو معرفی کنیم", "enabled": 1},
+    ]
+    fitted = style_rows_for_content_type(rows, "weekly_news")
+    assert len(fitted) == 3
+    assert all("مورد انتظارترین" not in row["name"] for row in fitted)
+
+
+def test_content_plan_uses_claim_ids_instead_of_english_prose_notes():
+    assert '"hook_claim_ids"' in CONTENT_PLAN_SYSTEM
+    assert '"detail_claim_ids"' in CONTENT_PLAN_SYSTEM
+    assert "MUST NOT write English or Persian prose" in CONTENT_PLAN_SYSTEM
+    assert "terse ENGLISH fact note" not in CONTENT_PLAN_SYSTEM
+
+
+def test_fluency_polish_is_wording_only_and_style_corpus_driven():
+    assert "final spoken-Persian editor" in NARRATION_FLUENCY_POLISH_SYSTEM
+    assert "SAME-FORMAT weekly-news style references" in NARRATION_FLUENCY_POLISH_SYSTEM
+    assert "Do not expand merely to hit a duration target" in NARRATION_FLUENCY_POLISH_SYSTEM
