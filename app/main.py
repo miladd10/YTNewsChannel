@@ -51,6 +51,7 @@ from .services.cinema_format import (
     WRITER_SYSTEM,
     annotate_style_quality,
     build_style_packet,
+    build_writer_style_packet,
     format_packet,
     length_target,
     narration_structure_audit,
@@ -1885,35 +1886,15 @@ def _run_narration_fact_check(
                 status = "pass"
                 issue_count = 0
                 issues = []
-            elif status == "corrected" and corrected:
-                allowed_ids = {str(story.get("id") or "") for story in stories}
-                corrected_ids = set(re.findall(r"<!--\s*STORY:([^>\s]+)\s*-->", corrected))
-                invalid_ids = corrected_ids - allowed_ids
-                if invalid_ids:
-                    status = "needs_human_check"
-                    corrected = draft_text
-                    issues.append({
-                        "story_id": "",
-                        "claim": "STORY marker integrity",
-                        "problem": f"Fact-check rewrite introduced unknown STORY ids: {sorted(invalid_ids)}",
-                        "correction_basis": "Keep only STORY ids from the approved packet.",
-                    })
-                    issue_count = len(issues)
-                else:
-                    edit_problem = _fact_check_over_edit(draft_text, corrected, issue_count)
-                    if edit_problem:
-                        # Keep the writer's text: an over-broad rewrite undoes
-                        # voice and structure. The listed issues stay attached
-                        # (needs_human_check) so review and revision fix them.
-                        status = "needs_human_check"
-                        corrected = draft_text
-                        issues.append({
-                            "story_id": "",
-                            "claim": "Fact-check rewrite rejected",
-                            "problem": edit_problem,
-                            "correction_basis": "Fix only the issues listed above in revision; the original draft was kept.",
-                        })
-                        issue_count = len(issues)
+            elif status == "corrected":
+                # FACT CHECK IS AUDIT-ONLY. Earlier versions accepted a whole
+                # corrected_narration from the auditor. Even small factual
+                # fixes could therefore replace the writer's colloquial Persian
+                # with generic newsroom/translationese prose. Keep the draft,
+                # preserve the issue list, and let the style-aware repair pass
+                # apply only supported corrections.
+                corrected = draft_text
+                status = "needs_human_check"
             else:
                 corrected = draft_text
 
@@ -2722,7 +2703,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_style_packet(style_rows_for_window(style_rows, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=80000),
+        build_writer_style_packet(style_rows, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=52000),
     ])
     try:
         text, actual_provider, actual_model = generate_text(provider, model, WRITER_SYSTEM, user)
@@ -2759,7 +2740,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         audit_provider,
         audit_model,
         style_profile.get("profile_text") or "",
-        build_style_packet(style_rows_for_window(style_rows, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=30000),
+        build_writer_style_packet(style_rows, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=30000),
     )
     polished_text, polished_fact, polished_audit, polished_structure, fluency_polished, fluency_error = _polish_narration_fluency(
         project,
@@ -2772,9 +2753,11 @@ def generate_narration(project_id: str, body: GenerateBody):
         audit_provider,
         audit_model,
         style_profile.get("profile_text") or "",
-        build_style_packet(
-            style_rows_for_window(style_rows, project.get("date_start"), project.get("content_type") or "weekly_news"),
-            max_chars=60000,
+        build_writer_style_packet(
+            style_rows,
+            project.get("date_start"),
+            project.get("content_type") or "weekly_news",
+            max_chars=42000,
         ),
     )
     if fluency_polished:
@@ -3057,7 +3040,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_style_packet(style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=80000),
+        build_writer_style_packet(styles, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=52000),
         "",
         "<existing_first_draft>",
         draft["content"],
@@ -3103,7 +3086,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         audit_provider,
         audit_model,
         style_profile.get("profile_text") or "",
-        build_style_packet(style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=30000),
+        build_writer_style_packet(styles, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=30000),
     )
     polished_text, polished_fact, polished_audit, polished_structure, fluency_polished, fluency_error = _polish_narration_fluency(
         project,
@@ -3116,9 +3099,11 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         audit_provider,
         audit_model,
         style_profile.get("profile_text") or "",
-        build_style_packet(
-            style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"),
-            max_chars=60000,
+        build_writer_style_packet(
+            styles,
+            project.get("date_start"),
+            project.get("content_type") or "weekly_news",
+            max_chars=42000,
         ),
     )
     if fluency_polished:
@@ -3315,7 +3300,7 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_style_packet(style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=80000),
+        build_writer_style_packet(styles, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=52000),
         "",
         "<draft_to_review>",
         draft["content"],
@@ -3424,7 +3409,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_style_packet(style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=70000),
+        build_writer_style_packet(styles, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=52000),
         "",
         "<existing_narration>",
         draft["content"],
@@ -3469,7 +3454,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         audit_provider,
         audit_model,
         style_profile.get("profile_text") or "",
-        build_style_packet(style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=30000),
+        build_writer_style_packet(styles, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=30000),
     )
     polished_text, polished_fact, polished_audit, polished_structure, fluency_polished, fluency_error = _polish_narration_fluency(
         project,
@@ -3482,9 +3467,11 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         audit_provider,
         audit_model,
         style_profile.get("profile_text") or "",
-        build_style_packet(
-            style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"),
-            max_chars=60000,
+        build_writer_style_packet(
+            styles,
+            project.get("date_start"),
+            project.get("content_type") or "weekly_news",
+            max_chars=42000,
         ),
     )
     if fluency_polished:
