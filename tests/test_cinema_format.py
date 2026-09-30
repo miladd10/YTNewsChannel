@@ -679,3 +679,17 @@ def test_prompts_never_prescribe_database_scope_wording():
     for prompt in (cf.WRITER_SYSTEM, cf.FACT_CHECK_SYSTEM, cf.REVIEWER_SYSTEM):
         assert "در جدول آخرهفتهٔ آمریکای شمالی ... رتبهٔ اول" not in prompt
     assert "Ordinary spoken scope is enough" in cf.FACT_CHECK_SYSTEM
+
+
+def test_lint_flags_database_persian_and_headline_items():
+    from app.services.cinema_format import spoken_lint
+    draft = "\n".join(
+        f"<!-- STORY:s{i} -->\nفیلم {i} در جدول گیشه آخرهفته داخلی آمریکای شمالی اول شد." for i in range(4)
+    )
+    rules = {f["rule"] for f in spoken_lint(draft)}
+    assert {"written_or_database_persian", "headline_items"} <= rules
+    rich = "\n".join(
+        f"<!-- STORY:s{i} -->\nاین فیلم این آخر هفته تو آمریکا اول شد. یعنی از همه جلو زد دیگه. "
+        f"جالبش اینجاست که بودجه‌ش خیلی کم بوده. کارگردانش گفتش که انتظارشو نداشته." for i in range(4)
+    )
+    assert not {"written_or_database_persian", "headline_items"} & {f["rule"] for f in spoken_lint(rich)}

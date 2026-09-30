@@ -1388,6 +1388,23 @@ _TRANSLATIONESE_RE = re.compile(
 )
 
 
+_DATABASE_PHRASE_RE = re.compile(
+    r"(آمریکای\s+شمالی|بازاکران|[‌\s]تجمعی|جدول\s+گیشه(?:ٔ|ی)?\s+آخر[‌\s]?هفته|آخر[‌\s]?هفته(?:ٔ|ی)?\s+داخلی|"
+    r"گیشه(?:ٔ|ی)?\s+داخلی|به[‌\s]عنوان|همچنین|علاوه\s+بر\s+این|می[‌\s]باشد|قابل\s+توجه)",
+)
+
+
+def _headline_items(text: str) -> list[str]:
+    """STORY passages that are only one or two sentences long."""
+    short = []
+    for chunk in re.split(r"<!--\s*STORY:[^>]+-->", text or "")[1:]:
+        passage = re.split(r"(?m)^\s*#+\s", chunk)[0]
+        sentences = [x for x in re.split(r"[.!؟?]+", passage) if len(x.split()) >= 3]
+        if 0 < len(sentences) <= 2:
+            short.append(passage.strip())
+    return short
+
+
 def spoken_lint(text: str) -> list[dict]:
     """Deterministic checks for things that make a script sound written or
     machine-made. Findings are advisory: shown in Step 3 and given to the
@@ -1419,6 +1436,13 @@ def spoken_lint(text: str) -> list[dict]:
     translationese = [m.group(0) for m in _TRANSLATIONESE_RE.finditer(body)]
     if translationese:
         add("translationese", "Literal/AI-like Persian phrasing; keep the fact but rewrite with ordinary spoken Persian collocations.", translationese)
+    database = [m.group(0) for m in _DATABASE_PHRASE_RE.finditer(body)]
+    if database:
+        add("written_or_database_persian", "Written/database Persian the host never says; use everyday words («تو آمریکا»، «تا الان»، «دوباره اکران»).", database)
+    headlines = _headline_items(text)
+    stories = len(re.findall(r"<!--\s*STORY:", text or ""))
+    if stories >= 3 and len(headlines) * 2 > stories:
+        add("headline_items", f"{len(headlines)} of {stories} story passages are only one or two sentences; the host tells each item as a small story.", headlines)
     return findings
 
 
