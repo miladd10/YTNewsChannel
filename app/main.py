@@ -2030,19 +2030,54 @@ def _build_verified_claim_ledger(
     return ledger, fresh_sources, actual_provider, actual_model
 
 
-def _claim_audit_with_structure(claim_audit: dict, structure_audit: dict) -> dict:
+def _claim_audit_with_structure(
+    claim_audit: dict,
+    structure_audit: dict,
+    claim_ledger: list[dict] | None = None,
+    stories: list[dict] | None = None,
+) -> dict:
     audit = dict(claim_audit or {})
     audit["structure_audit"] = structure_audit
-    structure_issues = [
+    issues = [
         *(structure_audit.get("blocking_issues") or []),
         *(structure_audit.get("major_issues") or []),
     ]
-    if structure_issues:
+
+    # A STORY marker alone is not coverage. The narration must actually state
+    # the selected story's current-week hook. This prevents filler such as
+    # "Paper Tiger is another title this week" from satisfying the pipeline
+    # when the selected news was specifically "official trailer released".
+    if claim_ledger and stories:
+        hook_ids_by_story: dict[str, set[str]] = {}
+        for claim in claim_ledger:
+            if (
+                claim.get("claim_role") == "current_hook"
+                and claim.get("verification_status") in {"verified", "verified_with_attribution"}
+            ):
+                hook_ids_by_story.setdefault(str(claim.get("story_id") or ""), set()).add(str(claim.get("id") or ""))
+
+        spoken_ids_by_story: dict[str, set[str]] = {}
+        for claim in audit.get("claims") or []:
+            if claim.get("status") not in {"verified", "verified_with_attribution"}:
+                continue
+            sid = str(claim.get("story_id") or "")
+            spoken_ids_by_story.setdefault(sid, set()).update(
+                str(value) for value in (claim.get("ledger_claim_ids") or []) if value
+            )
+
+        for story in stories:
+            sid = str(story.get("id") or "")
+            hook_ids = hook_ids_by_story.get(sid, set())
+            if hook_ids and not (hook_ids & spoken_ids_by_story.get(sid, set())):
+                title = str(story.get("canonical_title") or sid)
+                issues.append(f"Selected story current-week hook is not narrated: {title}")
+
+    if issues:
         existing = list(audit.get("system_issues") or [])
-        existing.extend(f"Narration assembly: {issue}" for issue in structure_issues)
+        existing.extend(f"Narration assembly: {issue}" for issue in issues)
         audit["system_issues"] = existing
         audit["status"] = "blocked"
-        audit["blocked_count"] = int(audit.get("blocked_count") or 0) + len(structure_issues)
+        audit["blocked_count"] = int(audit.get("blocked_count") or 0) + len(issues)
     return audit
 
 
@@ -2071,6 +2106,7 @@ def _repair_narration_until_stable(
     repair_error = ""
     repairs = 0
     structure = narration_structure_audit(text, stories, project)
+    claim_audit = _claim_audit_with_structure(claim_audit, structure, claim_ledger, stories)
 
     for _ in range(max_repairs):
         needs_repair = (
@@ -2159,8 +2195,8 @@ def _repair_narration_until_stable(
             reviewer_model,
         )
         structure = narration_structure_audit(text, stories, project)
+        claim_audit = _claim_audit_with_structure(claim_audit, structure, claim_ledger, stories)
 
-    claim_audit = _claim_audit_with_structure(claim_audit, structure)
     return text, fact_check, claim_audit, structure, repairs, repair_error
 
 
@@ -2233,7 +2269,7 @@ def _polish_narration_fluency(
         reviewer_model,
     )
     structure = narration_structure_audit(polished, stories, project)
-    claim_audit = _claim_audit_with_structure(claim_audit, structure)
+    claim_audit = _claim_audit_with_structure(claim_audit, structure, claim_ledger, stories)
 
     if (
         str(fact_check.get("status") or "needs_human_check") == "needs_human_check"
@@ -2990,7 +3026,7 @@ def run_claim_audit(project_id: str, narration_id: str, body: NarrationReviewBod
         model,
     )
     structure_audit = narration_structure_audit(str(draft["content"] or ""), stories, project)
-    claim_audit = _claim_audit_with_structure(claim_audit, structure_audit)
+    claim_audit = _claim_audit_with_structure(claim_audit, structure_audit, claim_ledger, stories)
 
     with db() as conn:
         project = project_or_404(conn, project_id)
