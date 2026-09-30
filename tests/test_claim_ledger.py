@@ -579,3 +579,31 @@ def test_generic_transition_with_release_word_is_not_deterministic_high_risk():
 این یکی برای فیلم‌بازها مهمه چون تعداد فیلم‌هایی که قراره اکران بشه رو مستقیم گذاشتن تو دل همین توافق.
 """
     assert high_risk_sentences(draft) == []
+
+
+
+def test_claim_role_current_hook_is_preserved_for_writer():
+    story = {
+        "id": "s1",
+        "canonical_title": "Paper Tiger trailer released",
+        "articles": [{
+            "url": "https://example.com/paper-tiger",
+            "source": "Example Trade",
+            "title": "Paper Tiger trailer released",
+            "snippet": "The first trailer for Paper Tiger was released this week.",
+        }],
+        "spice_sources": [],
+    }
+    claim = normalize_ledger_claims([{
+        "story_id": "s1",
+        "claim_role": "current_hook",
+        "claim_type": "release",
+        "canonical_text": "The first Paper Tiger trailer was released.",
+        "release_scope": "trailer_release",
+        "source_urls": ["https://example.com/paper-tiger"],
+        "evidence_url": "https://example.com/paper-tiger",
+        "evidence_quote": "The first trailer for Paper Tiger was released this week.",
+        "verification_status": "verified",
+    }], [story], {}, require_evidence_quote=True)[0]
+    assert claim["claim_role"] == "current_hook"
+    assert claim["verification_status"] == "verified"
