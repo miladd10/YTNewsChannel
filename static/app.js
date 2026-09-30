@@ -132,7 +132,21 @@ async function generateResolvePlan(){startRunStatus({title:'Building DaVinci Res
 async function openResolveFolder(){try{await api(`/api/projects/${state.project.id}/resolve-plan/open-folder`,{method:'POST'})}catch(e){toast(e.message,true)}}
 
 async function refreshSettings(){try{state.settings=await api('/api/settings')}catch(e){state.settings={ai:{}}}}
-async function openSettings(){await refreshSettings();const a=state.settings.ai||{};$('#sResearchProvider').value=a.research_provider||'codex_local';$('#sResearchModel').value=a.research_model||'default';$('#sWriterProvider').value=a.writer_provider||'codex_local';$('#sWriterModel').value=a.writer_model||'default';$('#sReviewerProvider').value=a.reviewer_provider||'claude_local';$('#sReviewerModel').value=a.reviewer_model||'default';renderProviderStatus(state.settings.local_providers||{});$('#settingsDialog').showModal()}
+async function openSettings(){
+  await refreshSettings();
+  const a=state.settings.ai||{};
+  if(window.YTNewsModels){
+    window.YTNewsModels.apply('sResearchProvider','sResearchModel',a.research_provider||'codex_local',a.research_model||'default');
+    window.YTNewsModels.apply('sWriterProvider','sWriterModel',a.writer_provider||'codex_local',a.writer_model||'default');
+    window.YTNewsModels.apply('sReviewerProvider','sReviewerModel',a.reviewer_provider||'claude_local',a.reviewer_model||'default');
+  }else{
+    $('#sResearchProvider').value=a.research_provider||'codex_local';$('#sResearchModel').value=a.research_model||'default';
+    $('#sWriterProvider').value=a.writer_provider||'codex_local';$('#sWriterModel').value=a.writer_model||'default';
+    $('#sReviewerProvider').value=a.reviewer_provider||'claude_local';$('#sReviewerModel').value=a.reviewer_model||'default';
+  }
+  renderProviderStatus(state.settings.local_providers||{});
+  $('#settingsDialog').showModal();
+}
 function renderProviderStatus(p){$('#providerStatus').innerHTML=['codex_local','claude_local'].map(k=>{const x=p[k]||{};const ok=x.installed&&x.authenticated;return `<div class="provider-card"><strong class="${ok?'provider-ok':'provider-bad'}">${esc(x.label||k)} ${ok?'✓':''}</strong><small>${esc(x.version||'Not installed')}<br>${esc(x.message||'')}</small><div class="provider-actions"><button type="button" class="btn secondary" data-login="${k}">Sign in</button><button type="button" class="btn ghost" data-test="${k}">Test</button></div></div>`}).join('')}
 async function providerLogin(provider){try{const r=await api('/api/local-providers/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider})});toast(r.message)}catch(e){toast(e.message,true)}}
 async function providerTest(provider){try{const r=await api('/api/local-providers/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider})});toast(`${provider}: ${r.response}`)}catch(e){toast(e.message,true)}}
