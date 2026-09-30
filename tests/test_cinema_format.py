@@ -573,7 +573,7 @@ def test_reviewer_minor_issues_do_not_block_and_keep_section_is_ignored_by_gate(
 def test_reviewer_prompt_defines_severity_and_audit_status():
     from app.services.cinema_format import REVIEWER_SYSTEM, REVISION_SYSTEM
     assert "Minor issues never fail an audit" in REVIEWER_SYSTEM
-    assert "At most 8 issues" in REVIEWER_SYSTEM and "# Keep" in REVIEWER_SYSTEM
+    assert "At most 12 issues" in REVIEWER_SYSTEM and "# Keep" in REVIEWER_SYSTEM
     assert '"# Keep"' in REVISION_SYSTEM
 
 
