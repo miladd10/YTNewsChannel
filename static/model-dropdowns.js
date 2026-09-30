@@ -83,7 +83,8 @@
 
     const provider = providerSelect.value || 'codex_local';
     const models = MODELS[provider] || [];
-    const requested = preferredModel ?? modelSelect.value ?? modelSelect.dataset.initialModel ?? '';
+    const hasPreferred = preferredModel !== null && preferredModel !== undefined;
+    const requested = hasPreferred ? preferredModel : (modelSelect.value || modelSelect.dataset.initialModel || '');
     const current = String(requested || '').trim();
 
     modelSelect.innerHTML = '';
@@ -94,16 +95,18 @@
       modelSelect.appendChild(option);
     }
 
-    if (current && !modelBelongsToProvider(current, provider)) {
+    if (hasPreferred && current && !modelBelongsToProvider(current, provider)) {
       const custom = document.createElement('option');
       custom.value = current;
       custom.textContent = `Saved/custom — ${current}`;
       modelSelect.appendChild(custom);
     }
 
-    const next = current && [...modelSelect.options].some(option => option.value === current)
+    const next = current && modelBelongsToProvider(current, provider)
       ? current
-      : (models[0]?.value || '');
+      : (hasPreferred && current && [...modelSelect.options].some(option => option.value === current)
+          ? current
+          : (models[0]?.value || ''));
     if (next) modelSelect.value = next;
 
     modelSelect.dataset.visibleProvider = provider;
