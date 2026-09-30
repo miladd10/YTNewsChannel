@@ -1184,7 +1184,7 @@ NON-NEGOTIABLE RULES:
 - Do not speak audit, ledger, evidence or pipeline language.
 - Keep conversational Persian and one consistent spoken register.
 - Preserve good lines when possible, but structural correctness and factual support are more important than minimal edits.
-- FLUENCY REPAIR IS PART OF ASSEMBLY REPAIR: if a sentence is factually correct but reads like translated English, internal ledger terminology, or generic AI filler, rewrite it into natural conversational Persian while preserving exactly the same claim. Prefer concrete verbs and ordinary collocations.
+- MINIMAL REPAIR MODE: this pass fixes factual/claim/coverage/section problems, not general style. If structure is already valid, edit only the STORY passages named by fact/claim issues and leave unrelated passages alone. A separate fluency pass handles wording after the gates are clean.
 - Never invent a flourish merely to connect two facts. If a story is thin, one clean factual sentence is better than two padded sentences.
 """ + ATTRIBUTION_POLICY + SPOKEN_QUALITY_RULES
 
