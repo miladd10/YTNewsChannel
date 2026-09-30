@@ -79,18 +79,18 @@
       <h3>Workflow roles</h3>
       <div class="role-grid">
         <label>Research / ranking<select id="sResearchProvider"></select></label>
-        <label>Research model<input id="sResearchModel" value="default" /></label>
+        <label>Research model<select id="sResearchModel"></select></label>
         <label>Narration writer<select id="sWriterProvider"></select></label>
-        <label>Writer model<input id="sWriterModel" value="default" /></label>
+        <label>Writer model<select id="sWriterModel"></select></label>
         <label>Narration reviewer / media planner<select id="sReviewerProvider"></select></label>
-        <label>Reviewer model<input id="sReviewerModel" value="default" /></label>
+        <label>Reviewer model<select id="sReviewerModel"></select></label>
       </div>
       <details class="api-details"><summary>Optional API keys</summary><div class="two-col api-key-row"><label>OpenAI API key<input id="openaiKey" type="password" placeholder="sk-…" /></label><button type="button" class="btn secondary" data-save-key="openai">Save OpenAI Key</button><label>Anthropic API key<input id="anthropicKey" type="password" placeholder="sk-ant-…" /></label><button type="button" class="btn secondary" data-save-key="anthropic">Save Anthropic Key</button></div></details>
       <div class="dialog-actions"><button type="button" class="btn ghost" data-close="settingsDialog">Cancel</button><button class="btn primary" type="submit">Save Settings</button></div>
     </form>
   </dialog>
 
-  <script src="/static/app.js?v=44"></script>
+  <script src="/static/app.js?v=45"></script>\n  <script src="/static/model-dropdowns.js?v=1"></script>
   <script src="/static/editorial.js?v=15"></script>
 </body>
 </html>
