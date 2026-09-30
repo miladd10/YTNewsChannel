@@ -1,4 +1,5 @@
 from app.services.cinema_format import narration_structure_audit
+from app.main import _claim_audit_with_structure
 
 
 def _project():
@@ -91,3 +92,69 @@ def test_short_complete_episode_is_warning_not_forced_repair():
     assert result["length_status"] == "short"
     assert result["status"] == "pass"
     assert result["advisory_issues"]
+
+
+
+def test_claim_audit_requires_current_hook_not_just_story_marker():
+    story = {"id": "s1", "canonical_title": "Paper Tiger trailer", "category": "upcoming_films"}
+    ledger = [
+        {
+            "id": "C001",
+            "story_id": "s1",
+            "claim_role": "current_hook",
+            "verification_status": "verified",
+            "canonical_text": "The official trailer was released.",
+        },
+        {
+            "id": "C002",
+            "story_id": "s1",
+            "claim_role": "background",
+            "verification_status": "verified",
+            "canonical_text": "Paper Tiger is a James Gray film.",
+        },
+    ]
+    structure = {
+        "blocking_issues": [],
+        "major_issues": [],
+        "status": "pass",
+    }
+    audit = {
+        "status": "pass",
+        "blocked_count": 0,
+        "claims": [{
+            "story_id": "s1",
+            "status": "verified",
+            "ledger_claim_ids": ["C002"],
+            "sentence": "Paper Tiger هم از فیلم‌های جیمز گریه.",
+        }],
+        "system_issues": [],
+    }
+    result = _claim_audit_with_structure(audit, structure, ledger, [story])
+    assert result["status"] == "blocked"
+    assert any("current-week hook" in issue for issue in result["system_issues"])
+
+
+def test_claim_audit_passes_when_current_hook_is_spoken():
+    story = {"id": "s1", "canonical_title": "Paper Tiger trailer", "category": "upcoming_films"}
+    ledger = [{
+        "id": "C001",
+        "story_id": "s1",
+        "claim_role": "current_hook",
+        "verification_status": "verified",
+        "canonical_text": "The official trailer was released.",
+    }]
+    structure = {"blocking_issues": [], "major_issues": [], "status": "pass"}
+    audit = {
+        "status": "pass",
+        "blocked_count": 0,
+        "claims": [{
+            "story_id": "s1",
+            "status": "verified",
+            "ledger_claim_ids": ["C001"],
+            "sentence": "این هفته تریلر رسمی Paper Tiger منتشر شد.",
+        }],
+        "system_issues": [],
+    }
+    result = _claim_audit_with_structure(audit, structure, ledger, [story])
+    assert result["status"] == "pass"
+    assert result["blocked_count"] == 0
