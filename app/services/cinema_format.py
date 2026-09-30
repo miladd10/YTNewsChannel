@@ -491,9 +491,15 @@ def narration_structure_audit(text: str, stories: list[dict], project: dict) -> 
         blocking.append("Section order does not follow the format blueprint.")
 
     major = []
+    advisory = []
     if length_status == "short":
-        major.append(
-            f"Narration is {current_words} words; minimum acceptable target is {int(low)}."
+        # Short is visible to the reviewer, but not a deterministic repair
+        # failure by itself. Earlier versions forced a repair pass to hit the
+        # word target even when the ledger was thin, which produced filler and
+        # translationese. The reviewer/writer may expand only from real unused
+        # verified beats.
+        advisory.append(
+            f"Narration is {current_words} words; minimum acceptable target is {int(low)}. Expand only if supported material is still unused."
         )
     elif length_status == "long":
         major.append(
@@ -504,6 +510,7 @@ def narration_structure_audit(text: str, stories: list[dict], project: dict) -> 
         "status": "pass" if not blocking and not major else "needs_repair",
         "blocking_issues": blocking,
         "major_issues": major,
+        "advisory_issues": advisory,
         "missing_story_ids": missing_ids,
         "missing_story_titles": [
             str(expected[story_id].get("canonical_title") or story_id) for story_id in missing_ids
