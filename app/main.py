@@ -2539,6 +2539,28 @@ def generate_narration(project_id: str, body: GenerateBody):
         style_profile.get("profile_text") or "",
         build_style_packet(style_rows_for_window(style_rows, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=30000),
     )
+    polished_text, polished_fact, polished_audit, polished_structure, fluency_polished, fluency_error = _polish_narration_fluency(
+        project,
+        stories,
+        text,
+        claim_ledger,
+        fresh_claim_sources,
+        actual_provider,
+        actual_model,
+        audit_provider,
+        audit_model,
+        style_profile.get("profile_text") or "",
+        build_style_packet(
+            style_rows_for_window(style_rows, project.get("date_start"), project.get("content_type") or "weekly_news"),
+            max_chars=60000,
+        ),
+    )
+    if fluency_polished:
+        text = polished_text
+        fact_check = polished_fact
+        claim_audit = polished_audit
+        structure_audit = polished_structure
+
 
     narration_id = str(uuid.uuid4())
     stamp = now()
@@ -2604,6 +2626,8 @@ def generate_narration(project_id: str, body: GenerateBody):
         "structure_audit": structure_audit,
         "repair_count": repair_count,
         "repair_error": repair_error,
+        "fluency_polished": bool(fluency_polished),
+        "fluency_error": fluency_error,
     }
 
 
@@ -2850,6 +2874,28 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         style_profile.get("profile_text") or "",
         build_style_packet(style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=30000),
     )
+    polished_text, polished_fact, polished_audit, polished_structure, fluency_polished, fluency_error = _polish_narration_fluency(
+        project,
+        stories,
+        rewritten_text,
+        claim_ledger,
+        fresh_claim_sources,
+        actual_provider,
+        actual_model,
+        audit_provider,
+        audit_model,
+        style_profile.get("profile_text") or "",
+        build_style_packet(
+            style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"),
+            max_chars=60000,
+        ),
+    )
+    if fluency_polished:
+        rewritten_text = polished_text
+        fact_check = polished_fact
+        claim_audit = polished_audit
+        structure_audit = polished_structure
+
 
     new_id = str(uuid.uuid4())
     stamp = now()
@@ -2912,6 +2958,8 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         "structure_audit": structure_audit,
         "repair_count": repair_count,
         "repair_error": repair_error,
+        "fluency_polished": bool(fluency_polished),
+        "fluency_error": fluency_error,
     }
 
 
@@ -3192,6 +3240,28 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         style_profile.get("profile_text") or "",
         build_style_packet(style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=30000),
     )
+    polished_text, polished_fact, polished_audit, polished_structure, fluency_polished, fluency_error = _polish_narration_fluency(
+        project,
+        stories,
+        revised_text,
+        claim_ledger,
+        fresh_claim_sources,
+        actual_provider,
+        actual_model,
+        audit_provider,
+        audit_model,
+        style_profile.get("profile_text") or "",
+        build_style_packet(
+            style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"),
+            max_chars=60000,
+        ),
+    )
+    if fluency_polished:
+        revised_text = polished_text
+        fact_check = polished_fact
+        claim_audit = polished_audit
+        structure_audit = polished_structure
+
 
     new_id = str(uuid.uuid4())
     stamp = now()
@@ -3248,6 +3318,8 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         "structure_audit": structure_audit,
         "repair_count": repair_count,
         "repair_error": repair_error,
+        "fluency_polished": bool(fluency_polished),
+        "fluency_error": fluency_error,
     }
 
 
