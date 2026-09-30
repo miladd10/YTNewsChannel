@@ -1994,21 +1994,37 @@ def _build_verified_claim_ledger(
         for claim in ledger
         if claim.get("verification_status") in {"verified", "verified_with_attribution"}
     }
+    hook_story_ids = {
+        str(claim.get("story_id") or "")
+        for claim in ledger
+        if claim.get("claim_role") == "current_hook"
+        and claim.get("verification_status") in {"verified", "verified_with_attribution"}
+    }
     missing_story_claims = [
         story for story in stories
         if str(story.get("id") or "") not in usable_story_ids
     ]
-    if missing_story_claims:
+    missing_hook_claims = [
+        story for story in stories
+        if str(story.get("id") or "") not in hook_story_ids
+    ]
+    if missing_story_claims or missing_hook_claims:
+        failed = missing_hook_claims or missing_story_claims
         titles = "; ".join(
             str(story.get("canonical_title") or story.get("id") or "Untitled")
-            for story in missing_story_claims[:8]
+            for story in failed[:8]
         )
-        extra = "" if len(missing_story_claims) <= 8 else f" (+{len(missing_story_claims)-8} more)"
+        extra = "" if len(failed) <= 8 else f" (+{len(failed)-8} more)"
+        reason = (
+            "a verified current-week hook claim"
+            if missing_hook_claims
+            else "any usable narration claim"
+        )
         raise HTTPException(
             400,
-            "Claim Ledger could not verify any usable narration claim for "
-            f"{len(missing_story_claims)} selected story/stories: {titles}{extra}. "
-            "Refresh/research those stories or change their selection instead of silently omitting them.",
+            f"Claim Ledger could not build {reason} for "
+            f"{len(failed)} selected story/stories: {titles}{extra}. "
+            "Refresh/research those stories before writing; the app will not replace this week's hook with generic background or filler.",
         )
     return ledger, fresh_sources, actual_provider, actual_model
 
