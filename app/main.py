@@ -43,6 +43,7 @@ from .services.cinema_format import (
     ENRICHMENT_REWRITE_SYSTEM,
     FACT_CHECK_SYSTEM,
     NARRATION_ASSEMBLY_REPAIR_SYSTEM,
+    NARRATION_FLUENCY_POLISH_SYSTEM,
     REVISION_SYSTEM,
     REVIEWER_SYSTEM,
     SECTION_ORDER,
@@ -2161,6 +2162,94 @@ def _repair_narration_until_stable(
 
     claim_audit = _claim_audit_with_structure(claim_audit, structure)
     return text, fact_check, claim_audit, structure, repairs, repair_error
+
+
+
+def _polish_narration_fluency(
+    project: dict,
+    stories: list[dict],
+    text: str,
+    claim_ledger: list[dict],
+    fresh_sources: dict[str, list[dict]] | None,
+    writer_provider: str,
+    writer_model: str,
+    reviewer_provider: str,
+    reviewer_model: str,
+    style_profile_text: str,
+    style_corpus_text: str,
+) -> tuple[str, dict, dict, dict, bool, str]:
+    """One final wording-only pass, accepted only if every factual/structure gate still passes."""
+    original = str(text or "").strip()
+    original_lint = spoken_lint(original)
+    user = "\n".join([
+        "<verified_claim_ledger>",
+        json.dumps(ledger_for_writer(claim_ledger), ensure_ascii=False),
+        "</verified_claim_ledger>",
+        "",
+        "<style_blueprint>",
+        style_profile_text or "",
+        "</style_blueprint>",
+        "",
+        style_corpus_text or "",
+        "",
+        "<narration_to_polish>",
+        original,
+        "</narration_to_polish>",
+    ])
+    try:
+        polished, actual_provider, actual_model = generate_text(
+            writer_provider,
+            writer_model,
+            NARRATION_FLUENCY_POLISH_SYSTEM,
+            user,
+        )
+    except Exception as exc:
+        return original, {}, {}, narration_structure_audit(original, stories, project), False, str(exc)
+
+    polished = str(polished or "").strip()
+    if not polished or polished == original:
+        return original, {}, {}, narration_structure_audit(original, stories, project), False, ""
+
+    # A fluency pass must preserve exact story coverage before we spend more AI
+    # calls validating it.
+    original_ids = re.findall(r"<!--\s*STORY:([^>\s]+)\s*-->", original)
+    polished_ids = re.findall(r"<!--\s*STORY:([^>\s]+)\s*-->", polished)
+    if original_ids != polished_ids:
+        return original, {}, {}, narration_structure_audit(original, stories, project), False, "Fluency polish changed STORY marker order/coverage."
+
+    polished, fact_check, _, _ = _run_narration_fact_check(
+        project,
+        stories,
+        polished,
+        actual_provider,
+        actual_model,
+        fresh_sources=fresh_sources,
+        claim_ledger=claim_ledger,
+    )
+    claim_audit, _, _ = audit_narration_claims(
+        polished,
+        claim_ledger,
+        reviewer_provider,
+        reviewer_model,
+    )
+    structure = narration_structure_audit(polished, stories, project)
+    claim_audit = _claim_audit_with_structure(claim_audit, structure)
+
+    if (
+        str(fact_check.get("status") or "needs_human_check") == "needs_human_check"
+        or str(claim_audit.get("status") or "blocked") != "pass"
+        or structure.get("status") != "pass"
+    ):
+        return original, fact_check, claim_audit, structure, False, "Polished wording failed factual or structure validation; original kept."
+
+    # Do not accept a wording pass that makes deterministic spoken warnings
+    # worse. Equal is fine because the style model can improve phrasing that a
+    # regex does not recognize.
+    if len(spoken_lint(polished)) > len(original_lint):
+        return original, fact_check, claim_audit, structure, False, "Polished wording increased spoken-language lint findings; original kept."
+
+    return polished, fact_check, claim_audit, structure, True, ""
+
 
 
 def _fact_check_summary(draft) -> dict:
