@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.7 — Sound Like the Host
+
+Why drafts read like translated news instead of the Filmbaz transcripts, and the fixes:
+- **Voice came last.** The writer prompt was a long English fact-rule wall with voice at the end. A new shared `HOST_VOICE` block, written from the real weekly episodes (colloquial verbs incl. «گفتش/کردش», «یعنی» consequences, «جالبش اینجاست», indirect speech, kitchen-table money talk, everyday scope words, the fixed signposts, opening/closing formulas, banned written forms), now opens the writer, revision, enrichment, repair and polish prompts. The writer prompt is shorter and voice-first.
+- **Rules prescribed stiff Persian.** The writer was told to name charts like «در جدول آخرهفتهٔ آمریکای شمالی»; the fact checker flagged any ranking without chart/date scope, even intro teases. Colloquial scope («این آخر هفته تو آمریکا») is now the house style everywhere, and claim extraction maps everyday scope words to the ledger instead of blocking them.
+- **Writers translated database fields.** Writers now get a compact fact + value + one scope note per claim instead of ~28 structured fields; auditors keep the full record.
+- **The writer only saw a few facts.** The AI planner call is gone (one fewer round-trip); the writer gets every verified claim per story.
+- **Fun facts never reached the writer.** Only the angle type was passed; the text and usage note now are.
+- **English mid-sentence.** Titles and names are now written in Persian script, as the host says them; lint flags Latin text.
+- New advisory lint: written/database Persian and headline-only items.
+
 ## v0.4.6 — Faster, Simpler Writing Pipeline
 
 A draft or revision used to take ~15-20 minutes and often came back short, blocked and bland. Causes and fixes:
