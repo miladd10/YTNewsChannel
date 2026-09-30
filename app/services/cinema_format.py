@@ -1444,6 +1444,10 @@ def parse_review_gate(text: str) -> dict:
         # note even though its own severity list says there is no major/blocker.
         # Do not force another full review/revise cycle for that inconsistency.
         recommendation = "polish_optional"
+    elif any(value and value != "pass" for value in audits.values()):
+        # NEEDS_WORK with no parsed issue severities is malformed/ambiguous
+        # reviewer output. Stay conservative rather than silently approving it.
+        recommendation = "revision_required"
     elif recommendation not in {"pass", "polish_optional"}:
         recommendation = "pass"
     return {
