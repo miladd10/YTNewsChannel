@@ -4,7 +4,7 @@
       { value: 'gpt-6-astra', label: 'GPT-6 Astra — Most capable' },
       { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol — High quality' },
       { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra — Balanced' },
-      { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna — Fast' },
+      { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna — Lowest cost' },
     ],
     anthropic: [
       { value: 'claude-fable-5', label: 'Claude Fable 5 — Most capable' },
