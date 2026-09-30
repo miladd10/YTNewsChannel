@@ -21,10 +21,12 @@ CLAIM_LEDGER_SYSTEM = """You build a source-locked atomic claim ledger for a wee
 You receive approved story packets, their dated sources, fresh verification results, and the project window.
 
 Return ONLY JSON:
-{"claims":[{"story_id":"...","claim_type":"box_office|ranking|budget|revenue|release|deal_value|title_identity|person_credit|cast|quote|award|production|company|other","subject":"...","predicate":"...","canonical_text":"one atomic fact","value_text":"","numeric_value":null,"currency":"","unit":"","metric":"","market":"","region":"","chart_type":"","rank":null,"period_type":"","date_start":"","date_end":"","as_of_date":"","release_scope":"","title_identity":"","estimate_status":"confirmed|reported_estimate|projection|approximate|conflicting|","attribution_required":false,"attribution_label":"","source_urls":["exact supplied URL"],"evidence_url":"one cited source URL","evidence_quote":"short exact contiguous quote copied from that source's supplied title/snippet/description/excerpt","evidence_summary":"what the cited evidence actually supports","conflict_note":"","verification_status":"verified|verified_with_attribution|blocked"}]}
+{"claims":[{"story_id":"...","claim_role":"current_hook|supporting|background","claim_type":"box_office|ranking|budget|revenue|release|deal_value|title_identity|person_credit|cast|quote|award|production|company|other","subject":"...","predicate":"...","canonical_text":"one atomic fact","value_text":"","numeric_value":null,"currency":"","unit":"","metric":"","market":"","region":"","chart_type":"","rank":null,"period_type":"","date_start":"","date_end":"","as_of_date":"","release_scope":"","title_identity":"","estimate_status":"confirmed|reported_estimate|projection|approximate|conflicting|","attribution_required":false,"attribution_label":"","source_urls":["exact supplied URL"],"evidence_url":"one cited source URL","evidence_quote":"short exact contiguous quote copied from that source's supplied title/snippet/description/excerpt","evidence_summary":"what the cited evidence actually supports","conflict_note":"","verification_status":"verified|verified_with_attribution|blocked"}]}
 
 HARD RULES:
 - Every claim is atomic. Split different numbers/scopes into separate claims.
+- CURRENT HOOK IS MANDATORY: for EVERY supplied story, create at least one claim_role=current_hook that states the actual current-week news_hook (trailer released, first-look images released, official title announced, cast addition, lawsuit settlement, current box-office result, etc.). A background fact such as an older collaboration/credit does NOT satisfy this. If the supplied evidence cannot support the news_hook, output that current_hook claim as blocked rather than replacing it with generic background.
+- claim_role=supporting is for additional facts that explain/enrich the current hook. claim_role=background is for older context only.
 - Use only supplied evidence. Never use memory.
 - FAMILIARITY: when a story has a familiarity_anchor (a short recognition cue such as a person's best-known work), create one person_credit claim stating that credit if any supplied source for the story supports it, citing that source. If nothing supplied supports it, create the claim with verification_status=blocked. Never support it from memory.
 - Read each article's title, snippet, description and excerpt. Extract every useful checkable fact the excerpts support (premise, credits, dates, formats, figures, context), not only the headline fact.
@@ -350,6 +352,9 @@ def normalize_ledger_claims(
         story_id = _clean(raw.get("story_id"))
         if story_id not in story_ids:
             continue
+        claim_role = _clean(raw.get("claim_role")).lower()
+        if claim_role not in {"current_hook", "supporting", "background"}:
+            claim_role = "supporting"
         claim_type = _clean(raw.get("claim_type")).lower()
         if claim_type not in CLAIM_TYPES:
             claim_type = "other"
@@ -437,7 +442,8 @@ def normalize_ledger_claims(
             status = "verified_with_attribution" if attribution_required else "verified"
         output.append({
             "id": f"C{index + 1:03d}",
-            "story_id": story_id, "claim_type": claim_type, "subject": _clean(raw.get("subject")),
+            "story_id": story_id, "claim_role": claim_role, "claim_type": claim_type,
+            "subject": _clean(raw.get("subject")),
             "predicate": _clean(raw.get("predicate")), "canonical_text": canonical_text,
             "value_text": _clean(raw.get("value_text")), "numeric_value": numeric_value,
             "currency": _clean(raw.get("currency")).upper(), "unit": _normalize_unit(raw.get("unit") or ""),
@@ -471,7 +477,7 @@ def build_claim_ledger(stories, project, fresh_sources, provider, model):
 
 def ledger_for_writer(claims: list[dict]) -> list[dict]:
     keys = (
-        "id", "story_id", "claim_type", "subject", "predicate", "canonical_text", "value_text",
+        "id", "story_id", "claim_role", "claim_type", "subject", "predicate", "canonical_text", "value_text",
         "numeric_value", "currency", "unit", "metric", "market", "region", "chart_type", "rank",
         "period_type", "date_start", "date_end", "as_of_date", "release_scope", "title_identity",
         "estimate_status", "attribution_required", "attribution_label", "source_names",
