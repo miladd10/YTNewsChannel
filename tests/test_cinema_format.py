@@ -618,3 +618,48 @@ def test_fluency_polish_is_wording_only_and_style_corpus_driven():
     assert "final spoken-Persian editor" in NARRATION_FLUENCY_POLISH_SYSTEM
     assert "SAME-FORMAT weekly-news style references" in NARRATION_FLUENCY_POLISH_SYSTEM
     assert "Do not expand merely to hit a duration target" in NARRATION_FLUENCY_POLISH_SYSTEM
+
+
+
+def test_review_gate_does_not_force_revision_for_minor_only_inconsistent_audit_status():
+    review = """# Review Summary
+Mostly clean.
+
+# Format Audit
+- Status: PASS
+- Notes: fine
+
+# Style Audit
+- Status: NEEDS_WORK
+- Notes: one small awkward phrase
+
+# Factual / Source Audit
+- Status: PASS
+- Notes: fine
+
+# Freshness Audit
+- Status: PASS
+- Notes: fine
+
+# Context / Spice Audit
+- Status: PASS
+- Notes: fine
+
+# Storytelling Audit
+- Status: PASS
+- Notes: fine
+
+# Issues
+## ISSUE 1 — awkward phrase
+- Severity: minor
+- Section: Upcoming Films
+- Problem: one phrase is clunky
+- Fix: simplify it
+
+# Review Gate
+- Blocking Issues: 0
+- Major Issues: 0
+- Minor Issues: 1
+- Recommendation: REVISION_REQUIRED
+"""
+    assert parse_review_gate(review)["gate_status"] == "polish_optional"
