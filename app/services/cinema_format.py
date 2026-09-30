@@ -1006,6 +1006,7 @@ The real episodes in <style_corpus> are the voice. Their facts are old and unusa
 - A short honest reaction is part of the voice when the facts support it: «یعنی منتقدا اصلاً دوستش نداشتن»، «حالا باید ببینیم می‌تونه ... یا نه» (only when there is a real open question).
 - Transitions are his fixed spoken signposts: «برای خبرای بعدی بریم سراغ ...»، «تو همین ...»، «یه خبر دیگه هم از ... بود»، «اما ...». Box office is a quick countdown: «رتبه اول ... جایگاه دوم ... جایگاه سوم رسید به ...».
 - Opening: «سلام به همه دوستان، به <channel_name> خوش اومدین. صبحتون بخیر و امروزم مثل هر هفته میریم ببینیم تو دنیای سینما چه خبر بوده.» then straight into the biggest story. Closing: «خب دوستان، اینم از ویدیوی این هفته. امیدوارم براتون جالب بوده باشه. اگه ویدیو رو دوست داشتید یادتون نره لایکش کنید و تا ویدیوی هفته بعد خدانگهدار.» Omit the channel name if project.channel_name is empty.
+- Titles and names are said in Persian, never switched into English mid-sentence: the common Persian title if one exists, otherwise a Persian transliteration.
 - Never: «را»، «است»، «می‌باشد»، «گردید»، «نمود»، «به‌عنوان»، «همچنین»، «علاوه بر این»، «در این راستا»، «قابل توجه»، or translated English metaphors.
 """
 
@@ -1111,7 +1112,7 @@ STORYTELLING
 - CASUAL-AUDIENCE FAMILIARITY RULE: the first time a person or company a casual viewer may not place appears, add one short cue from the ledger («همون کارگردانی که ... رو ساخته»). Do not turn it into a biography, skip it for household names, and never invent an anchor.
 - Box office is one quick countdown with the money, not separate mini-articles.
 - Continuity: only refer back to something already said in the body; an intro mention does not count.
-- Names are voiced by text-to-speech: transliterate each foreign name once and spell it the same way every time, with short-vowel marks where it could be misread. Titles stay in their official form.
+- Names and titles are voiced by text-to-speech and the host never switches to English: write every person, company and film/series title in Persian script the way he says it (the common Persian name when Persian audiences already use one, e.g. a translated franchise title; otherwise a Persian transliteration). No Latin script in the narration. Spell each name the same way every time and add short-vowel marks where it could be misread.
 
 LENGTH: length_target is the spoken word budget. Reach acceptable_words by telling the supported beats fully, never with filler.
 
@@ -1162,7 +1163,7 @@ Examples of the transformation principle:
 - abstract “the title entered viewers’ radar” -> state the concrete trailer/cast/release fact and stop
 - abstract “this shows how big the deal is” -> keep the actual deal figure/consequence, not the commentary
 
-Keep official titles as supplied. Write Persian around them naturally.
+Keep each title and name referring to the same work/person, but in Persian script the way the host says it (no Latin script); keep the spelling already used in the draft.
 """ + ATTRIBUTION_POLICY + SPOKEN_QUALITY_RULES
 
 
@@ -1439,6 +1440,10 @@ def spoken_lint(text: str) -> list[dict]:
     database = [m.group(0) for m in _DATABASE_PHRASE_RE.finditer(body)]
     if database:
         add("written_or_database_persian", "Written/database Persian the host never says; use everyday words («تو آمریکا»، «تا الان»، «دوباره اکران»).", database)
+    latin = re.findall(r"[A-Za-z][A-Za-z'’.:-]*(?:\s+[A-Za-z][A-Za-z'’.:-]*)*", body)
+    latin = [x for x in latin if len(x.replace(" ", "")) >= 2]
+    if latin:
+        add("latin_script", "English/Latin text inside the Persian narration; the host says titles and names in Persian.", latin)
     headlines = _headline_items(text)
     stories = len(re.findall(r"<!--\s*STORY:", text or ""))
     if stories >= 3 and len(headlines) * 2 > stories:

@@ -693,3 +693,10 @@ def test_lint_flags_database_persian_and_headline_items():
         f"جالبش اینجاست که بودجه‌ش خیلی کم بوده. کارگردانش گفتش که انتظارشو نداشته." for i in range(4)
     )
     assert not {"written_or_database_persian", "headline_items"} & {f["rule"] for f in spoken_lint(rich)}
+
+
+def test_lint_flags_latin_titles_in_persian_narration():
+    from app.services.cinema_format import spoken_lint, WRITER_SYSTEM
+    rules = {f["rule"] for f in spoken_lint("<!-- STORY:s -->\nنتفلیکس تریلر Glass Harbor رو منتشر کرد.")}
+    assert "latin_script" in rules
+    assert "No Latin script in the narration" in WRITER_SYSTEM
