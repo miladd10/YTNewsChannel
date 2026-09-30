@@ -69,3 +69,25 @@ def test_structure_audit_passes_complete_ordered_episode_when_length_is_in_range
     assert not result["section_order_violation"]
     assert result["length_status"] == "ok"
     assert result["status"] == "pass"
+
+
+
+def test_short_complete_episode_is_warning_not_forced_repair():
+    text = """
+## صنعت سینما
+<!-- STORY:s1 -->
+خبر معامله.
+
+## فیلم‌های جدید
+<!-- STORY:s2 -->
+خبر فیلم.
+
+## سریال‌ها
+<!-- STORY:s3 -->
+خبر سریال.
+"""
+    result = narration_structure_audit(text, _stories(), _project())
+    assert result["missing_story_ids"] == []
+    assert result["length_status"] == "short"
+    assert result["status"] == "pass"
+    assert result["advisory_issues"]
