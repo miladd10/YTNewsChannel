@@ -2047,6 +2047,68 @@ def _ensure_article_excerpts(stories: list[dict]) -> None:
             article["_excerpt_fetched"] = True
 
 
+LEDGER_CACHE_TTL_SECONDS = 12 * 3600
+
+
+def _ledger_cache_key(project: dict, stories: list[dict]) -> str:
+    """Same selected stories + same source articles + same week = same facts."""
+    payload = {
+        "window": [str(project.get("date_start") or ""), str(project.get("date_end") or "")],
+        "stories": sorted(
+            [
+                str(story.get("id") or ""),
+                sorted(str(a.get("url") or "") for a in story.get("articles") or []),
+                sorted(str(a.get("url") or "") for a in story.get("spice_sources") or []),
+                str(story.get("news_hook") or ""),
+            ]
+            for story in stories
+        ),
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _ledger_cache_path(project: dict) -> Path | None:
+    root = project.get("root_path")
+    return Path(root) / "narration" / "ledger-cache.json" if root else None
+
+
+def _ledger_cache_get(project: dict, key: str) -> list[dict] | None:
+    """The claim ledger is the slowest AI step. Generating a new baseline for
+    the same stories used to rebuild it from scratch every time."""
+    import time
+
+    path = _ledger_cache_path(project)
+    if not path or not path.exists():
+        return None
+    try:
+        entry = (json.loads(path.read_text(encoding="utf-8")) or {}).get(key) or {}
+    except Exception:
+        return None
+    if time.time() - float(entry.get("created") or 0) > LEDGER_CACHE_TTL_SECONDS:
+        return None
+    ledger = entry.get("ledger")
+    return ledger if isinstance(ledger, list) and ledger else None
+
+
+def _ledger_cache_put(project: dict, key: str, ledger: list[dict]) -> None:
+    import time
+
+    path = _ledger_cache_path(project)
+    if not path:
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except Exception:
+        data = {}
+    data[key] = {"created": time.time(), "ledger": ledger}
+    newest = sorted(data.items(), key=lambda item: float(item[1].get("created") or 0))[-5:]
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(dict(newest), ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _build_verified_claim_ledger(
     project: dict,
     stories: list[dict],
@@ -2061,16 +2123,21 @@ def _build_verified_claim_ledger(
     _ensure_article_excerpts(stories)
     if fresh_sources is None:
         fresh_sources = _fresh_sources_for(project, stories)
-    try:
-        ledger, actual_provider, actual_model = build_claim_ledger(
-            stories,
-            project,
-            fresh_sources,
-            provider,
-            model,
-        )
-    except Exception as exc:
-        raise HTTPException(400, f"Could not build verified claim ledger: {exc}") from exc
+    cache_key = _ledger_cache_key(project, stories)
+    cached = _ledger_cache_get(project, cache_key)
+    if cached is not None:
+        ledger, actual_provider, actual_model = cached, "cache", "cache"
+    else:
+        try:
+            ledger, actual_provider, actual_model = build_claim_ledger(
+                stories,
+                project,
+                fresh_sources,
+                provider,
+                model,
+            )
+        except Exception as exc:
+            raise HTTPException(400, f"Could not build verified claim ledger: {exc}") from exc
 
     summary = ledger_summary(ledger)
     usable = summary["verified"] + summary["attributed"]
@@ -2117,6 +2184,8 @@ def _build_verified_claim_ledger(
             f"{len(failed)} selected story/stories: {titles}{extra}. "
             "Refresh/research those stories before writing; the app will not replace this week's hook with generic background or filler.",
         )
+    if cached is None:
+        _ledger_cache_put(project, cache_key, ledger)
     return ledger, fresh_sources, actual_provider, actual_model
 
 
