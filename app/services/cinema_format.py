@@ -564,6 +564,20 @@ def format_packet() -> list[dict]:
     ]
 
 
+def _normalize_style_reference_text(text: str) -> str:
+    """Turn raw ASR/subtitle transcripts into continuous spoken reference text.
+
+    YouTube transcripts often insert a newline every few words. Feeding those
+    subtitle breaks directly to the writer makes the reference look choppy and
+    can over-emphasize transcription mistakes. We keep the exact words but
+    remove non-speech cue rows and collapse arbitrary whitespace.
+    """
+    value = str(text or "")
+    value = re.sub(r"\[(?:موسیقی|تشویق|خنده|music|applause|laughter)[^\]]*\]", " ", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
 def _distributed_style_excerpt(text: str, allowance: int) -> str:
     """Sample the full transcript evenly so every reference contributes structure.
 
@@ -572,7 +586,7 @@ def _distributed_style_excerpt(text: str, allowance: int) -> str:
     viral/celebrity items, and the closer, so evenly spaced windows preserve
     more of the episode's craft within a bounded prompt budget.
     """
-    text = str(text or "").strip()
+    text = _normalize_style_reference_text(text)
     if not text or allowance <= 0:
         return ""
     if len(text) <= allowance:
@@ -594,7 +608,7 @@ def _distributed_style_excerpt(text: str, allowance: int) -> str:
 
 def _contiguous_style_excerpt(text: str, allowance: int, offset_ratio: float = 0.0) -> str:
     """Preserve a long uninterrupted stretch so the model can see real spoken flow."""
-    text = str(text or "").strip()
+    text = _normalize_style_reference_text(text)
     if not text or allowance <= 0:
         return ""
     if len(text) <= allowance:
