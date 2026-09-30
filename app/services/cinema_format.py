@@ -808,6 +808,11 @@ ATTRIBUTION POLICY (single shared rule for writer, reviser, fact checker and rev
 
 SPOKEN_QUALITY_RULES = """
 SPOKEN QUALITY RULES (shared by writer, reviser, enrichment writer and fact checker):
+- NATURAL PERSIAN OVER LITERAL TRANSLATION: preserve the fact, not the English wording or ledger field label. Use verbs/collocations a Persian speaker would actually say. Structured labels such as cumulative/worldwide/opening-weekend/re-release are internal meaning, not phrases to translate word-for-word.
+- Prefer concrete everyday phrasing: «مجموع فروش جهانی فیلم تا پایان این آخرهفته...» over «فروش تجمعی جهانی»، «معامله رو نهایی کنه» over a literal translation of “close the acquisition”, «چند پروژه تازه معرفی کرد» over «چند عنوان تازه رو جلو آورد».
+- Avoid translationese / generic AI metaphors unless the surrounding facts genuinely earn them: «وارد رادار شد»، «باید حواسمون بهش باشه»، «از این نبرد بیرون اومد»، «با یک وعده پرزرق‌وبرق طرف نیستیم»، «نقشه هالیوود رو عوض می‌کنه»، or «برای فیلم‌بازها ملموس‌تره». Say the concrete consequence instead.
+- THIN STORY RULE: when only one or two verified beats exist, say those concrete beats naturally and move on. Never pad a thin item with empty sentences like “این عنوانیه که باید حواسمون بهش باشه”، “همین یک تریلر وارد رادارش کرد”، or “برای مخاطب‌ها جالبه”.
+- Do not force «فیلم‌بازها» / «مخاطب‌ها» into a sentence just to explain why a fact matters. Mention the viewer only when there is a direct viewing consequence (release, availability, ticketing, format, etc.).
 - Never speak pipeline language. No "in the available evidence/sources", "it is not specified", "the data does not show", ledger/audit/verification talk, or any variant («در شواهد موجود»، «مشخص نشده»، «در منابع موجود»). If a detail is unknown, simply leave it out.
 - State a figure's scope once, inside the sentence that gives the figure ("در آخرهفتهٔ افتتاحیه حدود ... فروخت"). Never add a separate sentence that only restates or clarifies scope ("این رقم مربوط به ... است"، "نه فروش کل ..."، "رقمی که دقیقاً مربوط به ...").
 - Speak numbers the way a host says them: round to natural spoken precision within the ledger value ("حدود ۱۰۸ میلیون دلار"، "نزدیک ۲ میلیارد و ۹۰۰ میلیون دلار"). Avoid decimals unless the decimal itself is the point.
@@ -908,6 +913,7 @@ PRIORITIES, in order: (1) every fact is supported, (2) it sounds like one person
 - CASUAL-AUDIENCE FAMILIARITY RULE: on the first important mention of a person or company a general viewer may not place, give the story's familiarity cue once, as a short natural reminder ("<name>، همون <role> که احتمالاً از <best-known work> می‌شناسیدش"), only when a ledger claim supports it. Do not turn it into a biography, do not stack credits, skip it for household names, and never invent an anchor.
 - FUN-FACT BEAT: a strong safe cool_fact that has a matching visual_context item gets one short self-contained sentence, so the editor can give it one shot. Related-work mentions from visual_context may name that title naturally.
 - Box office is a compact rundown with movement and comparison, not separate paragraphs that each restate a title. Business stories are explained in plain language, only as much as a viewer needs.
+- FACT-TO-SPEECH NATURALIZATION: never expose internal data vocabulary verbatim. For Persian speech, prefer «کل/مجموع فروش جهانی تا الان/تا پایان آخرهفته» to «فروش تجمعی جهانی», «اولین آخرهفته بازاکران» to stacked phrases such as «آخرهفته افتتاحیه اکران دوباره», and a direct concrete verb instead of abstract “title/project” language.
 - The INTRO teases this episode's most intriguing concrete hooks, never a template line that fits any week. The OUTRO is brief.
 
 4. LENGTH
@@ -935,6 +941,8 @@ NON-NEGOTIABLE RULES:
 - Do not speak audit, ledger, evidence or pipeline language.
 - Keep conversational Persian and one consistent spoken register.
 - Preserve good lines when possible, but structural correctness and factual support are more important than minimal edits.
+- FLUENCY REPAIR IS PART OF ASSEMBLY REPAIR: if a sentence is factually correct but reads like translated English, internal ledger terminology, or generic AI filler, rewrite it into natural conversational Persian while preserving exactly the same claim. Prefer concrete verbs and ordinary collocations.
+- Never invent a flourish merely to connect two facts. If a story is thin, one clean factual sentence is better than two padded sentences.
 """ + ATTRIBUTION_POLICY + SPOKEN_QUALITY_RULES
 
 
@@ -1119,6 +1127,12 @@ _OUTLET_RE = re.compile(
 )
 _FORMAL_FORMS_RE = re.compile(r"(?<![\w\u200c])(را|است|دارد|آمده|می[\u200c ]?باشد|شده[\u200c ]?اند|کرده[\u200c ]?اند)(?![\w\u200c])")
 _COLLOQUIAL_FORMS_RE = re.compile(r"(?<![\w\u200c])(رو|داره|اومده|هست|شدن|کردن|اینه)(?![\w\u200c])")
+_TRANSLATIONESE_RE = re.compile(
+    r"(عنوان(?:\s+تازه)?\s+رو\s+جلو\s+آورد|وارد\s+رادار|باید\s+حواسمون\s+بهش\s+باشه|"
+    r"از\s+این\s+نبرد\s+بیرون\s+اومد|وعده[‌\s]+پرزرق[‌\s-]*وبرق|"
+    r"برای\s+فیلم[‌\s-]*بازها[^.!؟\n]{0,50}ملموس|فروش\s+تجمعی\s+جهانی)",
+    re.IGNORECASE,
+)
 
 
 def spoken_lint(text: str) -> list[dict]:
@@ -1149,6 +1163,9 @@ def spoken_lint(text: str) -> list[dict]:
     colloquial = _COLLOQUIAL_FORMS_RE.findall(body)
     if formal and colloquial and len(formal) >= 3:
         add("register_drift", f"Mixed register: {len(formal)} formal forms next to {len(colloquial)} conversational forms.", formal)
+    translationese = [m.group(0) for m in _TRANSLATIONESE_RE.finditer(body)]
+    if translationese:
+        add("translationese", "Literal/AI-like Persian phrasing; keep the fact but rewrite with ordinary spoken Persian collocations.", translationese)
     return findings
 
 
