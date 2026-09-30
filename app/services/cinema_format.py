@@ -1131,8 +1131,7 @@ Return ONLY valid JSON:
       "problem": "what is wrong/stale/overstated",
       "correction_basis": "what the supplied evidence supports instead"
     }
-  ],
-  "corrected_narration": "complete narration markdown"
+  ]
 }
 
 STRICT RULES:
@@ -1158,7 +1157,7 @@ STRICT RULES:
 - If two supplied sources conflict and the difference cannot be reconciled from the packet, do not guess. Qualify the claim or mark needs_human_check.
 - Do not silently delete the STORY marker for a corrected claim.
 - Do not add a fact simply because it would make the narration better.
-- If no factual correction is needed, corrected_narration must exactly preserve the supplied draft.
+- You are an auditor only: never return a rewritten narration. List issues; the writer applies them.
 """ + ATTRIBUTION_POLICY + SPOKEN_QUALITY_RULES
 
 

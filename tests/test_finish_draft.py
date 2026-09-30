@@ -87,3 +87,10 @@ def test_polish_that_cuts_the_script_is_rejected(fakes):
     state["polish"] = lambda text: "<!-- STORY:s1 -->\nکوتاه."
     result = _finish(project)
     assert result["text"] == DRAFT and result["fluency_polished"] is False
+
+
+def test_finish_draft_records_step_timings(fakes):
+    _, _, project = fakes
+    timer = main._StepTimer()
+    main._finish_draft(project, [{"id": "s1"}], DRAFT, [], None, "codex_local", "default", "", [], timer=timer)
+    assert [label for label, _ in timer.steps] == ["polish", "fact check + claim audit"]

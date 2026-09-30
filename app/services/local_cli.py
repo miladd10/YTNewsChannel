@@ -199,7 +199,12 @@ def generate_local_text(provider: str, model: str, system_prompt: str, user_prom
         with tempfile.TemporaryDirectory(prefix="ytnews-claude-") as tmp:
             system_path = Path(tmp) / "system.txt"
             system_path.write_text(system_prompt, encoding="utf-8")
-            args = [path, "-p", "--output-format", "text", "--permission-mode", "plan", "--system-prompt-file", str(system_path)]
+            # Text in, text out. Without this the CLI may spend extra turns
+            # reading its empty temp folder or searching the web.
+            args = [path, "-p", "--output-format", "text", "--permission-mode", "plan",
+                    "--disallowedTools", "Bash", "Edit", "Write", "Read", "Glob", "Grep", "WebFetch",
+                    "WebSearch", "Task", "NotebookEdit", "TodoWrite",
+                    "--system-prompt-file", str(system_path)]
             if model and model != "default":
                 args += ["--model", model]
             result = _run(args, timeout=900, cwd=tmp, input_text=user_prompt)

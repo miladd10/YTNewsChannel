@@ -45,6 +45,8 @@ HARD RULES:
 - Prefer fresh preferred evidence for volatile current values. Older values may stay only as explicitly historical claims.
 - Do not create a current cumulative value from an opening-weekend figure.
 - Do not create a weekly #1 claim from weekend evidence, or vice versa.
+
+OUTPUT SIZE: omit every key whose value would be empty, null, false or 0-length; the schema above lists the keys you MAY use, not keys you must repeat. Output compact JSON with no indentation.
 """
 
 NARRATION_CLAIM_EXTRACT_SYSTEM = """Audit a completed cinema-news narration against the supplied verified claim ledger.
@@ -68,6 +70,8 @@ HARD RULES:
 - If no ledger claim supports the exact meaning, use semantic_match=unsupported and no ledger IDs.
 - The narration is colloquial spoken Persian. Everyday scope words are real scope: «این آخر هفته» = the weekend in the ledger claim, «تو آمریکا» = domestic, «تو کل دنیا»/«جهانی» = worldwide, «تا الان» = cumulative to date, «افتتاحیه» = opening, «دوباره اکران» = re-release. When the sentence's wording is consistent with a ledger claim, fill rank/chart_type/market/period_type/date_start/date_end/release_scope/title_identity from that claim and mark it exact or equivalent. Mark a mismatch only when the words actually contradict the ledger scope (weekend said as whole week, domestic said as worldwide, opening said as total so far, re-release said as new film).
 - An intro tease that only previews a story covered later in the body is not a separate claim; do not extract it.
+
+OUTPUT SIZE: omit every key whose value would be empty, null, false or 0-length; the schema above lists the keys you MAY use, not keys you must repeat. Output compact JSON with no indentation.
 """
 
 # Whole-word matching. Persian terms may carry common attached suffixes

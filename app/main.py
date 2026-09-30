@@ -2452,6 +2452,21 @@ def _polish_narration_fluency(
     return polished, True, ""
 
 
+class _StepTimer:
+    """Seconds spent per pipeline step, returned to the UI so slow steps are visible."""
+
+    def __init__(self) -> None:
+        import time
+        self._time = time.monotonic
+        self._last = self._time()
+        self.steps: list[list] = []
+
+    def mark(self, label: str) -> None:
+        current = self._time()
+        self.steps.append([label, round(current - self._last, 1)])
+        self._last = current
+
+
 def _finish_draft(
     project: dict,
     stories: list[dict],
@@ -2463,6 +2478,7 @@ def _finish_draft(
     style_profile_text: str,
     styles: list[dict],
     voice_pairs_text: str = "",
+    timer: "_StepTimer | None" = None,
 ) -> dict:
     """The one post-writing pipeline shared by Generate, Enrich and Revise.
 
@@ -2482,10 +2498,14 @@ def _finish_draft(
         style_profile_text,
         voice_pairs_text + "\n" + build_writer_style_packet(styles, project.get("date_start"), content_type, max_chars=36000),
     )
+    if timer:
+        timer.mark("polish")
     fact_check, claim_audit, structure = _verify_draft(
         project, stories, text, claim_ledger, fresh_sources,
         writer_provider, writer_model, audit_provider, audit_model,
     )
+    if timer:
+        timer.mark("fact check + claim audit")
     text, fact_check, claim_audit, structure, repair_count, repair_error = _repair_narration_until_stable(
         project, stories, text, claim_ledger, fresh_sources, fact_check, claim_audit,
         writer_provider, writer_model, audit_provider, audit_model,
@@ -2493,6 +2513,8 @@ def _finish_draft(
         voice_pairs_text + "\n" + build_writer_style_packet(styles, project.get("date_start"), content_type, max_chars=30000),
         structure=structure,
     )
+    if timer and repair_count + (1 if repair_error else 0):
+        timer.mark("repair + re-check")
     return {
         "text": text,
         "fact_check": fact_check,
@@ -2789,6 +2811,7 @@ def _fallback_content_plan(stories: list[dict], ledger: list[dict]) -> dict:
 @app.post("/api/projects/{project_id}/narration")
 def generate_narration(project_id: str, body: GenerateBody):
     settings = masked_status()
+    timer = _StepTimer()
     provider = body.provider or settings.get("writer_provider", "codex_local")
     model = body.model or settings.get("writer_model", "default")
     with db() as conn:
@@ -2813,6 +2836,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         provider,
         model,
     )
+    timer.mark("claim ledger (articles + web + AI)")
 
     packet = {
         "project": {
@@ -2843,6 +2867,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         model,
     )
     voice_pairs = _ensure_voice_pairs(style_rows, project, provider, model)
+    timer.mark("style blueprint + voice pairs")
 
     # The story order is built in code from the ledger. A separate AI
     # "planner" call used to pick a few claim ids per story; it cost a full
@@ -2871,6 +2896,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         text, actual_provider, actual_model = generate_text(provider, model, WRITER_SYSTEM, user)
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
+    timer.mark("writer")
 
     finished = _finish_draft(
         project,
@@ -2883,6 +2909,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         style_profile.get("profile_text") or "",
         style_rows,
         voice_pairs_text=voice_pairs,
+        timer=timer,
     )
     text = finished["text"]
     fact_check = finished["fact_check"]
@@ -2960,6 +2987,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         "repair_error": repair_error,
         "fluency_polished": bool(fluency_polished),
         "fluency_error": fluency_error,
+        "timings": timer.steps,
     }
 
 
@@ -3116,6 +3144,7 @@ def narration_workspace(project_id: str):
 @app.post("/api/projects/{project_id}/narrations/{narration_id}/enrich-rewrite")
 def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: NarrationEnrichmentRewriteBody):
     settings = masked_status()
+    timer = _StepTimer()
     provider = body.provider or settings.get("writer_provider", "codex_local")
     model = body.model or settings.get("writer_model", "default")
     with db() as conn:
@@ -3144,9 +3173,11 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         model,
     )
     voice_pairs = _ensure_voice_pairs(styles, project, provider, model)
+    timer.mark("style blueprint + voice pairs")
     claim_ledger, fresh_claim_sources, _, _ = _build_verified_claim_ledger(
         project, stories, provider, model
     )
+    timer.mark("claim ledger (articles + web + AI)")
 
     user = "\n".join([
         "<current_week_authoritative_packet>",
@@ -3185,6 +3216,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         )
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
+    timer.mark("writer")
 
     finished = _finish_draft(
         project,
@@ -3197,6 +3229,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         style_profile.get("profile_text") or "",
         styles,
         voice_pairs_text=voice_pairs,
+        timer=timer,
     )
     rewritten_text = finished["text"]
     fact_check = finished["fact_check"]
@@ -3271,6 +3304,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         "repair_error": repair_error,
         "fluency_polished": bool(fluency_polished),
         "fluency_error": fluency_error,
+        "timings": timer.steps,
     }
 
 
@@ -3443,6 +3477,7 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
 @app.post("/api/projects/{project_id}/narrations/{narration_id}/revise")
 def revise_narration(project_id: str, narration_id: str, body: NarrationRevisionBody):
     settings = masked_status()
+    timer = _StepTimer()
     provider = body.provider or settings.get("writer_provider", "codex_local")
     model = body.model or settings.get("writer_model", "default")
     with db() as conn:
@@ -3492,6 +3527,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         model,
     )
     voice_pairs = _ensure_voice_pairs(styles, project, provider, model)
+    timer.mark("style blueprint + voice pairs")
     if reused_ledger is not None:
         # Revise against the same ledger the reviewed draft was written and
         # audited against, so claim ids cited in the review stay valid.
@@ -3500,6 +3536,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         claim_ledger, fresh_claim_sources, _, _ = _build_verified_claim_ledger(
             project, stories, provider, model
         )
+    timer.mark("claim ledger (articles + web + AI)")
 
     user = "\n".join([
         "<current_week_authoritative_packet>",
@@ -3541,6 +3578,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         revised_text, actual_provider, actual_model = generate_text(provider, model, REVISION_SYSTEM, user)
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
+    timer.mark("writer")
 
     finished = _finish_draft(
         project,
@@ -3553,6 +3591,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         style_profile.get("profile_text") or "",
         styles,
         voice_pairs_text=voice_pairs,
+        timer=timer,
     )
     revised_text = finished["text"]
     fact_check = finished["fact_check"]
@@ -3621,6 +3660,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         "repair_error": repair_error,
         "fluency_polished": bool(fluency_polished),
         "fluency_error": fluency_error,
+        "timings": timer.steps,
     }
 
 
