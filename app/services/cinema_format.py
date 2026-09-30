@@ -1001,7 +1001,6 @@ The real episodes in <style_corpus> are the voice. Their facts are old and unusa
 - He TELLS each item like a story to a friend: what happened, the detail that makes it interesting (often «جالبش اینجاست که ...» / «نکته جالب اینه که ...»), then what's next. Several connected sentences per item, not one headline.
 - «یعنی» always brings something NEW: a number he worked out, a comparison, what it means in money or dates («یعنی همینجا ۲۰ میلیون ضرر داد»، «یعنی فقط دو تا فیلم تو تاریخ ازش بیشتر فروختن»). It never restates the sentence before it and never ends an item with a general takeaway such as «یعنی ... کنجکاوی رو بیشتر می‌کنه»، «یعنی هنوز فاصله زیادی داریم»، «یعنی فقط یه فرصت محدود داره». If there is nothing new to add, end on the fact. At most one or two per item.
 - He says what happened with the doer as subject and an everyday verb: «پارامونت با دوازده ایالت به توافق رسید» (not «ایالت‌ها شکایت رو حل‌وفصل کردن»)، «اسم سریال جدیدش مشخص شد: ...» (not «اسمش ... هستش»)، «قراره ... پخش بشه» (not «طبق اعلامی که شده»)، «خبر اومد که» (not «خبر رسید که»). No semicolons: he talks in commas and new sentences.
-- Industry jargon is never translated literally. Say the concrete thing the viewer knows: «نسخه ۷۰ میلی‌متری»، «پرده آیمکس»، «سینما»، «اول تو سینما، بعد تو نتفلیکس». Not calques like «فرمت بزرگ» (large format)، «پنجره اکران» (release window)، «اکران پریمیوم»، «عرضه همزمان». And when you refer back to something, repeat its concrete name («با همون نسخه ۷۰ میلی‌متری») instead of «اون + a generic English-sounding noun» («با اون فرمت بزرگ»).
 - If a new title sounds almost like an older famous one, he points it out in passing («اسمش خیلی شبیه ... ـه») instead of letting it confuse the listener.
 - He retells what people said as colloquial indirect speech: «گفتش که ...»، «می‌گفت ...»، «خودشم گفته ...». Not «اظهار داشت» or «اعلام کرده است».
 - He explains money and business in kitchen-table terms: «... ۵۰ میلیون خرید در حالی که بودجه‌ش ۷۰ میلیون بوده؛ یعنی همینجا ۲۰ میلیون ضرر داد». Numbers are spoken simply («۲۰ میلیون دلار»، «۱ میلیارد و ۵۰۰ میلیون دلار»، «نزدیک ۲ میلیارد»).
@@ -1388,8 +1387,7 @@ _COLLOQUIAL_FORMS_RE = re.compile(r"(?<![\w\u200c])(رو|داره|اومده|ه�
 _TRANSLATIONESE_RE = re.compile(
     r"(عنوان(?:\s+تازه)?\s+رو\s+جلو\s+آورد|وارد\s+رادار|باید\s+حواسمون\s+بهش\s+باشه|"
     r"از\s+این\s+نبرد\s+بیرون\s+اومد|وعده[‌\s]+پرزرق[‌\s-]*وبرق|"
-    r"برای\s+فیلم[‌\s-]*بازها[^.!؟\n]{0,50}ملموس|فروش\s+تجمعی\s+جهانی|"
-    r"فرمت(?:\s+های)?\s+(?:بزرگ|پریمیوم|ممتاز)|پنجره(?:ٔ|ی)?\s+(?:اکران|نمایش|انتشار)|اکران\s+پریمیوم|عرضه(?:ٔ|ی)?\s+همزمان)",
+    r"برای\s+فیلم[‌\s-]*بازها[^.!؟\n]{0,50}ملموس|فروش\s+تجمعی\s+جهانی)",
     re.IGNORECASE,
 )
 

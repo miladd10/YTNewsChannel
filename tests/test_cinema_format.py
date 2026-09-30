@@ -713,11 +713,3 @@ def test_lint_flags_yani_padding_semicolons_and_repeated_estimates():
     rules = {f["rule"] for f in spoken_lint(draft)}
     assert {"yani_overuse", "semicolons", "repeated_attribution"} <= rules
     assert "«یعنی» always brings something NEW" in WRITER_SYSTEM
-
-
-def test_lint_flags_literal_industry_jargon():
-    from app.services.cinema_format import spoken_lint, WRITER_SYSTEM
-    draft = "<!-- STORY:s -->\nاگه کسی بخواد فیلم رو با اون فرمت بزرگ ببینه، پنجره اکران کوتاهه."
-    found = [f for f in spoken_lint(draft) if f["rule"] == "translationese"]
-    assert found and any("فرمت بزرگ" in e for e in found[0]["examples"])
-    assert "Industry jargon is never translated literally" in WRITER_SYSTEM
