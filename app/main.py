@@ -57,6 +57,7 @@ from .services.cinema_format import (
     parse_review_gate,
     spoken_lint,
     style_corpus_hash,
+    style_reference_kind,
     style_rows_for_content_type,
     style_rows_for_window,
     usable_style_transcripts,
@@ -2977,6 +2978,15 @@ def narration_workspace(project_id: str):
         channel = project.get("channel") or "cinema"
         content_type = project.get("content_type") or "weekly_news"
         styles = _style_transcripts(conn, channel, content_type)
+        direct_style_rows = style_rows_for_window(
+            styles,
+            project.get("date_start"),
+            content_type,
+        )
+        direct_style_ids = {str(row.get("id") or "") for row in direct_style_rows}
+        for style in styles:
+            style["reference_kind"] = style_reference_kind(style)
+            style["writer_direct_sample"] = str(style.get("id") or "") in direct_style_ids
         style_profile = _style_profile_status(conn, channel, content_type, styles)
         claim_ledger_entries, narration_claim_checks = _claim_rows_for_workspace(conn, project_id)
     return {
