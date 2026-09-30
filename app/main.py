@@ -2040,6 +2040,7 @@ def _repair_narration_until_stable(
     reviewer_provider: str,
     reviewer_model: str,
     style_profile_text: str = "",
+    style_corpus_text: str = "",
     max_repairs: int = 2,
 ) -> tuple[str, dict, dict, dict, int, str]:
     """Repair deterministic assembly/claim failures before exposing a draft.
@@ -2096,6 +2097,10 @@ def _repair_narration_until_stable(
             "<style_blueprint>",
             style_profile_text or "",
             "</style_blueprint>",
+            "",
+            "<style_corpus>",
+            style_corpus_text or "",
+            "</style_corpus>",
             "",
             "<draft_to_repair>",
             text,
@@ -2425,6 +2430,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         audit_provider,
         audit_model,
         style_profile.get("profile_text") or "",
+        build_style_packet(style_rows_for_window(style_rows, project.get("date_start")), max_chars=30000),
     )
 
     narration_id = str(uuid.uuid4())
@@ -2735,6 +2741,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         audit_provider,
         audit_model,
         style_profile.get("profile_text") or "",
+        build_style_packet(style_rows_for_window(styles, project.get("date_start")), max_chars=30000),
     )
 
     new_id = str(uuid.uuid4())
@@ -3076,6 +3083,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         audit_provider,
         audit_model,
         style_profile.get("profile_text") or "",
+        build_style_packet(style_rows_for_window(styles, project.get("date_start")), max_chars=30000),
     )
 
     new_id = str(uuid.uuid4())
