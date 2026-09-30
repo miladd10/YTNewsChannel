@@ -63,6 +63,10 @@ from .services.cinema_format import (
     style_rows_for_content_type,
     style_rows_for_window,
     writer_style_rows_for_window,
+    VOICE_PAIRS_SYSTEM,
+    voice_pair_passages,
+    voice_pairs_hash,
+    voice_pairs_packet,
     usable_style_transcripts,
 )
 from .services.research import (
@@ -1574,6 +1578,50 @@ def _ensure_style_profile(
     return status
 
 
+def _ensure_voice_pairs(styles: list[dict], project: dict, provider: str, model: str) -> str:
+    """English-news -> host-speech pairs built from the direct references.
+
+    Rules and banned-phrase lists can never cover every calque. Instead the
+    writers see real examples of the exact transformation they perform: the
+    host's verbatim passages next to the dry English news they correspond to.
+    Built once per reference set (one AI call) and cached. Failure is silent:
+    writing continues without pairs.
+    """
+    rows = writer_style_rows_for_window(
+        styles, project.get("date_start"), project.get("content_type") or "weekly_news", max_rows=4,
+    )
+    passages = voice_pair_passages(rows)
+    if not passages:
+        return ""
+    corpus_hash = voice_pairs_hash(passages)
+    with db() as conn:
+        row = conn.execute("SELECT data_json FROM voice_pairs WHERE corpus_hash=?", (corpus_hash,)).fetchone()
+    if row:
+        try:
+            return voice_pairs_packet(json.loads(row["data_json"] or "[]"))
+        except Exception:
+            pass
+    numbered = "\n\n".join(f"[{index + 1}] {passage}" for index, passage in enumerate(passages))
+    try:
+        raw, actual_provider, actual_model = generate_text(provider, model, VOICE_PAIRS_SYSTEM, numbered)
+        english = _parse_json_object_text(raw).get("english") or []
+    except Exception:
+        return ""
+    if not isinstance(english, list) or len(english) != len(passages):
+        return ""
+    pairs = [
+        {"english": str(en or "").strip(), "persian": fa}
+        for en, fa in zip(english, passages)
+        if str(en or "").strip()
+    ]
+    with db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO voice_pairs(corpus_hash,data_json,provider,model,created_at) VALUES (?,?,?,?,?)",
+            (corpus_hash, json.dumps(pairs, ensure_ascii=False), actual_provider, actual_model, now()),
+        )
+    return voice_pairs_packet(pairs)
+
+
 def _sectioned_story_packet(stories: list[dict]) -> list[dict]:
     result = []
     for section in CINEMA_WEEKLY_FORMAT:
@@ -2414,6 +2462,7 @@ def _finish_draft(
     writer_model: str,
     style_profile_text: str,
     styles: list[dict],
+    voice_pairs_text: str = "",
 ) -> dict:
     """The one post-writing pipeline shared by Generate, Enrich and Revise.
 
@@ -2431,7 +2480,7 @@ def _finish_draft(
     text, fluency_polished, fluency_error = _polish_narration_fluency(
         project, stories, text, claim_ledger, writer_provider, writer_model,
         style_profile_text,
-        build_writer_style_packet(styles, project.get("date_start"), content_type, max_chars=42000),
+        voice_pairs_text + "\n" + build_writer_style_packet(styles, project.get("date_start"), content_type, max_chars=36000),
     )
     fact_check, claim_audit, structure = _verify_draft(
         project, stories, text, claim_ledger, fresh_sources,
@@ -2441,7 +2490,7 @@ def _finish_draft(
         project, stories, text, claim_ledger, fresh_sources, fact_check, claim_audit,
         writer_provider, writer_model, audit_provider, audit_model,
         style_profile_text,
-        build_writer_style_packet(styles, project.get("date_start"), content_type, max_chars=30000),
+        voice_pairs_text + "\n" + build_writer_style_packet(styles, project.get("date_start"), content_type, max_chars=30000),
         structure=structure,
     )
     return {
@@ -2793,6 +2842,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         provider,
         model,
     )
+    voice_pairs = _ensure_voice_pairs(style_rows, project, provider, model)
 
     # The story order is built in code from the ledger. A separate AI
     # "planner" call used to pick a few claim ids per story; it cost a full
@@ -2814,7 +2864,8 @@ def generate_narration(project_id: str, body: GenerateBody):
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_writer_style_packet(style_rows, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=52000),
+        voice_pairs,
+        build_writer_style_packet(style_rows, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=40000),
     ])
     try:
         text, actual_provider, actual_model = generate_text(provider, model, WRITER_SYSTEM, user)
@@ -2831,6 +2882,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         actual_model,
         style_profile.get("profile_text") or "",
         style_rows,
+        voice_pairs_text=voice_pairs,
     )
     text = finished["text"]
     fact_check = finished["fact_check"]
@@ -3091,6 +3143,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         provider,
         model,
     )
+    voice_pairs = _ensure_voice_pairs(styles, project, provider, model)
     claim_ledger, fresh_claim_sources, _, _ = _build_verified_claim_ledger(
         project, stories, provider, model
     )
@@ -3116,7 +3169,8 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_writer_style_packet(styles, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=52000),
+        voice_pairs,
+        build_writer_style_packet(styles, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=40000),
         "",
         "<existing_first_draft>",
         draft["content"],
@@ -3142,6 +3196,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         actual_model,
         style_profile.get("profile_text") or "",
         styles,
+        voice_pairs_text=voice_pairs,
     )
     rewritten_text = finished["text"]
     fact_check = finished["fact_check"]
@@ -3308,6 +3363,7 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
         provider,
         model,
     )
+    voice_pairs = _ensure_voice_pairs(styles, project, provider, model)
 
     user = "\n".join([
         "<current_week_authoritative_packet>",
@@ -3340,7 +3396,8 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_writer_style_packet(styles, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=52000),
+        voice_pairs,
+        build_writer_style_packet(styles, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=40000),
         "",
         "<draft_to_review>",
         draft["content"],
@@ -3434,6 +3491,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         provider,
         model,
     )
+    voice_pairs = _ensure_voice_pairs(styles, project, provider, model)
     if reused_ledger is not None:
         # Revise against the same ledger the reviewed draft was written and
         # audited against, so claim ids cited in the review stay valid.
@@ -3468,7 +3526,8 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_writer_style_packet(styles, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=52000),
+        voice_pairs,
+        build_writer_style_packet(styles, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=40000),
         "",
         "<existing_narration>",
         draft["content"],
@@ -3493,6 +3552,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         actual_model,
         style_profile.get("profile_text") or "",
         styles,
+        voice_pairs_text=voice_pairs,
     )
     revised_text = finished["text"]
     fact_check = finished["fact_check"]

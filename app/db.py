@@ -350,6 +350,14 @@ def init_db() -> None:
                 FOREIGN KEY(story_id) REFERENCES stories(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS voice_pairs (
+                corpus_hash TEXT PRIMARY KEY,
+                data_json TEXT NOT NULL,
+                provider TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS pronunciations (
                 language TEXT NOT NULL,
                 written TEXT NOT NULL,

@@ -854,6 +854,74 @@ def build_writer_style_packet(
     return "\n".join(chunks)[:budget + 4000]
 
 
+VOICE_PAIRS_SCHEMA_VERSION = 1
+_PAIR_CUE_RE = re.compile(r"[0-9۰-۹]|یعنی|جالب|گفتش|می[‌ ]?گفت|اکران|فروش|قراره|برای\s+همین")
+
+
+def voice_pair_passages(rows: Iterable[dict], *, per_episode: int = 5, size: int = 420) -> list[str]:
+    """Short verbatim passages of the host, spread across the direct references.
+
+    Passages are cut on word boundaries and preferably around beats that carry
+    facts (numbers, releases, quotes, «یعنی»), because those are the sentences
+    whose English-news -> spoken-Persian transformation the writer must learn.
+    """
+    passages: list[str] = []
+    for row in rows:
+        text = _normalize_style_reference_text(str(row.get("content") or ""))
+        words = text.split()
+        if len(words) < 80:
+            continue
+        step_words = max(40, size // 6)
+        windows = []
+        for start in range(20, len(words) - step_words, step_words):
+            chunk = " ".join(words[start:start + step_words])
+            score = len(_PAIR_CUE_RE.findall(chunk))
+            windows.append((score, start, chunk))
+        if not windows:
+            continue
+        # evenly spaced across the episode, best-scoring window in each slice
+        slice_len = max(1, len(windows) // per_episode)
+        for index in range(per_episode):
+            part = windows[index * slice_len:(index + 1) * slice_len]
+            if part:
+                passages.append(max(part, key=lambda item: item[0])[2])
+    return passages
+
+
+def voice_pairs_hash(passages: list[str]) -> str:
+    digest = hashlib.sha256()
+    digest.update(f"v{VOICE_PAIRS_SCHEMA_VERSION}".encode())
+    for passage in passages:
+        digest.update(passage.encode("utf-8"))
+    return digest.hexdigest()
+
+
+VOICE_PAIRS_SYSTEM = """You receive short passages spoken by a Persian cinema-news YouTube host (automatic transcripts, so there are spelling mistakes and no punctuation).
+
+For EACH passage, write the dry English version a trade outlet or wire service would have printed for the same facts: neutral newswire English, the way the facts would appear in an English source article. Do not translate the host's jokes, asides or tone; report only the facts in newswire style. If a passage has almost no facts, write the one-line English news sentence it implies.
+
+Return ONLY JSON: {"english": ["...", "..."]} with exactly one string per passage, in the same order."""
+
+
+def voice_pairs_packet(pairs: list[dict]) -> str:
+    """The writer-facing few-shot: English news in, the host's real speech out."""
+    usable = [pair for pair in pairs if pair.get("english") and pair.get("persian")]
+    if not usable:
+        return ""
+    lines = [
+        "<voice_pairs>",
+        "Each pair is REAL: HOST is verbatim from the host's episodes, EN is the English news it corresponds to.",
+        "This is exactly your job: the ledger gives you EN-style facts; you must produce HOST-style speech.",
+        "Learn the transformation (word order, verbs, how numbers/scope/jargon become everyday words, how he connects beats). The facts are old: never reuse them.",
+    ]
+    for pair in usable:
+        lines.append(f"EN: {pair['english']}")
+        lines.append(f"HOST: {pair['persian']}")
+        lines.append("")
+    lines.append("</voice_pairs>")
+    return "\n".join(lines)
+
+
 def build_style_packet(transcripts: Iterable[dict], max_chars: int = 120000) -> str:
     enabled = usable_style_transcripts(transcripts)
     enabled.sort(
@@ -996,7 +1064,9 @@ HARD RULES:
 
 HOST_VOICE = """
 HOW THIS HOST ACTUALLY TALKS (read this first; it outranks every generic "good writing" instinct)
-The real episodes in <style_corpus> are the voice. Their facts are old and unusable; their way of talking is the target. What they consistently do:
+The real episodes in <style_corpus> are the voice, and <voice_pairs> show the exact transformation you perform: English news in (EN), the host's real speech out (HOST). Their facts are old and unusable; their way of talking is the target.
+THE ONE TEST, for every sentence you write: could the HOST in those pairs have said it exactly like this? If a listener could guess the English words it came from (English word order or sentence shape, an English idiom, a trade term turned into Persian word by word, a vague «اون ...» pointing back to an English-style noun), it fails. Do not patch the words: go back to the underlying fact and say it again the way the HOST lines say such things. This test covers cases no list can.
+What the episodes consistently do:
 - Tehrani spoken Persian all the way through, never written Persian: «رو» «داره» «اومد» «میشه» «اینا» «یه» «خیلی» «یه عالمه» «دیگه» (as a particle: «این نقشو بازی می‌کنه دیگه»). He often adds the spoken -ش to past verbs: «گفتش»، «کردش»، «رسوندش»، «شدش»، «اومدش». Use these naturally, not in every sentence.
 - He TELLS each item like a story to a friend: what happened, the detail that makes it interesting (often «جالبش اینجاست که ...» / «نکته جالب اینه که ...»), then what's next. Several connected sentences per item, not one headline.
 - «یعنی» always brings something NEW: a number he worked out, a comparison, what it means in money or dates («یعنی همینجا ۲۰ میلیون ضرر داد»، «یعنی فقط دو تا فیلم تو تاریخ ازش بیشتر فروختن»). It never restates the sentence before it and never ends an item with a general takeaway such as «یعنی ... کنجکاوی رو بیشتر می‌کنه»، «یعنی هنوز فاصله زیادی داریم»، «یعنی فقط یه فرصت محدود داره». If there is nothing new to add, end on the fact. At most one or two per item.
@@ -1129,6 +1199,8 @@ NARRATION_FLUENCY_POLISH_SYSTEM = """You are the final spoken-Persian editor for
 
 Your job is NOT to add reporting, facts, jokes, hype, or length. Your job is to make the already verified draft sound like a real Persian-speaking host rather than translated entertainment-news copy.
 
+HOW: read the draft sentence by sentence as a Persian listener and apply THE ONE TEST from the voice section below. Most sentences in a weak draft fail it somewhere; rewrite each failing sentence from its underlying fact, the way the HOST lines in <voice_pairs> say such things. Leave sentences that pass untouched.
+
 You receive:
 - the complete current narration;
 - the verified claim ledger as a factual boundary;
@@ -1206,6 +1278,7 @@ HOW TO JUDGE FACTS
 - automatic_fact_check is the fresh-evidence fact check. If its status is needs_human_check, every issue it lists that is still present in the draft is a blocking issue.
 - The claim audit is the fact gate. Blocked audit claims are blocking, but DO NOT spend one reviewer issue per claim. Summarize all blocked claim sentences in ONE factual issue when possible; the revision writer receives the full claim-audit list directly and must fix every blocked claim.
 - Audit claims with status needs_review are low-risk context (cast, credit, production or company detail) that has no exact ledger twin. They are NOT blocking. Raise one only if the packet or a source contradicts it or it reads like an invented detail; otherwise leave it alone. Do not ask the writer to delete a correct, natural sentence just because it is not a ledger quote.
+- VOICE: apply THE ONE TEST from <voice_pairs>: a sentence whose English source a listener could guess (English sentence shape, a literal trade term, an English idiom) is a Style issue even if every word is Persian. Report such sentences together in one issue with their spoken rewrite; do not list phrase by phrase.
 - Colloquial scope («تو آمریکا»، «این آخر هفته»، «تا الان»، «تو کل دنیا») is correct and precise enough. Never ask the writer to replace it with database wording, date ranges or outlet names.
 - Beyond the audit, raise a factual issue only when you can point to the exact draft sentence and the exact ledger claim or source that contradicts it: wrong scope (opening vs cumulative, weekend vs weekly, domestic vs worldwide, estimate vs final, limited vs wide release), an older figure presented as current, a milestone called "approaching" after it was crossed, a background fact presented as this week's news, a fact under the wrong STORY marker, or a story that does not narrate its news_hook.
 - Never ask the writer to add a fact that is not a verified ledger claim or a safe_to_narrate spice angle; name the ledger id or angle you want used.
