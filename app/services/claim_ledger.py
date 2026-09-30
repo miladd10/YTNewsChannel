@@ -492,6 +492,50 @@ def ledger_for_writer(claims: list[dict]) -> list[dict]:
             if claim.get("verification_status") in {"verified", "verified_with_attribution"}]
 
 
+def ledger_for_prose(claims: list[dict]) -> list[dict]:
+    """Compact ledger view for the prose writers.
+
+    The full record has ~28 structured fields (market, chart_type,
+    period_type...). Handing those to a writer invites it to translate the
+    field labels into database Persian. Writers get the fact, its value and
+    one short scope note; auditors keep the full record.
+    """
+    output = []
+    for claim in claims:
+        if claim.get("verification_status") not in {"verified", "verified_with_attribution"}:
+            continue
+        rank = claim.get("rank")
+        dates = " to ".join(v for v in (_clean(claim.get("date_start")), _clean(claim.get("date_end"))) if v)
+        estimate = _clean(claim.get("estimate_status")).lower()
+        scope_bits = [
+            _clean(claim.get("market")), _clean(claim.get("region")),
+            _clean(claim.get("period_type")).replace("_", " "),
+            (f"#{rank} on {_clean(claim.get('chart_type')) or 'chart'}" if rank not in (None, "") else ""),
+            dates, (f"as of {_clean(claim.get('as_of_date'))}" if _clean(claim.get("as_of_date")) else ""),
+            _clean(claim.get("release_scope")).replace("_", " "),
+            _clean(claim.get("title_identity")).replace("_", " "),
+            _clean(claim.get("metric")).replace("_", " "),
+            (estimate.replace("_", " ") if estimate and estimate != "confirmed" else ""),
+        ]
+        item = {
+            "id": claim.get("id"),
+            "story_id": claim.get("story_id"),
+            "role": claim.get("claim_role"),
+            "fact": claim.get("canonical_text"),
+        }
+        if _clean(claim.get("value_text")):
+            item["value"] = _clean(claim.get("value_text"))
+        scope = ", ".join(bit for bit in scope_bits if bit)
+        if scope:
+            item["scope"] = scope
+        if claim.get("attribution_required"):
+            item["say_lightly_attributed"] = True
+        if _clean(claim.get("conflict_note")):
+            item["conflict_note"] = _clean(claim.get("conflict_note"))
+        output.append(item)
+    return output
+
+
 _SCOPE_CANON = {
     # field -> ordered (canonical, pattern) pairs; first match wins.
     "market": (

@@ -225,7 +225,7 @@ narrationHtml=async function(){
 generateNarration=async function(){
   const b=$('#generateNarrationBtn');if(b){b.disabled=true;b.textContent='Writing...'}
   const s=state.settings?.ai||{};
-  startRunStatus({title:'Writing + validating baseline narration',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading selected sections','Building verified atomic Claim Ledger','Planning only ledger-backed facts','Writing spoken draft','Polishing spoken Persian','Fact check + claim audit (parallel)','Repairing only if it helps','Draft saved']});
+  startRunStatus({title:'Writing + validating baseline narration',meta:`${s.writer_provider||'writer'} - ${s.writer_model||'default'}`,steps:['Loading selected sections','Building verified atomic Claim Ledger','Writing spoken draft','Polishing spoken Persian','Fact check + claim audit (parallel)','Repairing only if it helps','Draft saved']});
   try{
     const r=await api(`/api/projects/${state.project.id}/narration`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:s.writer_provider,model:s.writer_model})});
     state.narrationDraftId=r.id;state.lastNarrationReview=null;state.project=await api(`/api/projects/${state.project.id}`);await renderStage();

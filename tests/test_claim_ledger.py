@@ -629,3 +629,17 @@ def test_risky_unmatched_claims_still_block():
         result = claim_ledger._validate_spoken_claim(
             {"story_id": "s1", "semantic_match": "unsupported", "ledger_claim_ids": [], **raw}, ledger)
         assert result["status"] == "blocked", raw
+
+
+def test_prose_ledger_is_compact_and_hides_field_labels():
+    claims = [{"id": "C1", "story_id": "s", "claim_role": "current_hook", "claim_type": "box_office",
+               "canonical_text": "Film X grossed $20 million in its domestic opening weekend.",
+               "value_text": "$20 million", "market": "domestic", "period_type": "opening_weekend",
+               "estimate_status": "reported_estimate", "attribution_required": True,
+               "verification_status": "verified_with_attribution"},
+              {"id": "C2", "story_id": "s", "canonical_text": "x", "verification_status": "blocked"}]
+    rows = claim_ledger.ledger_for_prose(claims)
+    assert len(rows) == 1
+    row = rows[0]
+    assert set(row) <= {"id", "story_id", "role", "fact", "value", "scope", "say_lightly_attributed", "conflict_note"}
+    assert row["scope"] == "domestic, opening weekend, reported estimate" and row["say_lightly_attributed"]

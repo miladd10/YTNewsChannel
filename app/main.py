@@ -21,6 +21,7 @@ from .services.ai import generate_text
 from .services.claim_ledger import (
     audit_narration_claims,
     build_claim_ledger,
+    ledger_for_prose,
     ledger_for_writer,
     ledger_summary,
 )
@@ -2267,7 +2268,7 @@ def _repair_narration_until_stable(
             "format_blueprint": format_packet(),
             "length_target": length_target(project, text),
             "approved_sections": _narration_story_packet(stories),
-            "verified_claim_ledger": ledger_for_writer(claim_ledger),
+            "verified_claim_ledger": ledger_for_prose(claim_ledger),
             "structure_audit": structure,
             "automatic_fact_check": {
                 "status": fact_check.get("status") if fact_check else "not_run",
@@ -2361,7 +2362,7 @@ def _polish_narration_fluency(
     original = str(text or "").strip()
     user = "\n".join([
         "<verified_claim_ledger>",
-        json.dumps(ledger_for_writer(claim_ledger), ensure_ascii=False),
+        json.dumps(ledger_for_prose(claim_ledger), ensure_ascii=False),
         "</verified_claim_ledger>",
         "",
         "<style_blueprint>",
@@ -2680,7 +2681,7 @@ def _validate_content_plan(plan: dict, stories: list[dict], ledger: list[dict]) 
 
 
 def _fallback_content_plan(stories: list[dict], ledger: list[dict]) -> dict:
-    """Deterministic claim-id plan used when the planner returns malformed structure."""
+    """Story order + every verified claim per story, built in code (no AI call)."""
     claims_by_story: dict[str, list[dict]] = {}
     for claim in ledger:
         if claim.get("verification_status") not in {"verified", "verified_with_attribution"}:
@@ -2696,17 +2697,17 @@ def _fallback_content_plan(stories: list[dict], ledger: list[dict]) -> dict:
                 continue
             sid = str(story.get("id") or "")
             claims = claims_by_story.get(sid, [])
-            hooks = [str(x["id"]) for x in claims if x.get("claim_role") == "current_hook"][:2]
-            background = [str(x["id"]) for x in claims if x.get("claim_role") == "background"][:1]
+            hooks = [str(x["id"]) for x in claims if x.get("claim_role") == "current_hook"]
+            background = [str(x["id"]) for x in claims if x.get("claim_role") == "background"]
             familiarity = [
                 str(x["id"]) for x in claims
                 if x.get("claim_type") == "person_credit" and x.get("claim_role") != "current_hook"
-            ][:1]
+            ][:2]
             used = set(hooks + background + familiarity)
             details = [
                 str(x["id"]) for x in claims
-                if str(x.get("id")) not in used and x.get("claim_role") == "supporting"
-            ][:5]
+                if str(x.get("id")) not in used
+            ]
             if hooks and len(intro_claim_ids) < 3:
                 intro_claim_ids.append(hooks[0])
             total_beats = len(hooks) + len(background) + len(familiarity) + len(details)
@@ -2770,7 +2771,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         "format_blueprint": format_packet(),
         "length_target": length_target(project, None),
         "approved_sections": _narration_story_packet(baseline_stories),
-        "verified_claim_ledger": ledger_for_writer(claim_ledger),
+        "verified_claim_ledger": ledger_for_prose(claim_ledger),
         "additional_instructions": body.instructions,
     }
     channel = project.get("channel") or "cinema"
@@ -2783,25 +2784,12 @@ def generate_narration(project_id: str, body: GenerateBody):
         model,
     )
 
+    # The story order is built in code from the ledger. A separate AI
+    # "planner" call used to pick a few claim ids per story; it cost a full
+    # model round-trip and, worse, withheld supported facts from the writer,
+    # which is one reason drafts came out as one-line headlines.
     content_plan_error = ""
-    try:
-        plan_text, _, _ = generate_text(
-            provider,
-            model,
-            CONTENT_PLAN_SYSTEM,
-            json.dumps(packet, ensure_ascii=False),
-        )
-        content_plan = _parse_json_object_text(plan_text)
-        plan_errors = _validate_content_plan(content_plan, baseline_stories, claim_ledger)
-        if plan_errors:
-            raise ValueError("; ".join(plan_errors[:12]))
-    except Exception as exc:
-        # The fallback is deterministic and claim-id-only. It never invents
-        # prose/facts and still guarantees every selected current hook reaches
-        # the writer if the planner returns malformed JSON or bad claim ids.
-        content_plan_error = str(exc)
-        content_plan = _fallback_content_plan(baseline_stories, claim_ledger)
-        content_plan["planner_error"] = content_plan_error
+    content_plan = _fallback_content_plan(baseline_stories, claim_ledger)
 
     user = "\n".join([
         "<current_week_authoritative_packet>",
@@ -3110,7 +3098,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
             "length_target": length_target(project, draft["content"]),
             "spoken_lint": spoken_lint(draft["content"]),
             "approved_sections": _narration_story_packet(stories),
-            "verified_claim_ledger": ledger_for_writer(claim_ledger),
+            "verified_claim_ledger": ledger_for_prose(claim_ledger),
         }, ensure_ascii=False),
         "</current_week_authoritative_packet>",
         "",
@@ -3462,7 +3450,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
                 ],
             },
             "approved_sections": _narration_story_packet(stories),
-            "verified_claim_ledger": ledger_for_writer(claim_ledger),
+            "verified_claim_ledger": ledger_for_prose(claim_ledger),
         }, ensure_ascii=False),
         "</current_week_authoritative_packet>",
         "",
