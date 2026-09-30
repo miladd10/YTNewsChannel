@@ -73,11 +73,11 @@ HARD RULES:
 # «بازاکران» is not «اکران», «فروشگاه» is not «فروش», «هزاران» is not «هزار».
 _FA_SUFFIX = r"(?:‌?(?:های|ها|اش|شون|تون|مون|ش|ی|ه))?ٔ?"
 _FA_RISK_TERMS = (
-    r"میلیون|میلیارد|هزار|درصد|بودجه|درآمد|فروش|گیشه|رتبه|صدر\s*جدول|"
+    r"میلیون|میلیارد|هزار|درصد|بودجه|درآمد|رتبه|صدر\s*جدول|"
     r"ارزش\s+(?:معامله|خرید|بازار|قرارداد)|دلار"
 )
 _EN_RISK_TERMS = (
-    r"million|billion|percent|budget|revenue|gross(?:ed|es)?|box\s*office|"
+    r"million|billion|percent|budget|revenue|"
     r"rank(?:ed|ing|s)?|number\s+one|top(?:ped|s)?\s+the\s+chart|"
     r"pvod|vod|valuation|enterprise\s+value|equity\s+value"
 )
