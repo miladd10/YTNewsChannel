@@ -697,6 +697,19 @@ def test_lint_flags_database_persian_and_headline_items():
 
 def test_lint_flags_latin_titles_in_persian_narration():
     from app.services.cinema_format import spoken_lint, WRITER_SYSTEM
-    rules = {f["rule"] for f in spoken_lint("<!-- STORY:s -->\nنتفلیکس تریلر Glass Harbor رو منتشر کرد.")}
-    assert "latin_script" in rules
-    assert "No Latin script in the narration" in WRITER_SYSTEM
+    bare = "<!-- STORY:s -->\nنتفلیکس تریلر Glass Harbor رو منتشر کرد."
+    assert "latin_script" in {f["rule"] for f in spoken_lint(bare)}
+    good = "<!-- STORY:s -->\nنتفلیکس تریلر «بندر شیشه‌ای» یا همون Glass Harbor رو منتشر کرد. بندر شیشه‌ای ماه بعد میاد."
+    assert "latin_script" not in {f["rule"] for f in spoken_lint(good)}
+    repeated = good + " Glass Harbor هم اسم خوبیه."
+    assert "latin_script" in {f["rule"] for f in spoken_lint(repeated)}
+    assert "یا همون Paper Tiger" in WRITER_SYSTEM
+
+
+def test_lint_flags_yani_padding_semicolons_and_repeated_estimates():
+    from app.services.cinema_format import spoken_lint, WRITER_SYSTEM
+    draft = ("<!-- STORY:s -->\nفیلم اومد؛ یعنی خبر خوبیه. یعنی منتظرشیم. یعنی باید دید. "
+             "طبق برآوردها ۱۰ میلیون فروخت. طبق برآوردها اول شد. طبق گزارش‌ها دوم شد.")
+    rules = {f["rule"] for f in spoken_lint(draft)}
+    assert {"yani_overuse", "semicolons", "repeated_attribution"} <= rules
+    assert "«یعنی» always brings something NEW" in WRITER_SYSTEM

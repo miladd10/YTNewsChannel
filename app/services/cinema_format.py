@@ -998,23 +998,26 @@ HOST_VOICE = """
 HOW THIS HOST ACTUALLY TALKS (read this first; it outranks every generic "good writing" instinct)
 The real episodes in <style_corpus> are the voice. Their facts are old and unusable; their way of talking is the target. What they consistently do:
 - Tehrani spoken Persian all the way through, never written Persian: «رو» «داره» «اومد» «میشه» «اینا» «یه» «خیلی» «یه عالمه» «دیگه» (as a particle: «این نقشو بازی می‌کنه دیگه»). He often adds the spoken -ش to past verbs: «گفتش»، «کردش»، «رسوندش»، «شدش»، «اومدش». Use these naturally, not in every sentence.
-- He TELLS each item like a story to a friend: what happened, then «یعنی ...» with the plain consequence, then the detail that makes it interesting, often introduced by «جالبش اینجاست که ...» or «نکته جالب اینه که ...», then what's next. Several connected sentences per item, not one headline.
+- He TELLS each item like a story to a friend: what happened, the detail that makes it interesting (often «جالبش اینجاست که ...» / «نکته جالب اینه که ...»), then what's next. Several connected sentences per item, not one headline.
+- «یعنی» always brings something NEW: a number he worked out, a comparison, what it means in money or dates («یعنی همینجا ۲۰ میلیون ضرر داد»، «یعنی فقط دو تا فیلم تو تاریخ ازش بیشتر فروختن»). It never restates the sentence before it and never ends an item with a general takeaway such as «یعنی ... کنجکاوی رو بیشتر می‌کنه»، «یعنی هنوز فاصله زیادی داریم»، «یعنی فقط یه فرصت محدود داره». If there is nothing new to add, end on the fact. At most one or two per item.
+- He says what happened with the doer as subject and an everyday verb: «پارامونت با دوازده ایالت به توافق رسید» (not «ایالت‌ها شکایت رو حل‌وفصل کردن»)، «اسم سریال جدیدش مشخص شد: ...» (not «اسمش ... هستش»)، «قراره ... پخش بشه» (not «طبق اعلامی که شده»)، «خبر اومد که» (not «خبر رسید که»). No semicolons: he talks in commas and new sentences.
+- If a new title sounds almost like an older famous one, he points it out in passing («اسمش خیلی شبیه ... ـه») instead of letting it confuse the listener.
 - He retells what people said as colloquial indirect speech: «گفتش که ...»، «می‌گفت ...»، «خودشم گفته ...». Not «اظهار داشت» or «اعلام کرده است».
 - He explains money and business in kitchen-table terms: «... ۵۰ میلیون خرید در حالی که بودجه‌ش ۷۰ میلیون بوده؛ یعنی همینجا ۲۰ میلیون ضرر داد». Numbers are spoken simply («۲۰ میلیون دلار»، «۱ میلیارد و ۵۰۰ میلیون دلار»، «نزدیک ۲ میلیارد»).
 - Scope is said the way a person says it, inside the sentence: «تو آمریکا»، «تو گیشه جهانی» / «تو کل دنیا»، «این آخر هفته»، «فقط تو ۳ روز»، «تا الان»، «تو افتتاحیه‌ش». Never database phrasing like «جدول گیشه آخرهفته داخلی آمریکای شمالی»، «فروش تجمعی»، «بازاکران» (say «دوباره اکران شد»).
-- Light hedges when something is not confirmed: «ظاهراً»، «گفته میشه»، «حدس زده میشه»، «هنوز رسمی نشده»، «فعلاً در حد شایعه‌ست». Almost never an outlet name.
+- Light hedges when something is not confirmed: «ظاهراً»، «گفته میشه»، «حدس زده میشه»، «هنوز رسمی نشده»، «فعلاً در حد شایعه‌ست». For estimated figures «حدود» or «نزدیک» is enough; «طبق برآوردها»/«طبق گزارش‌ها» at most once per section. Almost never an outlet name.
 - A short honest reaction is part of the voice when the facts support it: «یعنی منتقدا اصلاً دوستش نداشتن»، «حالا باید ببینیم می‌تونه ... یا نه» (only when there is a real open question).
 - Transitions are his fixed spoken signposts: «برای خبرای بعدی بریم سراغ ...»، «تو همین ...»، «یه خبر دیگه هم از ... بود»، «اما ...». Box office is a quick countdown: «رتبه اول ... جایگاه دوم ... جایگاه سوم رسید به ...».
-- Opening: «سلام به همه دوستان، به <channel_name> خوش اومدین. صبحتون بخیر و امروزم مثل هر هفته میریم ببینیم تو دنیای سینما چه خبر بوده.» then straight into the biggest story. Closing: «خب دوستان، اینم از ویدیوی این هفته. امیدوارم براتون جالب بوده باشه. اگه ویدیو رو دوست داشتید یادتون نره لایکش کنید و تا ویدیوی هفته بعد خدانگهدار.» Omit the channel name if project.channel_name is empty.
-- Titles and names are said in Persian, never switched into English mid-sentence: the common Persian title if one exists, otherwise a Persian transliteration.
-- Never: «را»، «است»، «می‌باشد»، «گردید»، «نمود»، «به‌عنوان»، «همچنین»، «علاوه بر این»، «در این راستا»، «قابل توجه»، or translated English metaphors.
+- Opening: «سلام به همه دوستان، به <channel_name> خوش اومدین. صبحتون بخیر و امروزم مثل هر هفته میریم ببینیم تو دنیای سینما چه خبر بوده.» then straight into the biggest story, no menu of what the episode will cover («این هفته از ... داریم تا ...»). Closing: «خب دوستان، اینم از ویدیوی این هفته. امیدوارم براتون جالب بوده باشه. اگه ویدیو رو دوست داشتید یادتون نره لایکش کنید و تا ویدیوی هفته بعد خدانگهدار.» Omit the channel name if project.channel_name is empty.
+- TITLES, the way he introduces them: the FIRST time a film/series is mentioned in an item, say its Persian name and then the original English title: «ببر کاغذی یا همون Paper Tiger». The Persian name is what Persian fans already say (a well-known Persian title or the usual transliteration of a franchise, e.g. «اونجرز»), otherwise a translation ONLY if it sounds like a real title in Persian, otherwise a Persian transliteration of the English. Never translate subtitles or labels word by word into odd Persian. After the first mention in that item, use whichever of the two is shorter and easier to say. People and companies are always in Persian script.
+- Never: «را»، «است»، «می‌باشد»، «گردید»، «نمود»، «همچنین»، «علاوه بر این»، «در این راستا»، or translated English metaphors.
 """
 
 
 ATTRIBUTION_POLICY = """
 ATTRIBUTION POLICY (single shared rule for writer, reviser, fact checker and reviewer):
 - Speak a source or estimate marker ONLY for ledger claims with attribution_required=true. Never add source names to other facts (cast, trailers, titles, announcements).
-- DEFAULT: a light marker in the same sentence, not an outlet name: "حدود"، "تقریباً"، "طبق برآوردها"، "طبق گزارش‌ها"، "گفته می‌شه". Most viewers do not know trade outlets; a string of outlet names sounds like a news agency.
+- DEFAULT: a light marker in the same sentence, not an outlet name. For an estimated figure «حدود» or «نزدیک» is enough; for an unconfirmed report «گفته میشه»/«ظاهراً». Use «طبق برآوردها»/«طبق گزارش‌ها» at most once per section. Most viewers do not know trade outlets; a string of outlet names sounds like a news agency.
 - Name an outlet ONLY when figures from different outlets conflict, when the claim is an exclusive or still-unconfirmed report, or when the outlet itself is part of the story. Then name it once, naturally ("ورایتی می‌گه...").
 - Across the whole episode, name outlets rarely (aim for at most 2-3 in total). Never name the same outlet twice in one story; never open consecutive sentences with a source.
 - Reviewers must NOT flag required attribution as a style problem. Flag attribution added where the ledger does not require it, outlet names where a light marker would do, repeated outlets, or a required marker that is missing.
@@ -1107,12 +1110,12 @@ FACTS (non-negotiable, but they decide WHAT you say, never HOW you say it)
 - RUMORS: only from a safe rumor angle, always framed as unconfirmed («فعلاً در حد شایعه‌ست»، «گفته میشه»). Social reaction names its platform; critics are not fans.
 
 STORYTELLING
-- STORY MICRO-ARC: hook -> just enough setup -> the most interesting detail or contrast -> «یعنی ...» the plain consequence -> a supported aside/reaction -> end on a concrete fact. Lead story: use every supported beat it has. Normal: 4-7 beats. Quick: 2-4. Use ALL the supported claims a story has before calling it thin.
+- STORY MICRO-ARC: hook -> just enough setup -> the most interesting detail or contrast -> what it means in concrete terms (a number, a comparison, a date) when there is one -> a supported aside/reaction -> end on a concrete fact. Lead story: use every supported beat it has. Normal: 4-7 beats. Quick: 2-4. Use ALL the supported claims a story has before calling it thin.
 - A cast list by itself is not a payoff: say what the film is, who made it, what happened, why people care.
 - CASUAL-AUDIENCE FAMILIARITY RULE: the first time a person or company a casual viewer may not place appears, add one short cue from the ledger («همون کارگردانی که ... رو ساخته»). Do not turn it into a biography, skip it for household names, and never invent an anchor.
 - Box office is one quick countdown with the money, not separate mini-articles.
 - Continuity: only refer back to something already said in the body; an intro mention does not count.
-- Names and titles are voiced by text-to-speech and the host never switches to English: write every person, company and film/series title in Persian script the way he says it (the common Persian name when Persian audiences already use one, e.g. a translated franchise title; otherwise a Persian transliteration). No Latin script in the narration. Spell each name the same way every time and add short-vowel marks where it could be misread.
+- Names and titles are voiced by text-to-speech: follow the TITLES rule above (Persian name, then the original English title once, then the easier one). No other Latin script in the narration: people and companies are written in Persian. Spell each name the same way every time and add short-vowel marks where it could be misread.
 
 LENGTH: length_target is the spoken word budget. Reach acceptable_words by telling the supported beats fully, never with filler.
 
@@ -1163,7 +1166,7 @@ Examples of the transformation principle:
 - abstract “the title entered viewers’ radar” -> state the concrete trailer/cast/release fact and stop
 - abstract “this shows how big the deal is” -> keep the actual deal figure/consequence, not the commentary
 
-Keep each title and name referring to the same work/person, but in Persian script the way the host says it (no Latin script); keep the spelling already used in the draft.
+Keep each title and name referring to the same work/person. Titles follow the TITLES rule (Persian name then the original English title at the first mention in an item, then the easier one); people and companies stay in Persian script. Keep the spelling already used in the draft.
 """ + ATTRIBUTION_POLICY + SPOKEN_QUALITY_RULES
 
 
@@ -1391,7 +1394,7 @@ _TRANSLATIONESE_RE = re.compile(
 
 _DATABASE_PHRASE_RE = re.compile(
     r"(آمریکای\s+شمالی|بازاکران|[‌\s]تجمعی|جدول\s+گیشه(?:ٔ|ی)?\s+آخر[‌\s]?هفته|آخر[‌\s]?هفته(?:ٔ|ی)?\s+داخلی|"
-    r"گیشه(?:ٔ|ی)?\s+داخلی|به[‌\s]عنوان|همچنین|علاوه\s+بر\s+این|می[‌\s]باشد|قابل\s+توجه)",
+    r"گیشه(?:ٔ|ی)?\s+داخلی|همچنین|علاوه\s+بر\s+این|می[‌\s]باشد|در\s+این\s+راستا)",
 )
 
 
@@ -1440,10 +1443,41 @@ def spoken_lint(text: str) -> list[dict]:
     database = [m.group(0) for m in _DATABASE_PHRASE_RE.finditer(body)]
     if database:
         add("written_or_database_persian", "Written/database Persian the host never says; use everyday words («تو آمریکا»، «تا الان»، «دوباره اکران»).", database)
-    latin = re.findall(r"[A-Za-z][A-Za-z'’.:-]*(?:\s+[A-Za-z][A-Za-z'’.:-]*)*", body)
-    latin = [x for x in latin if len(x.replace(" ", "")) >= 2]
-    if latin:
-        add("latin_script", "English/Latin text inside the Persian narration; the host says titles and names in Persian.", latin)
+    # Latin script is allowed once per item: the original English title right
+    # after its Persian name («ببر کاغذی یا همون Paper Tiger»).
+    latin_misuse = []
+    for passage in re.split(r"<!--\s*STORY:[^>]+-->", text or ""):
+        passage = re.sub(r"(?m)^\s*#+\s.*$", " ", passage)
+        seen_latin: set[str] = set()
+        for match in re.finditer(r"[A-Za-z][A-Za-z0-9'’.:&-]*(?:\s+[A-Za-z0-9][A-Za-z0-9'’.:&-]*)*", passage):
+            phrase = match.group(0).strip()
+            if len(phrase.replace(" ", "")) < 2:
+                continue
+            introduced = re.search(r"یا\s+همون\s*[«\"]?\s*$", passage[:match.start()])
+            if phrase.casefold() in seen_latin or not introduced:
+                latin_misuse.append(phrase)
+            seen_latin.add(phrase.casefold())
+    if latin_misuse:
+        add("latin_script", "English text outside the first «<Persian name> یا همون <English title>» mention; after that the host uses the easier Persian name, and people/companies are in Persian.", latin_misuse)
+    passages = [p for p in re.split(r"<!--\s*STORY:[^>]+-->", text or "")[1:]]
+    yani_heavy = [p.strip()[:160] for p in passages if len(re.findall(r"(?<![\w\u200c])یعنی(?![\w\u200c])", p)) > 2]
+    total_yani = len(re.findall(r"(?<![\w\u200c])یعنی(?![\w\u200c])", body))
+    # An item that ENDS on a «یعنی ...» sentence with no number in it is almost
+    # always a restated takeaway rather than a new fact.
+    wrapups = []
+    for passage in passages:
+        passage = re.split(r"(?m)^\s*#+\s", passage)[0]
+        sentences = [x.strip() for x in re.split(r"[.!؟?]+", passage) if len(x.split()) >= 3]
+        if sentences and re.match(r"یعنی(?![\w\u200c])", sentences[-1]) and not re.search(r"[0-9۰-۹]", sentences[-1]):
+            wrapups.append(sentences[-1][:160])
+    if yani_heavy or wrapups or (passages and total_yani > max(2, len(passages) // 2)):
+        add("yani_overuse", f"«یعنی» used {total_yani} times, {len(wrapups)} item(s) end on a «یعنی» takeaway; the host uses it only to add a new number/comparison, never to restate or wrap up.", (wrapups + yani_heavy) or [f"{total_yani} × یعنی"])
+    semicolons = [x.strip()[:120] for x in re.findall(r"[^.؛;!؟\n]*[؛;][^.!؟\n]*", body)]
+    if semicolons:
+        add("semicolons", "Semicolons read as written prose; the host talks in commas and new sentences.", semicolons)
+    report_markers = re.findall(r"طبق\s+(?:برآورد|گزارش)", body)
+    if len(report_markers) > 2:
+        add("repeated_attribution", f"«طبق برآوردها/گزارش‌ها» said {len(report_markers)} times; «حدود/نزدیک» is enough for estimates.", report_markers)
     headlines = _headline_items(text)
     stories = len(re.findall(r"<!--\s*STORY:", text or ""))
     if stories >= 3 and len(headlines) * 2 > stories:
