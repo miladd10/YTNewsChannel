@@ -61,6 +61,7 @@ from .services.cinema_format import (
     style_reference_kind,
     style_rows_for_content_type,
     style_rows_for_window,
+    writer_style_rows_for_window,
     usable_style_transcripts,
 )
 from .services.research import (
@@ -2961,10 +2962,11 @@ def narration_workspace(project_id: str):
         channel = project.get("channel") or "cinema"
         content_type = project.get("content_type") or "weekly_news"
         styles = _style_transcripts(conn, channel, content_type)
-        direct_style_rows = style_rows_for_window(
+        direct_style_rows = writer_style_rows_for_window(
             styles,
             project.get("date_start"),
             content_type,
+            max_rows=4,
         )
         direct_style_ids = {str(row.get("id") or "") for row in direct_style_rows}
         for style in styles:
