@@ -1146,7 +1146,7 @@ WHAT YOU RECEIVE
 
 HOW TO JUDGE FACTS
 - automatic_fact_check is the fresh-evidence fact check. If its status is needs_human_check, every issue it lists that is still present in the draft is a blocking issue.
-- The claim audit is the fact gate. Every blocked audit claim is a blocking issue: quote it and give the fix (remove it, or reword it to match the ledger claim it should map to).
+- The claim audit is the fact gate. Blocked audit claims are blocking, but DO NOT spend one reviewer issue per claim. Summarize all blocked claim sentences in ONE factual issue when possible; the revision writer receives the full claim-audit list directly and must fix every blocked claim.
 - Beyond the audit, raise a factual issue only when you can point to the exact draft sentence and the exact ledger claim or source that contradicts it: wrong scope (opening vs cumulative, weekend vs weekly, domestic vs worldwide, estimate vs final, limited vs wide release), an older figure presented as current, a milestone called "approaching" after it was crossed, a background fact presented as this week's news, a fact under the wrong STORY marker, or a story that does not narrate its news_hook.
 - Never ask the writer to add a fact that is not a verified ledger claim or a safe_to_narrate spice angle; name the ledger id or angle you want used.
 
@@ -1176,7 +1176,7 @@ WHAT GOOD LOOKS LIKE (compare against the STYLE BLUEPRINT and the full style cor
 - Confirm spoken_lint findings against the text before reporting them; do not report a lint finding that is wrong.
 
 HOW TO WRITE ISSUES
-- At most 8 issues, most severe first. Merge repeats of the same problem into one issue that lists every place.
+- At most 12 issues, most severe first. Be exhaustive about distinct blocking/major problems in this pass so the user does not need repeated review/revise cycles. Merge repeats of the same problem into one issue that lists every place.
 - Problem: quote the exact draft sentence(s) in «» and say what is wrong in one or two sentences.
 - Fix: give a concrete rewrite in spoken Persian when it is a wording problem, or name the exact ledger id / spice angle to use or the sentence to delete. Never "make it more engaging" without saying how.
 - Never ask for required attribution to be removed, for disclaimers to be added, or for anything the ATTRIBUTION POLICY or SPOKEN QUALITY RULES forbid.
@@ -1275,12 +1275,14 @@ Apply the supplied reviewer feedback to the existing narration.
 Rules:
 - The review is the change list.
 - Also fix every issue in the packet's automatic_fact_check when its status is needs_human_check, using only verified ledger claims.
+- Also fix EVERY blocked item in the packet's narration_claim_audit, even if the reviewer did not repeat each one. The claim audit is exhaustive factual feedback; the reviewer is allowed to summarize it.
 - Preserve every line quoted under the review's "# Keep" section unless an issue explicitly requires changing it.
 - Apply issues in severity order; a Fix that contains a Persian rewrite may be used as written if it fits the surrounding register.
 - VERIFIED CLAIM LEDGER IS THE HARD FACTUAL BOUNDARY. Every factual sentence in the revised output must remain supported by a verified/verified_with_attribution ledger claim for that STORY id.
 - Never introduce a replacement number/date/rank/budget/revenue/deal/release/title fact that is absent from the ledger. If the reviewer asks for such a correction but no verified ledger claim exists, remove/qualify the unsupported statement rather than guessing.
 - Preserve attribution_required framing from the ledger.
 - Make only changes needed to resolve the review, BUT if the Style/Storytelling audit says an affected story is fundamentally over-compressed or article-like, rewrite that whole story's spoken passage rather than patching one sentence.
+- STABILITY: leave unaffected story passages byte-for-byte as close as practical. Do not "improve" already-correct stories on every revision. Repeated broad rewrites are a bug, not polish.
 - Preserve everything already correct.
 - Preserve current-week factual fidelity and STORY markers.
 - Preserve coverage of every selected story id and correct section order. If the existing draft omitted a selected story or has a broken transition, add/fix it using only verified ledger beats.
