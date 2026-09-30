@@ -1466,7 +1466,7 @@ def _parse_json_object_text(value: str) -> dict:
 
 
 def _style_profile_status(conn, channel: str, content_type: str, style_rows: list[dict]) -> dict:
-    enabled = usable_style_transcripts(style_rows)
+    enabled = usable_style_transcripts(style_rows_for_content_type(style_rows, content_type))
     current_hash = style_corpus_hash(enabled)
     row = conn.execute(
         "SELECT * FROM style_profiles WHERE channel=? AND content_type=?",
