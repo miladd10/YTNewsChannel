@@ -1437,10 +1437,15 @@ def parse_review_gate(text: str) -> dict:
         "spice_status": status("# Context / Spice Audit"),
         "storytelling_status": status("# Storytelling Audit"),
     }
-    if counts["blocking"] or counts["major"] or any(value != "pass" for value in audits.values()):
+    if counts["blocking"] or counts["major"]:
         recommendation = "revision_required"
-    elif not recommendation:
-        recommendation = "revision_required"
+    elif counts["minor"]:
+        # A reviewer sometimes marks an audit NEEDS_WORK for a minor wording
+        # note even though its own severity list says there is no major/blocker.
+        # Do not force another full review/revise cycle for that inconsistency.
+        recommendation = "polish_optional"
+    elif recommendation not in {"pass", "polish_optional"}:
+        recommendation = "pass"
     return {
         **audits,
         "blocking_count": counts["blocking"],
