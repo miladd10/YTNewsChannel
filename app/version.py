@@ -1,3 +1,3 @@
-APP_VERSION = "0.4.3"
+APP_VERSION = "0.4.4"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
-APP_RELEASE_NAME = "Narration Assembly Repair"
+APP_RELEASE_NAME = "Filmbaz Voice Match"
