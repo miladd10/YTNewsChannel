@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -166,6 +167,18 @@ def _require(provider: str) -> str:
     return str(status["path"])
 
 
+def _cli_error(result, label: str) -> str:
+    """A short, readable error. The CLIs echo the whole prompt (often the
+    full narration) before the real error line; never show that echo."""
+    text = f"{result.stderr or ''}\n{result.stdout or ''}"
+    errors = [line.strip() for line in text.splitlines() if re.match(r"\s*(ERROR|Error|error)\b[:\s]", line)]
+    message = errors[-1] if errors else (text.strip().splitlines() or [f"{label} failed"])[-1]
+    message = re.sub(r"^\s*(ERROR|Error|error)\s*:?\s*", "", message)[:400]
+    if re.search(r"usage limit|rate limit|quota|too many requests", text, re.IGNORECASE):
+        return f"{label} hit its usage limit: {message}"
+    return f"{label} failed: {message}"
+
+
 def generate_local_text(provider: str, model: str, system_prompt: str, user_prompt: str) -> str:
     if provider == "codex_local":
         path = _require(provider)
@@ -177,7 +190,7 @@ def generate_local_text(provider: str, model: str, system_prompt: str, user_prom
             prompt = f"<SYSTEM>\n{system_prompt}\n</SYSTEM>\n\n<USER>\n{user_prompt}\n</USER>"
             result = _run(args, timeout=900, cwd=tmp, input_text=prompt)
             if result.returncode != 0:
-                raise RuntimeError((result.stderr or result.stdout or "Codex failed")[-1800:])
+                raise RuntimeError(_cli_error(result, "Codex"))
             if output.exists() and output.read_text(encoding="utf-8").strip():
                 return output.read_text(encoding="utf-8").strip()
             return (result.stdout or "").strip()
@@ -191,6 +204,6 @@ def generate_local_text(provider: str, model: str, system_prompt: str, user_prom
                 args += ["--model", model]
             result = _run(args, timeout=900, cwd=tmp, input_text=user_prompt)
             if result.returncode != 0:
-                raise RuntimeError((result.stderr or result.stdout or "Claude failed")[-1800:])
+                raise RuntimeError(_cli_error(result, "Claude Code"))
             return (result.stdout or "").strip()
     raise RuntimeError("Unsupported subscription provider")

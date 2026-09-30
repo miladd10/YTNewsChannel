@@ -2089,7 +2089,12 @@ def _claim_audit_with_structure(
     # the selected story's current-week hook. This prevents filler such as
     # "Paper Tiger is another title this week" from satisfying the pipeline
     # when the selected news was specifically "official trailer released".
-    if claim_ledger and stories:
+    extraction_failed = any(
+        "Claim extraction failed" in str(issue) for issue in (audit.get("system_issues") or [])
+    )
+    # When the audit AI call itself failed there are no extracted claims, so
+    # every story would look "not narrated". Report the failure only.
+    if claim_ledger and stories and not extraction_failed:
         hook_ids_by_story: dict[str, set[str]] = {}
         for claim in claim_ledger:
             if (
