@@ -1167,17 +1167,32 @@ def fetch_narration_fact_check_sources(
     (box-office totals/rankings, release scopes/dates, deal values) that can be
     correctly mentioned by an older article but become stale before narration.
     """
+    from concurrent.futures import ThreadPoolExecutor
+
+    # Run every story's searches concurrently. They used to run one after
+    # another (up to ~16 queries per story), which alone could take minutes
+    # per fact-check pass.
+    story_queries = [
+        (str(story.get("id") or ""), _fact_check_queries(story, date_start, date_end))
+        for story in stories
+        if str(story.get("id") or "")
+    ]
+    all_queries = list(dict.fromkeys(q for _, queries in story_queries for q in queries))
+
+    def _search(query: str) -> list[dict]:
+        try:
+            return list(DDGS().text(query, max_results=per_query_limit) or [])
+        except Exception:
+            return []
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results_by_query = dict(zip(all_queries, pool.map(_search, all_queries)))
+
     by_story: dict[str, list[dict]] = defaultdict(list)
-    for story in stories:
-        story_id = str(story.get("id") or "")
-        if not story_id:
-            continue
+    for story_id, queries in story_queries:
         seen: set[str] = set()
-        for query in _fact_check_queries(story, date_start, date_end):
-            try:
-                results = list(DDGS().text(query, max_results=per_query_limit) or [])
-            except Exception:
-                continue
+        for query in queries:
+            results = results_by_query.get(query) or []
             for result in results:
                 url = str(result.get("href") or result.get("url") or "").strip()
                 if not url or url.casefold() in seen:

@@ -1827,12 +1827,7 @@ def _run_narration_fact_check(
 
     _ensure_article_excerpts(stories)
     if fresh_sources is None:
-        fresh_sources = fetch_narration_fact_check_sources(
-            stories,
-            str(project.get("date_start") or ""),
-            str(project.get("date_end") or ""),
-            per_query_limit=5,
-        )
+        fresh_sources = _fresh_sources_for(project, stories)
     deterministic_red_flags = _deterministic_fact_red_flags(draft_text, fresh_sources)
     fact_packet = {
         "project_window": {
@@ -2011,12 +2006,7 @@ def _build_verified_claim_ledger(
     # which made the initial ledger unnecessarily headline/snippet-only.
     _ensure_article_excerpts(stories)
     if fresh_sources is None:
-        fresh_sources = fetch_narration_fact_check_sources(
-            stories,
-            str(project.get("date_start") or ""),
-            str(project.get("date_end") or ""),
-            per_query_limit=5,
-        )
+        fresh_sources = _fresh_sources_for(project, stories)
     try:
         ledger, actual_provider, actual_model = build_claim_ledger(
             stories,
@@ -2127,6 +2117,107 @@ def _claim_audit_with_structure(
     return audit
 
 
+FRESH_SOURCE_TTL_SECONDS = 12 * 3600
+
+
+def _fresh_sources_for(project: dict, stories: list[dict]) -> dict[str, list[dict]]:
+    """Fresh verification search results, fetched once per story and reused.
+
+    Every writer/revise/repair pass used to re-run ~10-16 web searches per
+    story. Results also changed between passes, so each pass could raise new
+    "issues" and a draft never converged. Results are cached per story in the
+    project folder for FRESH_SOURCE_TTL_SECONDS.
+    """
+    import time
+
+    start = str(project.get("date_start") or "")
+    end = str(project.get("date_end") or "")
+    window = f"{start}|{end}"
+    root = project.get("root_path")
+    path = Path(root) / "narration" / "fact-sources.json" if root else None
+    cache: dict = {}
+    if path and path.exists():
+        try:
+            cache = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            cache = {}
+    if cache.get("window") != window:
+        cache = {"window": window, "stories": {}}
+    cached = cache.setdefault("stories", {})
+    stamp = time.time()
+
+    missing = [
+        story for story in stories
+        if str(story.get("id") or "")
+        and stamp - float((cached.get(str(story.get("id"))) or {}).get("fetched_at") or 0) > FRESH_SOURCE_TTL_SECONDS
+    ]
+    if missing:
+        fetched = fetch_narration_fact_check_sources(missing, start, end, per_query_limit=5)
+        for story in missing:
+            sid = str(story.get("id"))
+            cached[sid] = {"fetched_at": stamp, "sources": fetched.get(sid) or []}
+        if path:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+            except Exception:
+                pass
+    return {
+        str(story.get("id")): list((cached.get(str(story.get("id"))) or {}).get("sources") or [])
+        for story in stories
+        if str(story.get("id") or "")
+    }
+
+
+def _verify_draft(
+    project: dict,
+    stories: list[dict],
+    text: str,
+    claim_ledger: list[dict],
+    fresh_sources: dict[str, list[dict]] | None,
+    writer_provider: str,
+    writer_model: str,
+    audit_provider: str,
+    audit_model: str,
+) -> tuple[dict, dict, dict]:
+    """Fact check + claim audit (run in parallel) + structure audit."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    if fresh_sources is None:
+        fresh_sources = _fresh_sources_for(project, stories)
+    _ensure_article_excerpts(stories)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        fact_future = pool.submit(
+            _run_narration_fact_check,
+            project, stories, text, writer_provider, writer_model,
+            fresh_sources=fresh_sources, claim_ledger=claim_ledger,
+        )
+        audit_future = pool.submit(audit_narration_claims, text, claim_ledger, audit_provider, audit_model)
+        _, fact_check, _, _ = fact_future.result()
+        claim_audit, _, _ = audit_future.result()
+    structure = narration_structure_audit(text, stories, project)
+    claim_audit = _claim_audit_with_structure(claim_audit, structure, claim_ledger, stories)
+    return fact_check, claim_audit, structure
+
+
+def _gate_failures(fact_check: dict, claim_audit: dict, structure: dict) -> int:
+    """How far a draft is from passing, for comparing repair attempts."""
+    count = 0
+    if str((fact_check or {}).get("status") or "needs_human_check") == "needs_human_check":
+        count += max(1, int((fact_check or {}).get("issue_count") or 0))
+    if str((claim_audit or {}).get("status") or "blocked") != "pass":
+        count += max(1, int((claim_audit or {}).get("blocked_count") or 0))
+    if (structure or {}).get("status") != "pass":
+        count += 1
+    return count
+
+
+def _word_count(text: str) -> int:
+    body = re.sub(r"<!--.*?-->", " ", str(text or ""), flags=re.S)
+    body = re.sub(r"^\s*#+.*$", " ", body, flags=re.M)
+    return len(body.split())
+
+
 def _repair_narration_until_stable(
     project: dict,
     stories: list[dict],
@@ -2142,25 +2233,27 @@ def _repair_narration_until_stable(
     style_profile_text: str = "",
     style_corpus_text: str = "",
     max_repairs: int = 2,
+    structure: dict | None = None,
 ) -> tuple[str, dict, dict, dict, int, str]:
-    """Repair deterministic assembly/claim failures before exposing a draft.
+    """Targeted repair passes against the SAME ledger and fresh sources.
 
-    The older flow saved the first writer output even when it omitted selected
-    stories, was far below the requested duration, or still had blocked claims.
-    Run up to two tightly-scoped repair passes against the SAME verified ledger.
+    A repair is kept only when it reduces the gate failures without cutting
+    the script far below its length target; otherwise the better earlier
+    draft is kept and the loop stops (repeated passes used to shrink scripts).
     """
     repair_error = ""
     repairs = 0
-    structure = narration_structure_audit(text, stories, project)
-    claim_audit = _claim_audit_with_structure(claim_audit, structure, claim_ledger, stories)
+    if fresh_sources is None:
+        fresh_sources = _fresh_sources_for(project, stories)
+    if structure is None:
+        structure = narration_structure_audit(text, stories, project)
+        claim_audit = _claim_audit_with_structure(claim_audit, structure, claim_ledger, stories)
+    acceptable = (length_target(project, text) or {}).get("acceptable_words") or [0]
+    min_words = int(acceptable[0] or 0)
 
     for _ in range(max_repairs):
-        needs_repair = (
-            structure.get("status") != "pass"
-            or str((claim_audit or {}).get("status") or "blocked") != "pass"
-            or str((fact_check or {}).get("status") or "needs_human_check") == "needs_human_check"
-        )
-        if not needs_repair:
+        failures = _gate_failures(fact_check, claim_audit, structure)
+        if failures == 0:
             break
 
         repair_packet = {
@@ -2223,28 +2316,27 @@ def _repair_narration_until_stable(
             repair_error = "Repair pass returned no meaningful change."
             break
 
-        text = repaired
+        new_fact, new_audit, new_structure = _verify_draft(
+            project, stories, repaired, claim_ledger, fresh_sources,
+            actual_provider, actual_model, reviewer_provider, reviewer_model,
+        )
+        new_failures = _gate_failures(new_fact, new_audit, new_structure)
+        shrank = (
+            min_words
+            and _word_count(repaired) < min_words
+            and _word_count(repaired) < 0.85 * _word_count(text)
+        )
+        if new_failures >= failures or (shrank and new_failures > 0):
+            repair_error = (
+                "Repair pass did not reduce the open issues; the previous draft was kept."
+                if new_failures >= failures
+                else "Repair pass cut the script well below its length target; the previous draft was kept."
+            )
+            break
+        text, fact_check, claim_audit, structure = repaired, new_fact, new_audit, new_structure
         repairs += 1
-        text, fact_check, _, _ = _run_narration_fact_check(
-            project,
-            stories,
-            text,
-            actual_provider,
-            actual_model,
-            fresh_sources=fresh_sources,
-            claim_ledger=claim_ledger,
-        )
-        claim_audit, _, _ = audit_narration_claims(
-            text,
-            claim_ledger,
-            reviewer_provider,
-            reviewer_model,
-        )
-        structure = narration_structure_audit(text, stories, project)
-        claim_audit = _claim_audit_with_structure(claim_audit, structure, claim_ledger, stories)
 
     return text, fact_check, claim_audit, structure, repairs, repair_error
-
 
 
 def _polish_narration_fluency(
@@ -2252,17 +2344,21 @@ def _polish_narration_fluency(
     stories: list[dict],
     text: str,
     claim_ledger: list[dict],
-    fresh_sources: dict[str, list[dict]] | None,
     writer_provider: str,
     writer_model: str,
-    reviewer_provider: str,
-    reviewer_model: str,
     style_profile_text: str,
     style_corpus_text: str,
-) -> tuple[str, dict, dict, dict, bool, str]:
-    """One final wording-only pass, accepted only if every factual/structure gate still passes."""
+) -> tuple[str, bool, str]:
+    """One wording-only pass, run BEFORE verification.
+
+    It used to run last and re-run the fact check + claim audit on its own
+    output; because those gates rarely all passed, the polish was almost
+    always thrown away after three extra AI calls. Now the polished text is
+    simply the text that gets verified (and repaired if needed). Cheap
+    deterministic guards still reject a polish that changes story markers or
+    makes spoken-language lint worse.
+    """
     original = str(text or "").strip()
-    original_lint = spoken_lint(original)
     user = "\n".join([
         "<verified_claim_ledger>",
         json.dumps(ledger_for_writer(claim_ledger), ensure_ascii=False),
@@ -2279,58 +2375,74 @@ def _polish_narration_fluency(
         "</narration_to_polish>",
     ])
     try:
-        polished, actual_provider, actual_model = generate_text(
-            writer_provider,
-            writer_model,
-            NARRATION_FLUENCY_POLISH_SYSTEM,
-            user,
-        )
+        polished, _, _ = generate_text(writer_provider, writer_model, NARRATION_FLUENCY_POLISH_SYSTEM, user)
     except Exception as exc:
-        return original, {}, {}, narration_structure_audit(original, stories, project), False, str(exc)
+        return original, False, str(exc)
 
     polished = str(polished or "").strip()
     if not polished or polished == original:
-        return original, {}, {}, narration_structure_audit(original, stories, project), False, ""
-
-    # A fluency pass must preserve exact story coverage before we spend more AI
-    # calls validating it.
+        return original, False, ""
     original_ids = re.findall(r"<!--\s*STORY:([^>\s]+)\s*-->", original)
     polished_ids = re.findall(r"<!--\s*STORY:([^>\s]+)\s*-->", polished)
     if original_ids != polished_ids:
-        return original, {}, {}, narration_structure_audit(original, stories, project), False, "Fluency polish changed STORY marker order/coverage."
+        return original, False, "Fluency polish changed STORY marker order/coverage; original kept."
+    if len(spoken_lint(polished)) > len(spoken_lint(original)):
+        return original, False, "Polished wording increased spoken-language lint findings; original kept."
+    if _word_count(polished) < 0.85 * _word_count(original):
+        return original, False, "Polish cut more than 15% of the script; original kept."
+    return polished, True, ""
 
-    polished, fact_check, _, _ = _run_narration_fact_check(
-        project,
-        stories,
-        polished,
-        actual_provider,
-        actual_model,
-        fresh_sources=fresh_sources,
-        claim_ledger=claim_ledger,
+
+def _finish_draft(
+    project: dict,
+    stories: list[dict],
+    text: str,
+    claim_ledger: list[dict],
+    fresh_sources: dict[str, list[dict]] | None,
+    writer_provider: str,
+    writer_model: str,
+    style_profile_text: str,
+    styles: list[dict],
+) -> dict:
+    """The one post-writing pipeline shared by Generate, Enrich and Revise.
+
+    polish wording -> verify (fact check + claim audit in parallel) -> at most
+    two repairs that must each make progress. Worst case 1 + 1 + 2x2 serial
+    AI steps instead of the previous up to 12 sequential calls.
+    """
+    settings = masked_status()
+    audit_provider = settings.get("reviewer_provider") or writer_provider
+    audit_model = settings.get("reviewer_model") or writer_model
+    if fresh_sources is None:
+        fresh_sources = _fresh_sources_for(project, stories)
+    content_type = project.get("content_type") or "weekly_news"
+
+    text, fluency_polished, fluency_error = _polish_narration_fluency(
+        project, stories, text, claim_ledger, writer_provider, writer_model,
+        style_profile_text,
+        build_writer_style_packet(styles, project.get("date_start"), content_type, max_chars=42000),
     )
-    claim_audit, _, _ = audit_narration_claims(
-        polished,
-        claim_ledger,
-        reviewer_provider,
-        reviewer_model,
+    fact_check, claim_audit, structure = _verify_draft(
+        project, stories, text, claim_ledger, fresh_sources,
+        writer_provider, writer_model, audit_provider, audit_model,
     )
-    structure = narration_structure_audit(polished, stories, project)
-    claim_audit = _claim_audit_with_structure(claim_audit, structure, claim_ledger, stories)
-
-    if (
-        str(fact_check.get("status") or "needs_human_check") == "needs_human_check"
-        or str(claim_audit.get("status") or "blocked") != "pass"
-        or structure.get("status") != "pass"
-    ):
-        return original, fact_check, claim_audit, structure, False, "Polished wording failed factual or structure validation; original kept."
-
-    # Do not accept a wording pass that makes deterministic spoken warnings
-    # worse. Equal is fine because the style model can improve phrasing that a
-    # regex does not recognize.
-    if len(spoken_lint(polished)) > len(original_lint):
-        return original, fact_check, claim_audit, structure, False, "Polished wording increased spoken-language lint findings; original kept."
-
-    return polished, fact_check, claim_audit, structure, True, ""
+    text, fact_check, claim_audit, structure, repair_count, repair_error = _repair_narration_until_stable(
+        project, stories, text, claim_ledger, fresh_sources, fact_check, claim_audit,
+        writer_provider, writer_model, audit_provider, audit_model,
+        style_profile_text,
+        build_writer_style_packet(styles, project.get("date_start"), content_type, max_chars=30000),
+        structure=structure,
+    )
+    return {
+        "text": text,
+        "fact_check": fact_check,
+        "claim_audit": claim_audit,
+        "structure_audit": structure,
+        "repair_count": repair_count,
+        "repair_error": repair_error,
+        "fluency_polished": fluency_polished,
+        "fluency_error": fluency_error,
+    }
 
 
 
@@ -2711,39 +2823,7 @@ def generate_narration(project_id: str, body: GenerateBody):
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
 
-    text, fact_check, _, _ = _run_narration_fact_check(
-        project,
-        stories,
-        text,
-        actual_provider,
-        actual_model,
-        fresh_sources=fresh_claim_sources,
-        claim_ledger=claim_ledger,
-    )
-    audit_provider = settings.get("reviewer_provider") or actual_provider
-    audit_model = settings.get("reviewer_model") or actual_model
-    claim_audit, _, _ = audit_narration_claims(
-        text,
-        claim_ledger,
-        audit_provider,
-        audit_model,
-    )
-    text, fact_check, claim_audit, structure_audit, repair_count, repair_error = _repair_narration_until_stable(
-        project,
-        stories,
-        text,
-        claim_ledger,
-        fresh_claim_sources,
-        fact_check,
-        claim_audit,
-        actual_provider,
-        actual_model,
-        audit_provider,
-        audit_model,
-        style_profile.get("profile_text") or "",
-        build_writer_style_packet(style_rows, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=30000),
-    )
-    polished_text, polished_fact, polished_audit, polished_structure, fluency_polished, fluency_error = _polish_narration_fluency(
+    finished = _finish_draft(
         project,
         stories,
         text,
@@ -2751,21 +2831,17 @@ def generate_narration(project_id: str, body: GenerateBody):
         fresh_claim_sources,
         actual_provider,
         actual_model,
-        audit_provider,
-        audit_model,
         style_profile.get("profile_text") or "",
-        build_writer_style_packet(
-            style_rows,
-            project.get("date_start"),
-            project.get("content_type") or "weekly_news",
-            max_chars=42000,
-        ),
+        style_rows,
     )
-    if fluency_polished:
-        text = polished_text
-        fact_check = polished_fact
-        claim_audit = polished_audit
-        structure_audit = polished_structure
+    text = finished["text"]
+    fact_check = finished["fact_check"]
+    claim_audit = finished["claim_audit"]
+    structure_audit = finished["structure_audit"]
+    repair_count = finished["repair_count"]
+    repair_error = finished["repair_error"]
+    fluency_polished = finished["fluency_polished"]
+    fluency_error = finished["fluency_error"]
 
 
     narration_id = str(uuid.uuid4())
@@ -3058,39 +3134,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
 
-    rewritten_text, fact_check, _, _ = _run_narration_fact_check(
-        project,
-        stories,
-        rewritten_text,
-        actual_provider,
-        actual_model,
-        fresh_sources=fresh_claim_sources,
-        claim_ledger=claim_ledger,
-    )
-    audit_provider = settings.get("reviewer_provider") or actual_provider
-    audit_model = settings.get("reviewer_model") or actual_model
-    claim_audit, _, _ = audit_narration_claims(
-        rewritten_text,
-        claim_ledger,
-        audit_provider,
-        audit_model,
-    )
-    rewritten_text, fact_check, claim_audit, structure_audit, repair_count, repair_error = _repair_narration_until_stable(
-        project,
-        stories,
-        rewritten_text,
-        claim_ledger,
-        fresh_claim_sources,
-        fact_check,
-        claim_audit,
-        actual_provider,
-        actual_model,
-        audit_provider,
-        audit_model,
-        style_profile.get("profile_text") or "",
-        build_writer_style_packet(styles, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=30000),
-    )
-    polished_text, polished_fact, polished_audit, polished_structure, fluency_polished, fluency_error = _polish_narration_fluency(
+    finished = _finish_draft(
         project,
         stories,
         rewritten_text,
@@ -3098,21 +3142,17 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         fresh_claim_sources,
         actual_provider,
         actual_model,
-        audit_provider,
-        audit_model,
         style_profile.get("profile_text") or "",
-        build_writer_style_packet(
-            styles,
-            project.get("date_start"),
-            project.get("content_type") or "weekly_news",
-            max_chars=42000,
-        ),
+        styles,
     )
-    if fluency_polished:
-        rewritten_text = polished_text
-        fact_check = polished_fact
-        claim_audit = polished_audit
-        structure_audit = polished_structure
+    rewritten_text = finished["text"]
+    fact_check = finished["fact_check"]
+    claim_audit = finished["claim_audit"]
+    structure_audit = finished["structure_audit"]
+    repair_count = finished["repair_count"]
+    repair_error = finished["repair_error"]
+    fluency_polished = finished["fluency_polished"]
+    fluency_error = finished["fluency_error"]
 
 
     new_id = str(uuid.uuid4())
@@ -3445,39 +3485,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
 
-    revised_text, fact_check, _, _ = _run_narration_fact_check(
-        project,
-        stories,
-        revised_text,
-        actual_provider,
-        actual_model,
-        fresh_sources=fresh_claim_sources,
-        claim_ledger=claim_ledger,
-    )
-    audit_provider = settings.get("reviewer_provider") or actual_provider
-    audit_model = settings.get("reviewer_model") or actual_model
-    claim_audit, _, _ = audit_narration_claims(
-        revised_text,
-        claim_ledger,
-        audit_provider,
-        audit_model,
-    )
-    revised_text, fact_check, claim_audit, structure_audit, repair_count, repair_error = _repair_narration_until_stable(
-        project,
-        stories,
-        revised_text,
-        claim_ledger,
-        fresh_claim_sources,
-        fact_check,
-        claim_audit,
-        actual_provider,
-        actual_model,
-        audit_provider,
-        audit_model,
-        style_profile.get("profile_text") or "",
-        build_writer_style_packet(styles, project.get("date_start"), project.get("content_type") or "weekly_news", max_chars=30000),
-    )
-    polished_text, polished_fact, polished_audit, polished_structure, fluency_polished, fluency_error = _polish_narration_fluency(
+    finished = _finish_draft(
         project,
         stories,
         revised_text,
@@ -3485,21 +3493,17 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         fresh_claim_sources,
         actual_provider,
         actual_model,
-        audit_provider,
-        audit_model,
         style_profile.get("profile_text") or "",
-        build_writer_style_packet(
-            styles,
-            project.get("date_start"),
-            project.get("content_type") or "weekly_news",
-            max_chars=42000,
-        ),
+        styles,
     )
-    if fluency_polished:
-        revised_text = polished_text
-        fact_check = polished_fact
-        claim_audit = polished_audit
-        structure_audit = polished_structure
+    revised_text = finished["text"]
+    fact_check = finished["fact_check"]
+    claim_audit = finished["claim_audit"]
+    structure_audit = finished["structure_audit"]
+    repair_count = finished["repair_count"]
+    repair_error = finished["repair_error"]
+    fluency_polished = finished["fluency_polished"]
+    fluency_error = finished["fluency_error"]
 
 
     new_id = str(uuid.uuid4())
