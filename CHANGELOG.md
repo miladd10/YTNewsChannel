@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.8 — Natural Titles and Phrasing
+
+Fixes for the odd Persian in V26:
+- «یعنی» now has to add something new (a number, comparison or date); items no longer end on a restated takeaway.
+- Titles follow the host's pattern: Persian name, then the English title at the first mention («ببر کاغذی یا همون Paper Tiger»), then the easier one. No word-by-word subtitle translations.
+- Everyday doer-as-subject verbs instead of calques, no semicolons, no topic menu in the intro, look-alike titles are pointed out, «حدود» is enough for estimates.
+- New lint for «یعنی» wrap-ups, semicolons, repeated «طبق برآوردها» and stray English; calibrated so the real transcripts pass.
+- Provider errors show only the real error line (a usage limit no longer dumps the whole draft into the fact-check panel), and a failed claim audit no longer reports every story as "not narrated".
+
 ## v0.4.7 — Sound Like the Host
 
 Why drafts read like translated news instead of the Filmbaz transcripts, and the fixes:
