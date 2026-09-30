@@ -1594,6 +1594,69 @@ def _sectioned_story_packet(stories: list[dict]) -> list[dict]:
     return result
 
 
+
+def _narration_story_packet(stories: list[dict]) -> list[dict]:
+    """Small writer-facing story packet.
+
+    Research/fact-checking needs article excerpts and source metadata; prose
+    generation does not. Passing the whole research packet to the writer was
+    drowning the user's style corpus in English article text and model-written
+    summaries. Keep only story identity/current hook plus optional enrichment
+    metadata; the verified ledger remains the factual authority.
+    """
+    grouped = []
+    for section in CINEMA_WEEKLY_FORMAT:
+        items = []
+        for story in stories:
+            if story.get("category") != section["key"]:
+                continue
+            safe_spice = [
+                {
+                    "type": angle.get("type"),
+                    "safe_to_narrate": bool(angle.get("safe_to_narrate")),
+                    "evidence_status": angle.get("evidence_status"),
+                }
+                for angle in (story.get("spice_angles") or [])
+                if angle.get("safe_to_narrate")
+            ][:3]
+            visuals = [
+                {
+                    "kind": item.get("kind"),
+                    "subjects": item.get("subjects") or [],
+                    "related_title": item.get("related_title") or "",
+                    "layout_hint": item.get("layout_hint") or "single",
+                }
+                for item in (story.get("visual_context") or [])
+            ][:5]
+            items.append({
+                "id": story.get("id"),
+                "category": story.get("category"),
+                "canonical_title": story.get("canonical_title") or "",
+                "search_subject": story.get("search_subject") or "",
+                "news_hook": story.get("news_hook") or "",
+                "news_hook_date": story.get("news_hook_date") or "",
+                "familiarity_anchor": story.get("familiarity_anchor") or "",
+                "safe_spice_types": safe_spice,
+                "visual_context": visuals,
+            })
+        if items:
+            grouped.append({
+                "section": section["key"],
+                "spoken_label_fa": next(
+                    (
+                        item.get("spoken_label_fa")
+                        for item in format_packet()
+                        if item.get("key") == section["key"]
+                    ),
+                    section["label"],
+                ),
+                "writer_role": section.get("writer_role") or "",
+                "stories": items,
+            })
+    return grouped
+
+
+
 def _narration_version(conn, project_id: str) -> int:
     return int(conn.execute(
         "SELECT COALESCE(MAX(version_number),0)+1 v FROM narrations WHERE project_id=?",
@@ -2127,7 +2190,7 @@ def _repair_narration_until_stable(
             },
             "format_blueprint": format_packet(),
             "length_target": length_target(project, text),
-            "approved_sections": _sectioned_story_packet(stories),
+            "approved_sections": _narration_story_packet(stories),
             "verified_claim_ledger": ledger_for_writer(claim_ledger),
             "structure_audit": structure,
             "automatic_fact_check": {
@@ -2489,7 +2552,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         },
         "format_blueprint": format_packet(),
         "length_target": length_target(project, None),
-        "approved_sections": _sectioned_story_packet(baseline_stories),
+        "approved_sections": _narration_story_packet(baseline_stories),
         "verified_claim_ledger": ledger_for_writer(claim_ledger),
         "additional_instructions": body.instructions,
     }
@@ -2853,7 +2916,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
             "format_blueprint": format_packet(),
             "length_target": length_target(project, draft["content"]),
             "spoken_lint": spoken_lint(draft["content"]),
-            "approved_sections": _sectioned_story_packet(stories),
+            "approved_sections": _narration_story_packet(stories),
             "verified_claim_ledger": ledger_for_writer(claim_ledger),
         }, ensure_ascii=False),
         "</current_week_authoritative_packet>",
@@ -3104,7 +3167,7 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
             "spoken_lint": spoken_lint(draft["content"]),
             "automatic_fact_check": _fact_check_summary(draft),
             "structure_audit": narration_structure_audit(str(draft["content"] or ""), stories, project),
-            "approved_sections": _sectioned_story_packet(stories),
+            "approved_sections": _narration_story_packet(stories),
         }, ensure_ascii=False),
         "</current_week_authoritative_packet>",
         "",
@@ -3220,7 +3283,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
             "length_target": length_target(project, draft["content"]),
             "spoken_lint": spoken_lint(draft["content"]),
             "automatic_fact_check": _fact_check_summary(draft),
-            "approved_sections": _sectioned_story_packet(stories),
+            "approved_sections": _narration_story_packet(stories),
             "verified_claim_ledger": ledger_for_writer(claim_ledger),
         }, ensure_ascii=False),
         "</current_week_authoritative_packet>",
