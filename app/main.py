@@ -56,6 +56,7 @@ from .services.cinema_format import (
     parse_review_gate,
     spoken_lint,
     style_corpus_hash,
+    style_rows_for_content_type,
     style_rows_for_window,
     usable_style_transcripts,
 )
@@ -1499,7 +1500,8 @@ def _ensure_style_profile(
     *,
     force: bool = False,
 ) -> dict:
-    enabled = usable_style_transcripts(style_rows)
+    fitted_rows = style_rows_for_content_type(style_rows, content_type)
+    enabled = usable_style_transcripts(fitted_rows)
     if not enabled:
         return {
             "id": "",
@@ -2393,7 +2395,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_style_packet(style_rows_for_window(style_rows, project.get("date_start")), max_chars=80000),
+        build_style_packet(style_rows_for_window(style_rows, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=80000),
     ])
     try:
         text, actual_provider, actual_model = generate_text(provider, model, WRITER_SYSTEM, user)
@@ -2430,7 +2432,7 @@ def generate_narration(project_id: str, body: GenerateBody):
         audit_provider,
         audit_model,
         style_profile.get("profile_text") or "",
-        build_style_packet(style_rows_for_window(style_rows, project.get("date_start")), max_chars=30000),
+        build_style_packet(style_rows_for_window(style_rows, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=30000),
     )
 
     narration_id = str(uuid.uuid4())
@@ -2695,7 +2697,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_style_packet(style_rows_for_window(styles, project.get("date_start")), max_chars=80000),
+        build_style_packet(style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=80000),
         "",
         "<existing_first_draft>",
         draft["content"],
@@ -2741,7 +2743,7 @@ def rewrite_narration_with_enrichment(project_id: str, narration_id: str, body: 
         audit_provider,
         audit_model,
         style_profile.get("profile_text") or "",
-        build_style_packet(style_rows_for_window(styles, project.get("date_start")), max_chars=30000),
+        build_style_packet(style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=30000),
     )
 
     new_id = str(uuid.uuid4())
@@ -2929,7 +2931,7 @@ def review_narration(project_id: str, narration_id: str, body: NarrationReviewBo
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_style_packet(style_rows_for_window(styles, project.get("date_start")), max_chars=80000),
+        build_style_packet(style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=80000),
         "",
         "<draft_to_review>",
         draft["content"],
@@ -3038,7 +3040,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         style_profile.get("profile_text") or "",
         "</style_blueprint>",
         "",
-        build_style_packet(style_rows_for_window(styles, project.get("date_start")), max_chars=70000),
+        build_style_packet(style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=70000),
         "",
         "<existing_narration>",
         draft["content"],
@@ -3083,7 +3085,7 @@ def revise_narration(project_id: str, narration_id: str, body: NarrationRevision
         audit_provider,
         audit_model,
         style_profile.get("profile_text") or "",
-        build_style_packet(style_rows_for_window(styles, project.get("date_start")), max_chars=30000),
+        build_style_packet(style_rows_for_window(styles, project.get("date_start"), project.get("content_type") or "weekly_news"), max_chars=30000),
     )
 
     new_id = str(uuid.uuid4())
