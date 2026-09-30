@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .db import BASE_DIR, PIPELINE, db, init_db
-from .services.ai import generate_text
+from .services.ai import activity, ai_activity, generate_text
 from .services.claim_ledger import (
     audit_narration_claims,
     build_claim_ledger,
@@ -2021,7 +2021,7 @@ def _ensure_article_excerpts(stories: list[dict]) -> None:
                 pending.append(article)
     if not pending:
         return
-    with ThreadPoolExecutor(max_workers=6) as pool:
+    with activity(f"Fetching {len(pending)} article page(s)"), ThreadPoolExecutor(max_workers=6) as pool:
         results = list(pool.map(_fetch_one_excerpt, pending))
     stamp = now()
     with db() as conn:
@@ -2280,7 +2280,8 @@ def _fresh_sources_for(project: dict, stories: list[dict]) -> dict[str, list[dic
         and stamp - float((cached.get(str(story.get("id"))) or {}).get("fetched_at") or 0) > FRESH_SOURCE_TTL_SECONDS
     ]
     if missing:
-        fetched = fetch_narration_fact_check_sources(missing, start, end, per_query_limit=5)
+        with activity(f"Web verification search ({len(missing)} stories)"):
+            fetched = fetch_narration_fact_check_sources(missing, start, end, per_query_limit=5)
         for story in missing:
             sid = str(story.get("id"))
             cached[sid] = {"fetched_at": stamp, "sources": fetched.get(sid) or []}
@@ -2875,6 +2876,12 @@ def _fallback_content_plan(stories: list[dict], ledger: list[dict]) -> dict:
         if rows:
             sections.append({"section": section["key"], "stories": rows})
     return {"intro_claim_ids": intro_claim_ids, "sections": sections, "planner_fallback": True}
+
+
+@app.get("/api/ai-activity")
+def get_ai_activity():
+    """What the app is waiting on right now, plus the latest finished calls."""
+    return ai_activity()
 
 
 @app.post("/api/projects/{project_id}/narration")
